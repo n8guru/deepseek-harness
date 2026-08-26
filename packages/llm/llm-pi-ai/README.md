@@ -160,6 +160,8 @@ Durable content is the authoritative record; replay state only restores native f
 
 Every request carries the shared attribution header from dsh-llm's `attributionHeaders()`, merged through pi-ai's `headers` stream option. Provider-specific app-attribution headers are not synthesized. See [dsh-llm § App attribution](../llm/README.md#app-attribution-attributionts).
 
+Routes whose configured `baseURL` path starts with `/api/llm` also receive `X-DSH-Session-ID` and `X-DSH-Provider` from the active request. Harness-owned values replace conflicting profile headers. Direct provider endpoints never receive these opaque gateway-correlation fields. See [gateway-scoped DSH request identity](../../../.agents/notes/implemented/feature/2026-08-25-dsh-gateway-request-identity.md).
+
 ## Dependency weight
 
 pi-ai installs several provider SDKs and lazy-loads the one selected by the catalog model. The dependency weight is isolated to this opt-in adapter package.

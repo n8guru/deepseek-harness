@@ -83,6 +83,26 @@ describe('PiAiAdapter provider routing', () => {
     expect(server.headers[0]?.['user-agent']).toBe(userAgent())
   })
 
+  it('identifies DSH sessions to /api/llm gateways without leaking identity to direct providers', async () => {
+    const gateway = await mockServer([{ events: textEvents }])
+    const gatewayCtx = await harness(`${gateway.url}/api/llm`, {
+      headers: { 'X-DSH-Session-ID': 'wrong', 'x-dsh-provider': 'wrong' },
+    })
+    await assemble(gatewayCtx, {
+      model: 'deepseek-v4-flash', messages: [], sessionId: 'session-123' as never,
+    })
+    expect(gateway.headers[0]?.['x-dsh-session-id']).toBe('session-123')
+    expect(gateway.headers[0]?.['x-dsh-provider']).toBe('deepseek')
+
+    const direct = await mockServer([{ events: textEvents }])
+    const directCtx = await harness(direct.url)
+    await assemble(directCtx, {
+      model: 'deepseek-v4-flash', messages: [], sessionId: 'session-456' as never,
+    })
+    expect(direct.headers[0]?.['x-dsh-session-id']).toBeUndefined()
+    expect(direct.headers[0]?.['x-dsh-provider']).toBeUndefined()
+  })
+
   it('forwards common stream options and profile reasoning', async () => {
     const server = await mockServer([{ events: textEvents }])
     const ctx = await harness(server.url, {

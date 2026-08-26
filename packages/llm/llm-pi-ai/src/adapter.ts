@@ -173,13 +173,35 @@ function reasoningInfo(
   }
 }
 
-/** Merge deployment headers while removing case-insensitive attribution collisions. */
-function requestHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
+/** Opaque DSH identity is sent only to configured `/api/llm` gateways. */
+function gatewayIdentityHeaders(
+  profile: ResolvedPiAiProviderProfile,
+  provider: string,
+  sessionId: GenerateOptions['sessionId'],
+): Record<string, string> {
+  if (sessionId === undefined || profile.baseURL === undefined) return {}
+  try {
+    if (!new URL(profile.baseURL).pathname.startsWith('/api/llm')) return {}
+  } catch {
+    return {}
+  }
+  return {
+    'x-dsh-session-id': String(sessionId),
+    'x-dsh-provider': provider,
+  }
+}
+
+/** Merge deployment headers while removing case-insensitive Harness collisions. */
+function requestHeaders(
+  headers: Readonly<Record<string, string>> | undefined,
+  identity: Readonly<Record<string, string>> = {},
+): Record<string, string> {
   const attribution = attributionHeaders()
-  const reserved = new Set(Object.keys(attribution).map(name => name.toLowerCase()))
+  const harnessHeaders = { ...attribution, ...identity }
+  const reserved = new Set(Object.keys(harnessHeaders).map(name => name.toLowerCase()))
   return {
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
-    ...attribution,
+    ...harnessHeaders,
   }
 }
 
@@ -326,7 +348,10 @@ export class PiAiAdapter extends LlmAdapter {
         signal: watchdog.signal,
         // Profile headers are deployment-owned; attribution names are
         // Harness-owned and therefore win collisions.
-        headers: requestHeaders(profile.headers),
+        headers: requestHeaders(
+          profile.headers,
+          gatewayIdentityHeaders(profile, options.provider, options.sessionId),
+        ),
       })
       const iterator = toStreamChunks(events, model.contextWindow)[Symbol.asyncIterator]()
       let exhausted = false

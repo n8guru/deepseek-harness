@@ -161,6 +161,8 @@ pi-ai 依据提供方 id 与 baseURL 决定每个请求的形状：系统提示�
 
 每个请求都携带 dsh-llm `attributionHeaders()` 的共享归因标头，并通过 pi-ai `headers` 流选项合并。不会合成提供方特定应用归因标头。详见 [dsh-llm § 应用归因](../llm/README.md#app-attribution-attributionts)。
 
+配置 `baseURL` 路径以 `/api/llm` 开头的路由还会从当前请求接收 `X-DSH-Session-ID` 和 `X-DSH-Provider`。Harness 拥有的值会取代 profile 中的同名标头。直连提供方端点绝不会收到这些用于网关关联的不透明字段。详见 [网关范围的 DSH 请求身份](../../../.agents/notes/implemented/feature/2026-08-25-dsh-gateway-request-identity.md)。
+
 ## 依赖体量
 
 pi-ai 会安装多个提供方 SDK，并延迟加载 catalog 模型所选的 SDK。该可选适配器包将依赖体量隔离在自身范围内。
