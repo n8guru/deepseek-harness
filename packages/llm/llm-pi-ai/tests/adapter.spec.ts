@@ -95,7 +95,9 @@ describe('PiAiAdapter provider routing', () => {
     expect(gateway.headers[0]?.['x-dsh-provider']).toBe('deepseek')
 
     const direct = await mockServer([{ events: textEvents }])
-    const directCtx = await harness(direct.url)
+    const directCtx = await harness(direct.url, {
+      headers: { 'X-DsH-SeSsIoN-Id': 'wrong', 'X-dSh-PrOvIdEr': 'wrong' },
+    })
     await assemble(directCtx, {
       model: 'deepseek-v4-flash', messages: [], sessionId: 'session-456' as never,
     })

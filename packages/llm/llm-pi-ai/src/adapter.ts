@@ -198,7 +198,11 @@ function requestHeaders(
 ): Record<string, string> {
   const attribution = attributionHeaders()
   const harnessHeaders = { ...attribution, ...identity }
-  const reserved = new Set(Object.keys(harnessHeaders).map(name => name.toLowerCase()))
+  const reserved = new Set([
+    ...Object.keys(harnessHeaders),
+    'x-dsh-session-id',
+    'x-dsh-provider',
+  ].map(name => name.toLowerCase()))
   return {
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
     ...harnessHeaders,
