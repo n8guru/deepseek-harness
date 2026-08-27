@@ -181,7 +181,8 @@ function gatewayIdentityHeaders(
 ): Record<string, string> {
   if (sessionId === undefined || profile.baseURL === undefined) return {}
   try {
-    if (!new URL(profile.baseURL).pathname.startsWith('/api/llm')) return {}
+    const path = new URL(profile.baseURL).pathname
+    if (path !== '/api/llm' && !path.startsWith('/api/llm/')) return {}
   } catch {
     return {}
   }
@@ -198,7 +199,11 @@ function requestHeaders(
 ): Record<string, string> {
   const attribution = attributionHeaders()
   const harnessHeaders = { ...attribution, ...identity }
-  const reserved = new Set(Object.keys(harnessHeaders).map(name => name.toLowerCase()))
+  const reserved = new Set([
+    ...Object.keys(harnessHeaders).map(name => name.toLowerCase()),
+    'x-dsh-session-id',
+    'x-dsh-provider',
+  ])
   return {
     ...Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !reserved.has(name.toLowerCase()))),
     ...harnessHeaders,
