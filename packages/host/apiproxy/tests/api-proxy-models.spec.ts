@@ -222,7 +222,7 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
-  it('uses a secondary vision route for image uploads to a text-only model', async () => {
+  it('discovers a secondary vision route for image uploads to a text-only model', async () => {
     const { ctx, agent, sessionId } = await harness()
     registerTextOnly(ctx)
     const vision = new VisionAdapter()
@@ -242,7 +242,6 @@ describe('Web session model selection', () => {
     Object.assign(agent, { followup })
     const api = createApiProxy(ctx, {
       defaultModelSelection: () => ({ provider: 'text-only', model: 'plain' }),
-      visionFallbackSelection: () => ({ provider: 'vision', model: 'eyes' }),
       cwd: '/tmp',
     })
 
@@ -263,6 +262,46 @@ describe('Web session model selection', () => {
     expect(primary.content).toEqual([
       { type: 'text', text: 'What is in this?' },
       { type: 'text', text: expect.stringContaining('a red square with the word STOP') },
+    ])
+    await ctx.fiber.dispose()
+  })
+
+  it('preserves uploaded image blocks for a natively vision-capable model', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const vision = new VisionAdapter()
+    ctx.llm.registerAdapter(['vision'], vision)
+    const ref = {
+      attachmentId: 'att-native', mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1,
+    }
+    ctx.provide('attachments', {
+      imageLimits: {
+        maxImageBytes: 4, maxImagesPerMessage: 2, maxMessageImageBytes: 4,
+        maxImagePixels: 4, maxImageDimension: 2000, mediaTypes: ['image/png'],
+      },
+      validateImage: () => Promise.resolve(),
+      saveImages: () => Promise.resolve([ref]),
+    } as never)
+    const followup = vi.fn()
+    Object.assign(agent, { followup })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'vision', model: 'eyes' }),
+      cwd: '/tmp',
+    })
+
+    const result = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue' as const,
+      content: [
+        { type: 'text' as const, text: 'Inspect this directly' },
+        { type: 'image' as const, mediaType: 'image/png' as const, data: 'AQ==' },
+      ],
+    }))
+
+    expect(result.result.ok).toBe(true)
+    expect(vision.requests).toHaveLength(0)
+    expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([
+      { type: 'text', text: 'Inspect this directly' },
+      { type: 'image', attachment: ref },
     ])
     await ctx.fiber.dispose()
   })
