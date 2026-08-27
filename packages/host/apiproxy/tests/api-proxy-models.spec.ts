@@ -82,6 +82,13 @@ class VisionAdapter extends CatalogAdapter {
   }
 }
 
+class FailingVisionAdapter extends VisionAdapter {
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options)
+    throw new Error('vision provider offline')
+  }
+}
+
 const REASONING: LlmModelReasoningInfo = {
   efforts: [
     { id: ReasoningEffortId('off'), name: 'Off' },
@@ -265,6 +272,49 @@ describe('Web session model selection', () => {
     ])
     await ctx.fiber.dispose()
   })
+
+  it.each(['missing', 'failing'] as const)(
+    'accepts a text-only upload when the vision fallback is %s',
+    async (fallbackState) => {
+      const { ctx, agent, sessionId } = await harness()
+      registerTextOnly(ctx)
+      if (fallbackState === 'failing') ctx.llm.registerAdapter(['vision'], new FailingVisionAdapter())
+      const ref = {
+        attachmentId: 'att-degraded', mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1,
+      }
+      ctx.provide('attachments', {
+        imageLimits: {
+          maxImageBytes: 4, maxImagesPerMessage: 2, maxMessageImageBytes: 4,
+          maxImagePixels: 4, maxImageDimension: 2000, mediaTypes: ['image/png'],
+        },
+        validateImage: () => Promise.resolve(),
+        saveImages: () => Promise.resolve([ref]),
+      } as never)
+      const followup = vi.fn()
+      Object.assign(agent, { followup })
+      const api = createApiProxy(ctx, {
+        defaultModelSelection: () => ({ provider: 'text-only', model: 'plain' }),
+        cwd: '/tmp',
+      })
+
+      const result = await api.sessions.prompt(request({
+        sessionId,
+        mode: 'queue' as const,
+        content: [{ type: 'image' as const, mediaType: 'image/png' as const, data: 'AQ==' }],
+      }))
+
+      expect(result.result.ok).toBe(true)
+      const primary = followup.mock.calls[0]?.[0] as UserMessage
+      expect(primary.content.some(block => block.type === 'image')).toBe(false)
+      expect(primary.content[0]).toEqual({
+        type: 'text',
+        text: expect.stringContaining(fallbackState === 'missing'
+          ? 'no vision-capable fallback model is currently available'
+          : 'was unavailable for this upload'),
+      })
+      await ctx.fiber.dispose()
+    },
+  )
 
   it('preserves uploaded image blocks for a natively vision-capable model', async () => {
     const { ctx, agent, sessionId } = await harness()
