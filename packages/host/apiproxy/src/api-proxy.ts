@@ -13,7 +13,7 @@ import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatu
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { contentHasImage, createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, contentHasImage, createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
@@ -321,6 +321,69 @@ async function buildModelCatalog(ctx: Context): Promise<{
   }
 }
 
+/** Find one positively-declared vision route, preferring the operator's configured route. */
+async function visionFallbackRoute(ctx: Context, preferred?: ModelSelection): Promise<ModelSelection | undefined> {
+  const candidates: ModelSelection[] = []
+  if (preferred !== undefined) candidates.push(preferred)
+  for (const provider of ctx.llm.listProviders()) {
+    try {
+      for (const model of await ctx.llm.listModels(provider.id)) {
+        candidates.push({ provider: provider.id, model: model.id })
+      }
+    } catch {
+      // One broken provider must not prevent another provider from supplying vision.
+    }
+  }
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const key = `${candidate.provider}\u0000${candidate.model}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    try {
+      const info = await ctx.llm.resolveModelInfo(candidate.provider, candidate.model)
+      if (info.inputModalities?.includes('image')) return candidate
+    } catch {
+      // Discovery is fail-soft; only an exact positive capability declaration wins.
+    }
+  }
+  return undefined
+}
+
+/** Describe uploaded images through a secondary vision route for a text-only primary model. */
+async function describeImagesForTextModel(
+  ctx: Context,
+  content: readonly ContentBlock[],
+  route: ModelSelection,
+  signal?: AbortSignal,
+): Promise<string> {
+  const images = content.filter((block): block is Extract<ContentBlock, { type: 'image' }> => block.type === 'image')
+  const assembler = new BlockAssembler()
+  const request = {
+    provider: route.provider,
+    model: route.model,
+    messages: [createUserMessage({
+      source: { kind: 'user' },
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Describe every attached image accurately for another model that cannot see images. Include visible text, people, objects, layout, colors, and details relevant to the user request. Be concise but complete; no preamble.',
+        },
+        ...images,
+      ],
+    })],
+    maxTokens: 1200,
+    ...signal === undefined ? {} : { signal },
+  }
+  for await (const chunk of ctx.llm.stream(request)) assembler.push(chunk)
+  const description = assembler.blocks()
+    .filter((block): block is Extract<ContentBlock, { type: 'text' | 'reasoning' }> => block.type === 'text' || block.type === 'reasoning')
+    .map(block => block.text.trim())
+    .filter(Boolean)
+    .join('\n')
+  if (description.length === 0) throw new Error('the vision fallback returned no description')
+  return description
+}
+
 /** Wrap an error result echoing the request's rpcId. */
 function err<T>(request: RpcRequest<unknown>, error: RpcError): RpcResponse<T> {
   return { rpcId: request.rpcId, result: { ok: false, error } }
@@ -612,6 +675,8 @@ export interface ApiProxyDefaults {
    * falls back to platform detection ({@link canOpenNativePath}).
    */
   canOpenPath?: () => boolean
+  /** Optional preferred cross-provider route used to describe images for text-only models. */
+  visionFallbackSelection?: () => ModelSelection | undefined
 }
 
 /** The tool/call payload fields the presenter path reads. */
@@ -2398,18 +2463,30 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const hasImage = content.some(part => part.type === 'image')
         const admit = async (): Promise<RpcResponse<{ accepted: true }>> => {
           try {
+            let durable = await durablePromptContent(ctx, content)
             if (hasImage) {
               const current = selectionFor(agent).current
               const modelInfo = await ctx.llm.resolveModelInfo(current.provider, current.model)
               if (modelInfo.inputModalities !== undefined && !modelInfo.inputModalities.includes('image')) {
-                return err(request, {
-                  code: 'attachment-error',
-                  message: `Model "${current.model}" does not support image input.`,
-                  details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
-                })
+                const fallback = await visionFallbackRoute(ctx, defaults.visionFallbackSelection?.())
+                let notice: string
+                if (fallback === undefined) {
+                  notice = '[Image uploaded. This model cannot see images natively, and no vision-capable fallback model is currently available.]'
+                } else {
+                  try {
+                    const description = await describeImagesForTextModel(ctx, durable, fallback)
+                    notice = `[Image uploaded. This model cannot see images natively, so ${fallback.provider}/${fallback.model} inspected it on its behalf.\n\nVision description:\n${description}]`
+                  } catch (error: unknown) {
+                    ctx.logger.warn(`api-proxy: vision fallback failed for ${fallback.provider}/${fallback.model}: ${errorChain(error)}`)
+                    notice = `[Image uploaded. This model cannot see images natively. The vision fallback ${fallback.provider}/${fallback.model} was unavailable for this upload.]`
+                  }
+                }
+                durable = [
+                  ...durable.filter(block => block.type !== 'image'),
+                  { type: 'text', text: notice },
+                ]
               }
             }
-            const durable = await durablePromptContent(ctx, content)
             const message: UserMessage = createUserMessage({ content: durable, source })
             if (mode === 'steer') agent.steer(message)
             else agent.followup(message)

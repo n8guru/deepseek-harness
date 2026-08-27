@@ -64,6 +64,24 @@ class CatalogAdapter extends LlmAdapter {
   }
 }
 
+class VisionAdapter extends CatalogAdapter {
+  readonly requests: GenerateOptions[] = []
+
+  constructor() {
+    super('Vision', [{ provider: 'vision', id: 'eyes', name: 'Eyes', inputModalities: ['text', 'image'] }])
+  }
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({ provider, id: model, name: model, inputModalities: ['text', 'image'] })
+  }
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options)
+    yield { type: 'block-end', index: 0, block: { type: 'text', text: 'a red square with the word STOP' } }
+    yield { type: 'finish', reason: { kind: 'stop' } }
+  }
+}
+
 const REASONING: LlmModelReasoningInfo = {
   efforts: [
     { id: ReasoningEffortId('off'), name: 'Off' },
@@ -201,6 +219,51 @@ describe('Web session model selection', () => {
       error: { code: 'attachment-error', details: { reason: 'TOO_MANY_IMAGES' } },
     })
     expect(saveImage).toHaveBeenCalledTimes(2)
+    await ctx.fiber.dispose()
+  })
+
+  it('uses a secondary vision route for image uploads to a text-only model', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    registerTextOnly(ctx)
+    const vision = new VisionAdapter()
+    ctx.llm.registerAdapter(['vision'], vision)
+    const ref = {
+      attachmentId: 'att-upload', mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1,
+    }
+    ctx.provide('attachments', {
+      imageLimits: {
+        maxImageBytes: 4, maxImagesPerMessage: 2, maxMessageImageBytes: 4,
+        maxImagePixels: 4, maxImageDimension: 2000, mediaTypes: ['image/png'],
+      },
+      validateImage: () => Promise.resolve(),
+      saveImages: () => Promise.resolve([ref]),
+    } as never)
+    const followup = vi.fn()
+    Object.assign(agent, { followup })
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'text-only', model: 'plain' }),
+      visionFallbackSelection: () => ({ provider: 'vision', model: 'eyes' }),
+      cwd: '/tmp',
+    })
+
+    const result = await api.sessions.prompt(request({
+      sessionId,
+      mode: 'queue' as const,
+      content: [
+        { type: 'text' as const, text: 'What is in this?' },
+        { type: 'image' as const, mediaType: 'image/png' as const, data: 'AQ==' },
+      ],
+    }))
+
+    expect(result.result.ok).toBe(true)
+    expect(vision.requests).toHaveLength(1)
+    expect(vision.requests[0]?.messages[0]?.content.some(block => block.type === 'image')).toBe(true)
+    const primary = followup.mock.calls[0]?.[0] as UserMessage
+    expect(primary.content.some(block => block.type === 'image')).toBe(false)
+    expect(primary.content).toEqual([
+      { type: 'text', text: 'What is in this?' },
+      { type: 'text', text: expect.stringContaining('a red square with the word STOP') },
+    ])
     await ctx.fiber.dispose()
   })
 
