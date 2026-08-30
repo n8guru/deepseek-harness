@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest'
+import { parseEmbedContext, projectEmbedBootGraph } from '../src/embed.ts'
+
+describe('compact embed route', () => {
+  it('plumbs the stable context query parameters', () => {
+    expect(parseEmbedContext({
+      pathname: '/embed',
+      search: '?slug=x&title=y&url=https%3A%2F%2Fexample.test%2Fp&session=s',
+    } as Location)).toEqual({ slug: 'x', title: 'y', url: 'https://example.test/p', session: 's' })
+    expect(parseEmbedContext({ pathname: '/', search: '?slug=x' } as Location)).toBeUndefined()
+  })
+
+  it('keeps the conversation surface and drops sidebar/settings plugins', () => {
+    const graph = projectEmbedBootGraph({ rev: 'r1', entries: [
+      { id: '@deepseek-ai/dsh-client-runtime', url: '/runtime', rev: '1' },
+      { id: '@deepseek-ai/dsh-client-ui-renderer', url: '/renderer', rev: '1', inject: ['@deepseek-ai/dsh-client-runtime'] },
+      { id: '@deepseek-ai/dsh-client-ui-conversation', url: '/conversation', rev: '1' },
+      { id: '@deepseek-ai/dsh-client-ui-user-questions', url: '/questions', rev: '1' },
+      { id: '@deepseek-ai/dsh-client-ui-sidebar', url: '/sidebar', rev: '1' },
+      { id: '@deepseek-ai/dsh-client-ui-settings', url: '/settings', rev: '1' },
+    ] }) as { rev: string; entries: Array<{ id: string }> }
+    expect(graph.rev).toBe('r1:embed')
+    expect(graph.entries.map(row => row.id)).toEqual([
+      '@deepseek-ai/dsh-client-runtime',
+      '@deepseek-ai/dsh-client-ui-renderer',
+      '@deepseek-ai/dsh-client-ui-conversation',
+      '@deepseek-ai/dsh-client-ui-user-questions',
+    ])
+  })
+})
