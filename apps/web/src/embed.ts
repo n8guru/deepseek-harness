@@ -5,6 +5,7 @@ export interface EmbedContext {
   title?: string
   url?: string
   session?: string
+  excerpt?: string
 }
 
 interface BootEntry {
@@ -46,7 +47,7 @@ export function parseEmbedContext(location: Pick<Location, 'pathname' | 'search'
   if (location.pathname !== '/embed' && location.pathname !== '/embed/') return undefined
   const query = new URLSearchParams(location.search)
   const context: EmbedContext = {}
-  for (const key of ['slug', 'title', 'url', 'session'] as const) {
+  for (const key of ['slug', 'title', 'url', 'session', 'excerpt'] as const) {
     const value = query.get(key)
     if (value !== null && value !== '') context[key] = value
   }
@@ -88,4 +89,33 @@ export function configureEmbedSurface(win: Window): EmbedContext | undefined {
   }
   win.__DSH_BOOT__ = projectEmbedBootGraph(win.__DSH_BOOT__)
   return context
+}
+
+
+interface EmbedSessions {
+  create(opts: { agentPreset: string; focusedContext: { slug: string; title?: string; url: string; excerpt?: string } }): Promise<string>
+  open(sessionId: string): void
+}
+interface EmbedClientContext { get(name: 'sessions'): EmbedSessions | undefined }
+
+/** Force the compact surface onto the page-curator session boundary before UI mount. */
+export async function initializeEmbedSession(ctx: EmbedClientContext, context?: EmbedContext): Promise<void> {
+  if (context === undefined) return
+  const sessions = ctx.get('sessions')
+  if (sessions === undefined) throw new Error('embed: sessions service unavailable')
+  if (context.session !== undefined) {
+    sessions.open(context.session)
+    return
+  }
+  if (context.slug === undefined || context.url === undefined) throw new Error('embed: slug and url are required')
+  const sessionId = await sessions.create({
+    agentPreset: 'page-curator',
+    focusedContext: {
+      slug: context.slug, url: context.url,
+      ...(context.title === undefined ? {} : { title: context.title }),
+      ...(context.excerpt === undefined ? {} : { excerpt: context.excerpt }),
+    },
+  })
+  sessions.open(sessionId)
+  window.parent.postMessage({ type: 'dsh-embed-session', sessionId }, '*')
 }

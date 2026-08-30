@@ -1276,8 +1276,20 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   // restore that history under the old tool set.
   const agentFor = createApiRemoteAgentResolver(ctx, {
     agentOptions,
-    setup: async ({ meta, events }) =>
-      (await composeAgent(resolveSessionPreset({ header: meta, events }))).setup,
+    setup: async ({ meta, events }) => {
+      const composition = await composeAgent(resolveSessionPreset({ header: meta, events }))
+      const focusedContext = meta.focusedContext
+      if (focusedContext === undefined) return composition.setup
+      return async (agentCtx: Context): Promise<void> => {
+        await composition.setup(agentCtx)
+        const systemPrompt = agentCtx.get('systemPrompt')
+        if (systemPrompt === undefined) throw new Error('page-curator requires systemPrompt')
+        systemPrompt.section({
+          name: 'page-curator:focused-context', order: 5,
+          text: buildPageCuratorPreamble(focusedContext),
+        })
+      }
+    },
   })
 
   /** Send one transient frame to every connected mux consumer. */
@@ -1624,12 +1636,26 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     }
   }
 
+  /** Compile untrusted page metadata into the fixed focused-context contract. */
+  function buildPageCuratorPreamble(context: { slug: string; title?: string; url: string; excerpt?: string }): string {
+    const lines = [
+      'Focused page context:',
+      `- URL: ${context.url}`,
+      `- Title: ${context.title ?? '(untitled)'}`,
+      `- Owning Studio slug: ${context.slug}`,
+    ]
+    if (context.excerpt !== undefined && context.excerpt.trim() !== '') lines.push(`- Short excerpt: ${context.excerpt.trim()}`)
+    lines.push('', "focused-context mode: skip the normal Forage Studio bootstrap and continuation briefings (do not run forage-session-start, do not load dev-session history or other projects' operator cards); Studio is the source of truth — query the owning slug (studio-query / GET /studio/query) before making project-state claims; you may still mint projects, edit forage code, and deploy.")
+    return lines.join('\n')
+  }
+
   /** Resolve one requested identity to a live agent, creating or resuming it once. */
   async function ensureSession(
     sessionId: SessionId,
     cwd: string,
     checkPersistedIdentity: boolean,
     presetId?: string,
+    focusedContext?: { slug: string; title?: string; url: string; excerpt?: string },
   ): Promise<Agent> {
     let creation = sessionCreations.get(sessionId)
     if (creation === undefined) {
@@ -1677,14 +1703,26 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
         }
         const composition = await composeAgent(presetId)
+        const setup = async (agentCtx: Context): Promise<void> => {
+          await composition.setup(agentCtx)
+          if (focusedContext !== undefined) {
+            const systemPrompt = agentCtx.get('systemPrompt')
+            if (systemPrompt === undefined) throw new Error('page-curator requires systemPrompt')
+            systemPrompt.section({
+              name: 'page-curator:focused-context', order: 5,
+              text: buildPageCuratorPreamble(focusedContext),
+            })
+          }
+        }
         return (await ctx.agents.create({
           sessionId,
           agentOptions: agentOptions(),
           meta: {
             cwd,
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
+            ...focusedContext === undefined ? {} : { focusedContext },
           },
-          setup: composition.setup,
+          setup,
         })).agent
       })().catch((error: unknown) => {
         // Another Host entry path may have published the same identity while
@@ -2158,10 +2196,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
-        const requestedPreset = request.payload.agentPreset
+        const focusedContext = request.payload.focusedContext
+        // Embed creation is a host-enforced capability boundary: browser-supplied
+        // cwd/preset cannot escape the canonical page-curator workspace.
+        const cwd = focusedContext === undefined
+          ? (workspace?.path ?? request.payload.cwd ?? defaults.cwd)
+          : (process.env.DSH_PAGE_CURATOR_CWD ?? '/home/n8/codex-forage')
+        const requestedPreset = focusedContext === undefined ? request.payload.agentPreset : 'page-curator'
         try {
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
+          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, focusedContext)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
             return err(request, {

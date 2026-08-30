@@ -104,6 +104,12 @@ export const sessionCreateRequestSchema = z.object({
   cwd: z.string().optional(),
   sessionId: sessionIdSchema.optional(),
   agentPreset: z.string().optional(),
+  focusedContext: z.object({
+    slug: z.string().min(1).max(200),
+    title: z.string().max(500).optional(),
+    url: z.string().url().max(4096),
+    excerpt: z.string().max(2000).optional(),
+  }).optional(),
 }).refine(
   payload => payload.workspaceId === undefined || payload.cwd === undefined,
   { message: 'session.create accepts workspaceId or cwd, not both' },

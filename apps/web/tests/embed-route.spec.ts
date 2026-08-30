@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { parseEmbedContext, projectEmbedBootGraph } from '../src/embed.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { initializeEmbedSession, parseEmbedContext, projectEmbedBootGraph } from '../src/embed.ts'
 
 describe('compact embed route', () => {
   it('plumbs the stable context query parameters', () => {
@@ -8,6 +8,31 @@ describe('compact embed route', () => {
       search: '?slug=x&title=y&url=https%3A%2F%2Fexample.test%2Fp&session=s',
     } as Location)).toEqual({ slug: 'x', title: 'y', url: 'https://example.test/p', session: 's' })
     expect(parseEmbedContext({ pathname: '/', search: '?slug=x' } as Location)).toBeUndefined()
+  })
+
+  it('forces new embed sessions through page-curator with focused context', async () => {
+    const create = vi.fn(async () => 'curator-session')
+    const open = vi.fn()
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { parent: { postMessage } })
+    await initializeEmbedSession({ get: () => ({ create, open }) }, {
+      slug: 'forage', title: 'Studio', url: 'https://forage.ink/studio', excerpt: 'Focused excerpt',
+    })
+    expect(create).toHaveBeenCalledWith({
+      agentPreset: 'page-curator',
+      focusedContext: { slug: 'forage', title: 'Studio', url: 'https://forage.ink/studio', excerpt: 'Focused excerpt' },
+    })
+    expect(open).toHaveBeenCalledWith('curator-session')
+    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh-embed-session', sessionId: 'curator-session' }, '*')
+    vi.unstubAllGlobals()
+  })
+
+  it('resumes the supplied embed session without minting another', async () => {
+    const create = vi.fn()
+    const open = vi.fn()
+    await initializeEmbedSession({ get: () => ({ create, open }) }, { session: 'existing' })
+    expect(create).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledWith('existing')
   })
 
   it('keeps the conversation surface and drops sidebar/settings plugins', () => {
