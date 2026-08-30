@@ -23,6 +23,7 @@ export class AppWebEntry {
   private readonly container: HTMLElement
   private readonly seams: BootSeams | undefined
   private readonly page: BootPage
+  private readonly beforeMount: ((ctx: Context) => Promise<void>) | undefined
   private ctx: Context | undefined
   private modules!: ClientModuleSystem
   private manifest!: BootManifest
@@ -32,9 +33,10 @@ export class AppWebEntry {
    * @param container - Application mount point.
    * @param seams - Optional module transport replacement.
    */
-  constructor(container: HTMLElement, seams?: BootSeams) {
+  constructor(container: HTMLElement, seams?: BootSeams, beforeMount?: (ctx: Context) => Promise<void>) {
     this.container = container
     this.seams = seams
+    this.beforeMount = beforeMount
     this.page = new BootPage(container)
   }
 
@@ -61,6 +63,7 @@ export class AppWebEntry {
       const ctx = new Context()
       this.ctx = ctx
       await this.runPluginBoot(ctx, prefetching)
+      await this.beforeMount?.(ctx)
       await this.mountApp(ctx)
     } catch (reason) {
       console.error(reason)

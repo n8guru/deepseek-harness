@@ -258,7 +258,13 @@ export interface SessionsApi {
    * id fails with `agent-preset-not-found`, and a preset whose composition
    * cannot be mounted fails with `agent-preset-invalid`.
    */
-  create(request: RpcRequest<{ workspaceId?: WorkspaceId; cwd?: string; sessionId?: SessionId; agentPreset?: string }>):
+  create(request: RpcRequest<{
+    workspaceId?: WorkspaceId
+    cwd?: string
+    sessionId?: SessionId
+    agentPreset?: string
+    focusedContext?: { slug: string; title?: string; url: string; excerpt?: string }
+  }>):
   Promise<RpcResponse<{ sessionId: SessionId; agentPreset?: string }>>
 
   /**

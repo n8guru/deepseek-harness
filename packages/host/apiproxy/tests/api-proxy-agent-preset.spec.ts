@@ -12,6 +12,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentFactory } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { RpcId, type RpcRequest } from '../src/api/rpc.ts'
 import type { HostFrame } from '../src/api/events.ts'
@@ -109,6 +110,7 @@ async function harness(
   const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-apiproxy-preset-')))
   const ctx = new Context()
   await ctx.plugin(SessionStore)
+  await ctx.plugin(SystemPrompt)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(UserQuestionService)
   ctx.provide('sessionPersistence', (persistence ?? { list: () => Promise.resolve([]) }) as never)
@@ -151,6 +153,28 @@ describe('session.create with an agent preset', () => {
 
     expect(created.result.ok).toBe(true)
     expect(ctx.sessions.get(SessionId('s1'))?.header.agentPreset).toBe('minimal')
+  })
+
+  it('host-forces focused embed creation to page-curator and installs its preamble', async () => {
+    const { api, ctx, cwd } = await harness(['standard', 'page-curator'])
+    process.env.DSH_PAGE_CURATOR_CWD = cwd
+    try {
+      const created = await api.sessions.create(request({
+        sessionId: SessionId('page-focused'), cwd: '/untrusted', agentPreset: 'standard',
+        focusedContext: { slug: 'forage', title: 'Studio', url: 'https://forage.ink/studio', excerpt: 'Short excerpt' },
+      }))
+      if (!created.result.ok) throw new Error(JSON.stringify(created.result.error))
+      expect(ctx.sessions.get(SessionId('page-focused'))?.header).toMatchObject({ cwd, agentPreset: 'page-curator' })
+      const agent = ctx.agents.get(SessionId('page-focused'))
+      expect(agent).toBeDefined()
+      const prompt = (await agent!.ctx.systemPrompt.assemble({ scope: agent! })).sections
+        .find(section => section.name === 'page-curator:focused-context')?.text
+      expect(prompt).toContain('Owning Studio slug: forage')
+      expect(prompt).toContain('do not run forage-session-start')
+      expect(prompt).toContain('you may still mint projects, edit forage code, and deploy')
+    } finally {
+      delete process.env.DSH_PAGE_CURATOR_CWD
+    }
   })
 
   it('records the default when the caller names none', async () => {
