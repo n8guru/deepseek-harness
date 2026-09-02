@@ -499,6 +499,22 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).toContain('conversation.hero.agentPreset')
   })
 
+  it('embed surface keeps the composer live without a workspace picker', () => {
+    document.documentElement.dataset.dshSurface = 'embed'
+    try {
+      const b = mount(conversationSnapshot({ composerPhase: 'blank', blank: true }), [], undefined, {
+        summaryBlank: true,
+      })
+      expect(b.view.queryByRole('button', { name: '选择工作区' })).toBeNull()
+      const box = b.view.getByRole('textbox') as HTMLTextAreaElement
+      expect(box.disabled).toBe(false)
+      expect(box.readOnly).toBe(false)
+      expect(box.placeholder).not.toBe('select a model first')
+    } finally {
+      delete document.documentElement.dataset.dshSurface
+    }
+  })
+
   it('prompt failure renders the promptError strip (ordinary failure, no transaction UI)', () => {
     const b = mount(conversationSnapshot({
       promptError: { op: 'send', error: { code: 'offline', message: 'Message send failed' } as never },

@@ -31,6 +31,9 @@ export function ConversationRoot({
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pendingWorkspaceId, setPendingWorkspaceId] = useState<WorkspaceId | undefined>()
   const pickerAnchor = useRef<HTMLButtonElement>(null)
+  // Forage slide-in /embed pins cwd on the host and strips the workspace
+  // picker. A missing Workspace row must not lock the composer.
+  const embedSurface = document.documentElement.dataset.dshSurface === 'embed'
 
   // Publishes the seat's live height as --dsh-composer-height on the scroll
   // body so floating controls (ChatView back-to-bottom) clear the composer as
@@ -89,13 +92,14 @@ export function ConversationRoot({
   //      flash on refresh (empty cwd → placeholder);
   //   5. list ready but no owning workspace (deleted from the sidebar) →
   //      placeholder, never the deleted folder's name via cwd.
+  const cwdLabel = cwd !== undefined && cwd !== '' ? workspaceLabel(cwd) : undefined
   const chipTitle = pendingWorkspace?.title
     ?? (sessionId === undefined
-      ? undefined
+      ? (embedSurface ? cwdLabel : undefined)
       : sessionWorkspace?.title
-        ?? (workspaces.phase === 'ready' || cwd === undefined || cwd === ''
-          ? undefined
-          : workspaceLabel(cwd)))
+        ?? (workspaces.phase === 'ready' || cwdLabel === undefined
+          ? (embedSurface ? cwdLabel : undefined)
+          : cwdLabel))
 
   const heroWorkspaceRow = (
     <div className={css.heroWorkspaceRow}>
@@ -128,7 +132,7 @@ export function ConversationRoot({
   // blank session whose workspace vanished (deleted from the sidebar). The
   // bar is ONE session-maybe slot rendered unconditionally — inert is a prop,
   // not a different tree, so the textarea DOM survives the transition.
-  const inert = sessionId === undefined || (hero && chipTitle === undefined)
+  const inert = !embedSurface && (sessionId === undefined || (hero && chipTitle === undefined))
   // A raised block is the same inert posture with the blocker's own reason:
   // one disabled textarea, never a second tree. The no-workspace state wins
   // when both hold — picking a workspace is the earlier prerequisite.
@@ -160,7 +164,7 @@ export function ConversationRoot({
     <div className={clsx(css.composerStack, hero && css.composerHero)}>
       {hero && <HeroGlow className={css.heroGlow} />}
       {hero && <HeroShell t={t} renderSlot={renderSlot} />}
-      {hero && heroWorkspaceRow}
+      {hero && !embedSurface && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}
     </div>

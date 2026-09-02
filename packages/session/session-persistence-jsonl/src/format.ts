@@ -41,6 +41,7 @@ export interface HeaderLine {
   origin?: 'subagent'
   delegationDepth: number
   agentPreset?: string
+  focusedContext?: { slug: string; title?: string; url: string; excerpt?: string }
 }
 
 /**
@@ -60,6 +61,7 @@ export function toHeaderLine(header: SessionHeader): HeaderLine {
     ...header.origin !== undefined ? { origin: header.origin } : {},
     delegationDepth: header.delegationDepth ?? 0,
     ...header.agentPreset !== undefined ? { agentPreset: header.agentPreset } : {},
+    ...header.focusedContext !== undefined ? { focusedContext: header.focusedContext } : {},
   }
 }
 
@@ -82,6 +84,7 @@ export function fromHeaderLine(line: HeaderLine): SessionHeader {
     ...line.origin !== undefined ? { origin: line.origin } : {},
     delegationDepth: line.delegationDepth,
     ...line.agentPreset !== undefined ? { agentPreset: line.agentPreset } : {},
+    ...line.focusedContext !== undefined ? { focusedContext: line.focusedContext } : {},
   }
 }
 

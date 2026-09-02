@@ -27,8 +27,8 @@ describe('compact embed route', () => {
     vi.unstubAllGlobals()
   })
 
-  it('creates a page-curator session even when a resume id is supplied', async () => {
-    const create = vi.fn(async () => 'existing')
+  it('mints a new page-curator session instead of resuming a stale drawer id', async () => {
+    const create = vi.fn(async () => 'fresh-curator')
     const open = vi.fn()
     const postMessage = vi.fn()
     vi.stubGlobal('window', { parent: { postMessage } })
@@ -36,11 +36,11 @@ describe('compact embed route', () => {
       session: 'existing', slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed',
     })
     expect(create).toHaveBeenCalledWith({
-      sessionId: 'existing',
       agentPreset: 'page-curator',
       focusedContext: { slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed' },
     })
-    expect(open).toHaveBeenCalledWith('existing')
+    expect(open).toHaveBeenCalledWith('fresh-curator')
+    expect(postMessage).toHaveBeenCalledWith({ type: 'dsh-embed-session', sessionId: 'fresh-curator' }, '*')
     vi.unstubAllGlobals()
   })
 

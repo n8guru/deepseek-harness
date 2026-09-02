@@ -114,8 +114,10 @@ export async function initializeEmbedSession(ctx: EmbedClientContext, context?: 
     }
     throw new Error('embed: slug and url are required')
   }
+  // Never reuse a localStorage resume id here. Older drawer UUIDs were minted
+  // before focusedContext existed; create-with-id resumes that live agent and
+  // skips the page preamble. Mint a new page-curator session for this page.
   const sessionId = await sessions.create({
-    ...(context.session === undefined ? {} : { sessionId: context.session }),
     agentPreset: 'page-curator',
     focusedContext: {
       slug: context.slug, url: context.url,

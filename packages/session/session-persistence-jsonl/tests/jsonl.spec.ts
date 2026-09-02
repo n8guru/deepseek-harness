@@ -927,6 +927,20 @@ describe('JsonlSessionPersistence: scanLog unit', () => {
     expect(() => scanLog(Buffer.from(log))).toThrow(/session header/)
   })
 
+  it('round-trips focusedContext for page-curator embed sessions', () => {
+    const focusedContext = { slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed' }
+    const line = toHeaderLine({
+      version: 0,
+      id: SessionId('page-focused'),
+      createdAt: 1,
+      delegationDepth: 0,
+      agentPreset: 'page-curator',
+      focusedContext,
+    })
+    const log = `${JSON.stringify(line)}\n`
+    expect(scanLog(Buffer.from(log)).meta.focusedContext).toEqual(focusedContext)
+  })
+
   it('round-trips the agent preset a session was composed from', () => {
     const line = toHeaderLine({
       version: 0,
