@@ -168,7 +168,11 @@ export function AppFrame({
     <div
       ref={frameRef}
       className={css.frame}
-      style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
+      style={{
+        gridTemplateColumns: embedSurface
+          ? 'minmax(0, 1fr)'
+          : `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px`,
+      }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-details-collapsed={cols.details === 0 || undefined}
       data-dragging={dragging || undefined}

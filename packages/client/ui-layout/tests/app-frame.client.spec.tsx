@@ -142,6 +142,22 @@ describe('AppFrame', () => {
     expect(tracks(frame)).toEqual([280, 0])
   })
 
+  it('uses a single conversation track on the compact embed surface', () => {
+    document.documentElement.dataset.dshSurface = 'embed'
+    try {
+      const { frame, queryByTestId, slotCalls } = mountFrame()
+      expect(frame.style.gridTemplateColumns).toBe('minmax(0, 1fr)')
+      expect(queryByTestId('center-content')).toBeTruthy()
+      expect(queryByTestId('sidebar-content')).toBeNull()
+      expect(queryByTestId('details-content')).toBeNull()
+      expect(slotCalls.map(c => c.key)).toEqual(expect.arrayContaining(['conversation']))
+      expect(slotCalls.map(c => c.key)).not.toContain('sidebar')
+      expect(slotCalls.map(c => c.key)).not.toContain('details')
+    } finally {
+      delete document.documentElement.dataset.dshSurface
+    }
+  })
+
   it('renders the session pair with empty owner shares (sessionId is framework-standard)', () => {
     const { slotCalls, getByTestId } = mountFrame()
     expect(getByTestId('center-content')).toBeTruthy()
