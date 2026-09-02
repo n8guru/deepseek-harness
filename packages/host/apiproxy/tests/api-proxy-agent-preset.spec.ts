@@ -177,6 +177,23 @@ describe('session.create with an agent preset', () => {
     }
   })
 
+  it('persists focusedContext on the page-curator session header', async () => {
+    const { api, ctx, cwd } = await harness(['standard', 'page-curator'])
+    process.env.DSH_PAGE_CURATOR_CWD = cwd
+    try {
+      const created = await api.sessions.create(request({
+        sessionId: SessionId('page-resume'),
+        focusedContext: { slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed' },
+      }))
+      if (!created.result.ok) throw new Error(JSON.stringify(created.result.error))
+      expect(ctx.sessions.get(SessionId('page-resume'))?.header.focusedContext).toEqual({
+        slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed',
+      })
+    } finally {
+      delete process.env.DSH_PAGE_CURATOR_CWD
+    }
+  })
+
   it('records the default when the caller names none', async () => {
     const { api, ctx } = await harness(['standard', 'minimal'])
 

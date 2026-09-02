@@ -93,7 +93,11 @@ export function configureEmbedSurface(win: Window): EmbedContext | undefined {
 
 
 interface EmbedSessions {
-  create(opts: { agentPreset: string; focusedContext: { slug: string; title?: string; url: string; excerpt?: string } }): Promise<string>
+  create(opts: {
+    sessionId?: string
+    agentPreset: string
+    focusedContext: { slug: string; title?: string; url: string; excerpt?: string }
+  }): Promise<string>
   open(sessionId: string): void
 }
 interface EmbedClientContext { get(name: 'sessions'): EmbedSessions | undefined }
@@ -103,12 +107,15 @@ export async function initializeEmbedSession(ctx: EmbedClientContext, context?: 
   if (context === undefined) return
   const sessions = ctx.get('sessions')
   if (sessions === undefined) throw new Error('embed: sessions service unavailable')
-  if (context.session !== undefined) {
-    sessions.open(context.session)
-    return
+  if (context.slug === undefined || context.url === undefined) {
+    if (context.session !== undefined) {
+      sessions.open(context.session)
+      return
+    }
+    throw new Error('embed: slug and url are required')
   }
-  if (context.slug === undefined || context.url === undefined) throw new Error('embed: slug and url are required')
   const sessionId = await sessions.create({
+    ...(context.session === undefined ? {} : { sessionId: context.session }),
     agentPreset: 'page-curator',
     focusedContext: {
       slug: context.slug, url: context.url,

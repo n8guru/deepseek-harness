@@ -27,7 +27,24 @@ describe('compact embed route', () => {
     vi.unstubAllGlobals()
   })
 
-  it('resumes the supplied embed session without minting another', async () => {
+  it('creates a page-curator session even when a resume id is supplied', async () => {
+    const create = vi.fn(async () => 'existing')
+    const open = vi.fn()
+    const postMessage = vi.fn()
+    vi.stubGlobal('window', { parent: { postMessage } })
+    await initializeEmbedSession({ get: () => ({ create, open }) }, {
+      session: 'existing', slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed',
+    })
+    expect(create).toHaveBeenCalledWith({
+      sessionId: 'existing',
+      agentPreset: 'page-curator',
+      focusedContext: { slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed' },
+    })
+    expect(open).toHaveBeenCalledWith('existing')
+    vi.unstubAllGlobals()
+  })
+
+  it('resumes a session-only embed without minting another', async () => {
     const create = vi.fn()
     const open = vi.fn()
     await initializeEmbedSession({ get: () => ({ create, open }) }, { session: 'existing' })

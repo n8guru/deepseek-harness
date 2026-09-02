@@ -1690,10 +1690,23 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // session's history was produced under that composition, and
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
+          const resumeFocus = inspected.meta.focusedContext ?? focusedContext
+          const composition = await composeAgent(storedPreset)
+          const setup = resumeFocus === undefined
+            ? composition.setup
+            : async (agentCtx: Context): Promise<void> => {
+              await composition.setup(agentCtx)
+              const systemPrompt = agentCtx.get('systemPrompt')
+              if (systemPrompt === undefined) throw new Error('page-curator requires systemPrompt')
+              systemPrompt.section({
+                name: 'page-curator:focused-context', order: 5,
+                text: buildPageCuratorPreamble(resumeFocus),
+              })
+            }
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: agentOptions(),
-            setup: (await composeAgent(storedPreset)).setup,
+            setup,
           })).agent
         }
 
