@@ -6,6 +6,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { AppWebEntry } from '@deepseek-ai/dsh-client-web'
 import { configureEmbedSurface, initializeEmbedSession } from './embed.ts'
+import { connectOrchestratorSelection } from './orchestrator-bridge.ts'
 
 // `/embed` consumes the same host-injected graph as `/`, projected before the
 // shell creates its module system. The normal route is deliberately untouched.
@@ -13,4 +14,7 @@ const embedContext = configureEmbedSurface(window)
 
 const el = document.getElementById('root')
 if (el === null) throw new Error('web app: missing #root')
-void new AppWebEntry(el, undefined, async (ctx: Context) => initializeEmbedSession(ctx, embedContext)).run()
+void new AppWebEntry(el, undefined, async (ctx: Context) => {
+  await initializeEmbedSession(ctx, embedContext)
+  ctx.effect(() => connectOrchestratorSelection(ctx, window))
+}).run()
