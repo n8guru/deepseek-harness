@@ -134,7 +134,10 @@ export function AppFrame({
   // solver stays breakpoint-free: a narrow re-expand passes the preference
   // (or the default when the wide preference is closed) and the center
   // absorbs the squeeze.
-  const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
+  // The shell validates this root-only iframe opt-in before mounting. Keep
+  // native browsing and New Session visible, without changing normal roots.
+  const chooser = document.documentElement.dataset.dshOrchestratorChooser === 'true'
+  const narrow = !chooser && viewport < SIDEBAR_AUTO_COLLAPSE
   useEffect(() => { actions.setNarrow(narrow) }, [actions, narrow])
   const sidebarCollapsed = embedSurface || (narrow ? !panels.narrowExpanded : panels.sidebar === 0)
   const sidebarPreference = sidebarCollapsed
@@ -143,6 +146,14 @@ export function AppFrame({
   const cols = embedSurface
     ? { sidebar: 0, center: viewport, details: 0 }
     : computeColumns(viewport, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  // A half-screen phone drawer can be narrower than the normal sidebar
+  // minimum. Let only the opted-in chooser use the full available width;
+  // the conversation remains mounted at zero width until the user collapses.
+  if (chooser && !embedSurface && cols.sidebar > viewport) {
+    cols.sidebar = viewport
+    cols.center = 0
+    cols.details = 0
+  }
   const colsRef = useRef(cols)
   colsRef.current = cols
 

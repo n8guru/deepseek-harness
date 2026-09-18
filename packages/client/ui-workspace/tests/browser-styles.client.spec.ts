@@ -38,6 +38,12 @@ describe('WorkspaceBrowser.module.css list', () => {
   const listArea = declarations('.listArea')
   const list = declarations('.list')
 
+  it('reveals workspace actions without hover only on the opted-in chooser', () => {
+    expect(rowDeclarations('.rowActions')?.get('display')).toBe('none')
+    expect(rowDeclarations(":global(html[data-dsh-orchestrator-chooser='true']) .projectRow .rowActions")?.get('display')).toBe('inline-flex')
+    expect(rowDeclarations(":global(html[data-dsh-orchestrator-chooser='true']) .sessionRow .rowActions")).toBeUndefined()
+  })
+
   it('is the scrolling region', () => {
     expect(list).toBeDefined()
     expect(list!.get('overflow-y')).toBe('auto')

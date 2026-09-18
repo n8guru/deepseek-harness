@@ -6,10 +6,11 @@
 import { Context } from '@deepseek-ai/cordis'
 import { AppWebEntry } from '@deepseek-ai/dsh-client-web'
 import { configureEmbedSurface, initializeEmbedSession } from './embed.ts'
-import { connectOrchestratorSelection } from './orchestrator-bridge.ts'
+import { configureOrchestratorSurface, connectOrchestratorSelection } from './orchestrator-bridge.ts'
 
 // `/embed` consumes the same host-injected graph as `/`, projected before the
 // shell creates its module system. The normal route is deliberately untouched.
+configureOrchestratorSurface(window)
 const embedContext = configureEmbedSurface(window)
 
 const el = document.getElementById('root')

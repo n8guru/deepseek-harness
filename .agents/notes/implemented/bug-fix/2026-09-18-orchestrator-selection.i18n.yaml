@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-18-orchestrator-selection.md
-2026-09-18-orchestrator-selection.md: f31a78dbe8649c985d75fadff353169ef9df94e9
-2026-09-18-orchestrator-selection.zh.md: 8500a9aa490d1b56f8833dea61ebb1a4ba527c4d
+2026-09-18-orchestrator-selection.md: 585c02333922e2ac5c1f1a6c6f1c9abc05a80415
+2026-09-18-orchestrator-selection.zh.md: e899359ee00cd7e38f4f702b8217b473a395eb19
