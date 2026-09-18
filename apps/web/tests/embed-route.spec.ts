@@ -66,13 +66,25 @@ describe('compact embed route', () => {
     expect(create).not.toHaveBeenCalled()
   })
 
-  it('does not create or select when the Host list fails', async () => {
+  it('propagates an unexpected refresh rejection without creating a session', async () => {
     const refresh = vi.fn(async () => { throw new Error('Host unreachable') })
     const create = vi.fn()
     const open = vi.fn()
     await expect(initializeEmbedSession({ get: () => ({ create, open, refresh }) }, { session: 'existing' }))
       .rejects.toThrow('Host unreachable')
     expect(open).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('keeps selection fail-closed when a cold list error is captured by refresh', async () => {
+    // The actual manager records list errors and resolves refresh. With no
+    // catalog baseline, open still rejects the unknown id; never mint a new one.
+    const refresh = vi.fn(async () => {})
+    const create = vi.fn()
+    const open = vi.fn(() => { throw new Error('sessions.select: unknown session existing') })
+    await expect(initializeEmbedSession({ get: () => ({ create, open, refresh }) }, { session: 'existing' }))
+      .rejects.toThrow('sessions.select: unknown session existing')
+    expect(open).toHaveBeenCalledWith('existing')
     expect(create).not.toHaveBeenCalled()
   })
 
