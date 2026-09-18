@@ -15,7 +15,7 @@ describe('compact embed route', () => {
     const open = vi.fn()
     const postMessage = vi.fn()
     vi.stubGlobal('window', { parent: { postMessage } })
-    await initializeEmbedSession({ get: () => ({ create, open }) }, {
+    await initializeEmbedSession({ get: () => ({ create, open, refresh: vi.fn(async () => {}) }) }, {
       slug: 'forage', title: 'Studio', url: 'https://forage.ink/studio', excerpt: 'Focused excerpt',
     })
     expect(create).toHaveBeenCalledWith({
@@ -32,7 +32,7 @@ describe('compact embed route', () => {
     const open = vi.fn()
     const postMessage = vi.fn()
     vi.stubGlobal('window', { parent: { postMessage } })
-    await initializeEmbedSession({ get: () => ({ create, open }) }, {
+    await initializeEmbedSession({ get: () => ({ create, open, refresh: vi.fn(async () => {}) }) }, {
       session: 'existing', slug: 'forage', title: 'Forage', url: 'https://n8.forage.ink/#feed',
     })
     expect(create).toHaveBeenCalledWith({
@@ -47,9 +47,33 @@ describe('compact embed route', () => {
   it('resumes a session-only embed without minting another', async () => {
     const create = vi.fn()
     const open = vi.fn()
-    await initializeEmbedSession({ get: () => ({ create, open }) }, { session: 'existing' })
+    await initializeEmbedSession({ get: () => ({ create, open, refresh: vi.fn(async () => {}) }) }, { session: 'existing' })
     expect(create).not.toHaveBeenCalled()
     expect(open).toHaveBeenCalledWith('existing')
+  })
+
+  it('waits for the Host list before selecting the requested session', async () => {
+    let resolveList!: () => void
+    const refresh = vi.fn(() => new Promise<void>((resolve) => { resolveList = resolve }))
+    const create = vi.fn()
+    const open = vi.fn()
+    const pending = initializeEmbedSession({ get: () => ({ create, open, refresh }) }, { session: 'pump-attempt' })
+    expect(refresh).toHaveBeenCalledOnce()
+    expect(open).not.toHaveBeenCalled()
+    resolveList()
+    await pending
+    expect(open).toHaveBeenCalledWith('pump-attempt')
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('does not create or select when the Host list fails', async () => {
+    const refresh = vi.fn(async () => { throw new Error('Host unreachable') })
+    const create = vi.fn()
+    const open = vi.fn()
+    await expect(initializeEmbedSession({ get: () => ({ create, open, refresh }) }, { session: 'existing' }))
+      .rejects.toThrow('Host unreachable')
+    expect(open).not.toHaveBeenCalled()
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('keeps the conversation surface and drops sidebar/settings plugins', () => {

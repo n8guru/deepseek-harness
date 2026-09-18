@@ -99,16 +99,20 @@ interface EmbedSessions {
     focusedContext: { slug: string; title?: string; url: string; excerpt?: string }
   }): Promise<string>
   open(sessionId: string): void
+  refresh(): Promise<void>
 }
 interface EmbedClientContext { get(name: 'sessions'): EmbedSessions | undefined }
 
-/** Force the compact surface onto the page-curator session boundary before UI mount. */
+/** Resolve an existing Host session, or create a focused page curator, before UI mount. */
 export async function initializeEmbedSession(ctx: EmbedClientContext, context?: EmbedContext): Promise<void> {
   if (context === undefined) return
   const sessions = ctx.get('sessions')
   if (sessions === undefined) throw new Error('embed: sessions service unavailable')
   if (context.slug === undefined || context.url === undefined) {
     if (context.session !== undefined) {
+      // Plugin activation does not await the initial Host list. Selection only
+      // accepts catalogued ids, so resolve that baseline before opening one.
+      await sessions.refresh()
       sessions.open(context.session)
       return
     }
