@@ -297,7 +297,21 @@ export const sessionPromptRequestSchema = z.object({
   mode: z.union([z.literal('queue'), z.literal('steer')]),
   content: z.array(promptContentPartSchema),
   clientTimeZone: z.string().optional(),
+  clientId: z.string().min(1).max(128).optional(),
+  clientLabel: z.string().min(1).max(64).optional(),
 }) as unknown as z.ZodType<RequestPayload<'session.prompt'>>
+
+/** session.presence request payload — ephemeral active-surface report. */
+export const sessionPresenceRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+  clientId: z.string().min(1).max(128),
+  clientLabel: z.string().min(1).max(64).optional(),
+}) as unknown as z.ZodType<RequestPayload<'session.presence'>>
+
+/** session.presence response value. */
+export const sessionPresenceValueSchema = z.object({
+  accepted: z.literal(true),
+}) as unknown as z.ZodType<ResponseValue<'session.presence'>>
 
 /** session.prompt response value (the command slot appears only when the prompt dispatched a slash command). */
 export const sessionPromptValueSchema = z.object({

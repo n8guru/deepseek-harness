@@ -148,6 +148,16 @@ export class SessionManager {
    */
   private readonly jobsBySession = new Map<SessionId, readonly JobView[]>()
 
+  /**
+   * Last-activity-wins record of the client surface the human is on, per
+   * session. Transient and never persisted — the Host recomputes it from
+   * live prompts and presence reports.
+   */
+  private readonly activeClientBySession =
+    new Map<SessionId, { clientId: string; clientLabel: string | undefined; at: number }>()
+
+  private readonly activeClientListeners = new Set<(sessionId: SessionId, clientId: string) => void>()
+
   private selected: SessionId | undefined
 
   private listSnapshotCache: SessionListSnapshot
@@ -654,6 +664,25 @@ export class SessionManager {
   }
 
   /**
+   * The client surface the human was last active on for a session.
+   * @param sessionId - session to read.
+   * @returns The active surface, or undefined when none has reported.
+   */
+  activeClient(sessionId: SessionId): { clientId: string; clientLabel: string | undefined; at: number } | undefined {
+    return this.activeClientBySession.get(sessionId)
+  }
+
+  /**
+   * Observe active-surface changes.
+   * @param listener - receives the session and its new active client id.
+   * @returns the unsubscribe function.
+   */
+  onActiveClient(listener: (sessionId: SessionId, clientId: string) => void): () => void {
+    this.activeClientListeners.add(listener)
+    return () => { this.activeClientListeners.delete(listener) }
+  }
+
+  /**
    * Cached list snapshot (rebuilt lazily when dirty with no listeners).
    * @returns the cached reference (stable until the next flush).
    */
@@ -709,6 +738,28 @@ export class SessionManager {
       // synchronous markDirty keeps the list snapshot same-tick fresh (the
       // store's own any-key channel is microtask-batched).
       this.projectionStore(frame.sessionId).apply(frame.key, frame.value, frame.seq)
+      this.notifier.markDirty()
+      return
+    }
+    if (frame.type === 'session/active-client') {
+      // Ephemeral: which surface the human is on. Device-scoped capabilities
+      // (voice capture, spoken playback) subscribe so exactly one client acts.
+      this.activeClientBySession.set(frame.sessionId, {
+        clientId: frame.clientId,
+        clientLabel: frame.clientLabel,
+        at: frame.at,
+      })
+      // Mirror onto a window global so machine-local client plugins (the
+      // voice surface) can read ownership without importing runtime internals.
+      const globals = globalThis as { __dshActiveClient?: Record<string, string> }
+      globals.__dshActiveClient = { ...globals.__dshActiveClient, [frame.sessionId]: frame.clientId }
+      for (const listener of this.activeClientListeners) {
+        try {
+          listener(frame.sessionId, frame.clientId)
+        } catch {
+          // One bad subscriber must not break frame dispatch.
+        }
+      }
       this.notifier.markDirty()
       return
     }

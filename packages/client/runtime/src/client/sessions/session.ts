@@ -25,6 +25,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionRemotes } from './remotes.ts'
 import { ProjectionValueStore } from './projection-store.ts'
 import type { ProjectionsBaseline } from './projection-store.ts'
+import { clientId, clientLabel } from '../client-identity.ts'
 import { resolvedClientTimeZone } from '../time-zone.ts'
 import { SessionQueueMirror } from './queue-mirror.ts'
 
@@ -208,6 +209,8 @@ export class Session implements SessionFace {
           mode,
           content,
           clientTimeZone: resolvedClientTimeZone(),
+          clientId: clientId(),
+          clientLabel: clientLabel(),
         }, signal)).result
       } else if (this.address.mode === 'one-shot') {
         result = {
@@ -282,6 +285,29 @@ export class Session implements SessionFace {
       return { ok: true, value: { attachment: result.value.attachment, data } }
     } catch (error) {
       return transportError(error)
+    }
+  }
+
+  /**
+   * Report that the human is active on THIS client surface — typing,
+   * touching, or focusing. Fire-and-forget: presence is a hint, so a failed
+   * report must never surface as an error in the conversation. Callers
+   * should throttle; the Host additionally coalesces repeats.
+   */
+  async presence(): Promise<void> {
+    try {
+      // Machine-local client plugins (the voice surface) compare themselves
+      // against the broadcast owner; publish our own id so they can, without
+      // importing runtime internals.
+      ;(globalThis as { __dshClientId?: string }).__dshClientId = clientId()
+      ;(globalThis as { __dshClientLabel?: string }).__dshClientLabel = clientLabel()
+      await this.api.sessions.presence({
+        sessionId: this.sessionId,
+        clientId: clientId(),
+        clientLabel: clientLabel(),
+      })
+    } catch {
+      // A presence hint is never worth surfacing or retrying.
     }
   }
 
@@ -457,6 +483,11 @@ export class Session implements SessionFace {
    * @returns the cached reference (stable until the next flush).
    */
   getSnapshot(): ConversationSnapshot {
+    // The rendered session is the one the human is looking at, so this is the
+    // natural place to publish the presence handle machine-local client
+    // plugins (the voice surface) call on typing and touch. Assignment only —
+    // no RPC happens until a plugin actually reports activity.
+    ;(globalThis as { __dshReportPresence?: () => void }).__dshReportPresence = () => { void this.presence() }
     this.notifier.ensureFresh()
     return this.snapshotCache
   }

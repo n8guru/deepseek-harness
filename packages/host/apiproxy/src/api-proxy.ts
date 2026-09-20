@@ -1298,6 +1298,34 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     for (const queue of muxQueues) queue.push(envelope)
   }
 
+  /**
+   * Last-activity-wins record of which client surface the human is on, per
+   * session. Deliberately in-memory and unlogged: presence is ephemeral, and
+   * a durable event per keystroke would pollute session history forever.
+   * Re-publishing the same client is coalesced so a stream of keystrokes does
+   * not flood every connected consumer.
+   */
+  const activeClients = new Map<string, { clientId: string; clientLabel: string | undefined; at: number }>()
+  const ACTIVE_CLIENT_COALESCE_MS = 5_000
+
+  function publishActiveClient(sessionId: SessionId, clientId: string, clientLabel?: string): void {
+    const at = Date.now()
+    const previous = activeClients.get(sessionId)
+    const unchanged = previous !== undefined
+      && previous.clientId === clientId
+      && previous.clientLabel === clientLabel
+      && at - previous.at < ACTIVE_CLIENT_COALESCE_MS
+    activeClients.set(sessionId, { clientId, clientLabel, at })
+    if (unchanged) return
+    broadcast({
+      type: 'session/active-client',
+      sessionId,
+      clientId,
+      ...(clientLabel === undefined ? {} : { clientLabel }),
+      at,
+    })
+  }
+
   // Projection change feed → session/projection push frames. The carrier
   // mints the wire frame (the Service Definition package holds no wire vocabulary); the
   // child activates only when a projection registry is composed, and the
@@ -2496,7 +2524,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async prompt(request) {
-        const { sessionId, mode, content, clientTimeZone } = request.payload
+        const { sessionId, mode, content, clientTimeZone, clientId, clientLabel } = request.payload
+        // A prompt is the strongest possible activity signal: publish the
+        // active surface before admission so device-scoped capabilities
+        // (capture, playback) follow the human even if admission then fails.
+        if (clientId !== undefined) publishActiveClient(sessionId, clientId, clientLabel)
         const canonicalTimeZone = clientTimeZone === undefined
           ? undefined
           : canonicalClientTimeZone(clientTimeZone)
@@ -2563,6 +2595,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           return ok(request, { accepted: true as const })
         }
         return hasImage ? serializeImageAdmission(agent, admit) : admit()
+      },
+
+      async presence(request) {
+        const { sessionId, clientId, clientLabel } = request.payload
+        // Intentionally does NOT resolve or wake an Agent: presence is a
+        // read-side hint about the human, valid while a session is idle and
+        // cheap enough to fire on ordinary typing.
+        publishActiveClient(sessionId, clientId, clientLabel)
+        return ok(request, { accepted: true as const })
       },
 
       async attachment(request) {

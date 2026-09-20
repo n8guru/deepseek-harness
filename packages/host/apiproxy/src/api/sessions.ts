@@ -355,8 +355,26 @@ export interface SessionsApi {
     mode: 'queue' | 'steer'
     content: PromptContentPart[]
     clientTimeZone?: string
+    clientId?: string
+    clientLabel?: string
   }>):
   Promise<RpcResponse<{ accepted: true; command?: { kind: 'success'; text?: string } }>>
+
+  /**
+   * Reports that a client is the human's active surface for this session —
+   * they typed, touched, or focused it. Presence is EPHEMERAL: it is never
+   * written to the session log (a durable event per keystroke would pollute
+   * history), it only rebroadcasts `session/active-client` to every connected
+   * consumer so device-scoped capabilities (voice capture, spoken playback)
+   * can follow the human between machines. Omitting it is always valid; a
+   * client that never reports simply never claims the surface.
+   */
+  presence(request: RpcRequest<{
+    sessionId: SessionId
+    clientId: string
+    clientLabel?: string
+  }>):
+  Promise<RpcResponse<{ accepted: true }>>
 
   /** Reads one durable image after proving that this session's log references its id. */
   attachment(request: RpcRequest<{ sessionId: SessionId; attachmentId: AttachmentIdType }>):
