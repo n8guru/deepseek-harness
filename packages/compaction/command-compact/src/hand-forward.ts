@@ -9,7 +9,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-fs'
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile, unlink } from 'node:fs/promises'
+import { openAudit } from './baton-audit.ts'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,18 +21,12 @@ export interface HandForwardConfig {
   batonPath?: string
   /** Maximum baton bytes read and hashed; default one MiB. */
   maxBatonBytes?: number
+  /** Renewable lease expiry and interrupted-pending recovery age; default 120 seconds, minimum five seconds. */
+  staleMs?: number
 }
 
 function digest(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
-}
-
-async function append(path: string, record: object): Promise<void> {
-  const file = await open(path, 'a', 0o600)
-  try {
-    await file.writeFile(JSON.stringify(record) + '\n')
-    await file.sync()
-  } finally { await file.close() }
 }
 
 function route(agent: Agent): { provider: string; model: string } {
@@ -47,6 +41,8 @@ function route(agent: Agent): { provider: string; model: string } {
  * @param config - deployment-owned audit and default baton paths.
  */
 export function installHandForward(ctx: Context, config: HandForwardConfig): void {
+  const staleMs = config.staleMs ?? 120000
+  if (!Number.isFinite(staleMs) || staleMs < 5000) throw new Error('handForward.staleMs must be at least 5000')
   const pending = new Set<string>()
   const active = new Set<Promise<void>>()
   const shutdown = new AbortController()
@@ -86,7 +82,9 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
         if (!args.reason.trim()) throw new Error('reason must not be empty')
         if (pending.has(agent.id)) throw new Error('hand_forward already pending')
         pending.add(agent.id)
-        let lockPath: string | undefined
+        let audit: Awaited<ReturnType<typeof openAudit>> | undefined
+        const leaseAbort = new AbortController()
+        const operationSignal = AbortSignal.any([shutdown.signal, leaseAbort.signal])
         let handedOff = false
         try {
           const baton = args.baton_path ?? defaultBaton
@@ -103,56 +101,48 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
           if (JSON.stringify(route(agent)) !== JSON.stringify(selected)) throw new Error('model changed during measurement; retry')
           const measurement = ctx.tokenMeter.measure(agent.session)
           exec.signal.throwIfAborted()
-          shutdown.signal.throwIfAborted()
+          operationSignal.throwIfAborted()
           const directory = join(auditRoot, digest(agent.id))
-          await mkdir(directory, { recursive: true, mode: 0o700 })
-          const candidate = join(directory, 'pending.lock')
-          const lock = await open(candidate, 'wx', 0o600)
-          lockPath = candidate
-          await lock.close()
-          const log = join(directory, 'baton-generations.jsonl')
-          let previous = ''
-          try { previous = await readFile(log, 'utf8') } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-          }
-          const records = previous.trim() ? previous.trim().split('\n').map(line => JSON.parse(line) as { generation: number }) : []
-          if (records.some(record => !Number.isSafeInteger(record.generation) || record.generation < 1)) throw new Error('invalid generation audit')
-          const generation = Math.max(0, ...records.map(record => record.generation)) + 1
+          const journal = await openAudit(directory, staleMs, (error) => { leaseAbort.abort(error) })
+          audit = journal
+          const generation = journal.generation
           const record = {
             generation, session_id: agent.id, time: new Date().toISOString(), ...selected,
             baton_path: target.displayPath, baton_sha256: digest(bytes), reason: args.reason,
             at_context_pct: measurement.totalTokens / capacity * 100,
           }
-          await append(log, { ...record, status: 'scheduled' })
+          await journal.record({ ...record, status: 'scheduled' }, true)
           // Work begins on the next microtask and waits for the driver AND maintenance.
           // The tool result must settle so its owning turn can itself finish.
           const work = (async () => {
             try {
               await new Promise<void>((resolve, reject) => {
-                const abort = (): void => { reject(new Error('hand_forward plugin disposed')) }
-                shutdown.signal.addEventListener('abort', abort, { once: true })
-                const cleanup = (): void => { shutdown.signal.removeEventListener('abort', abort) }
+                const abort = (): void => { reject(new Error('hand_forward scheduling cancelled')) }
+                operationSignal.addEventListener('abort', abort, { once: true })
+                const cleanup = (): void => { operationSignal.removeEventListener('abort', abort) }
                 void agent.whenIdle().then(() => { cleanup(); resolve() }, (error: unknown) => {
                   cleanup()
                   reject(error instanceof Error ? error : new Error(String(error)))
                 })
-                if (shutdown.signal.aborted) abort()
+                if (operationSignal.aborted) abort()
               })
-              shutdown.signal.throwIfAborted()
+              operationSignal.throwIfAborted()
               if (ctx.agents.get(agent.id) !== agent) throw new Error('agent is no longer live')
-              await ctx.compaction.compactNow(agent, shutdown.signal)
-              shutdown.signal.throwIfAborted()
+              journal.assertOwner()
+              await ctx.compaction.compactNow(agent, operationSignal)
+              journal.assertOwner()
+              operationSignal.throwIfAborted()
               agent.followup(createUserMessage({
                 content: [{ type: 'text', text: `Baton generation start. Read ${target.displayPath} and Studio slug=conductor-relay, then give Nate one short state update.` }],
                 source: { kind: 'plugin', plugin: 'hand-forward' },
               }))
               await ctx.sessions.flush(agent.session)
-              await append(log, { ...record, time: new Date().toISOString(), status: 'bootstrap-queued' })
+              await journal.record({ ...record, time: new Date().toISOString(), status: 'bootstrap-queued' }, false)
             } catch (error) {
-              await append(log, { ...record, time: new Date().toISOString(), status: 'failed', error: String(error) })
+              await journal.record({ ...record, time: new Date().toISOString(), status: 'failed', error: String(error) }, false)
             } finally {
               pending.delete(agent.id)
-              await unlink(candidate)
+              await journal.release()
             }
           })()
           active.add(work)
@@ -168,7 +158,7 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
         } finally {
           if (!handedOff) {
             pending.delete(agent.id)
-            if (lockPath) await unlink(lockPath)
+            if (audit) await audit.release()
           }
         }
       },

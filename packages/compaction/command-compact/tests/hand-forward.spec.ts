@@ -14,6 +14,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import * as commandCompact from '../src/index.ts'
+import Storage from '@deepseek-ai/dsh-storage'
+import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
+import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
+import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import SandboxPolicy, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import Approval, { setApprovalPolicy, effectiveApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 
 const cleanup: (() => Promise<unknown>)[] = []
@@ -34,7 +43,18 @@ async function harness() {
   for (const plugin of [LlmRuntime, SessionStore, SystemPrompt, ToolRuntime, AgentRegistry, TokenMeter, LocalFileSystem]) {
     await ctx.plugin(plugin)
   }
+  await ctx.plugin(JsonlSessionPersistence, { root: join(directory, 'sessions') })
+  await ctx.plugin(Storage)
+  ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
+  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
+  ctx.storage.mount('domain', facility)
+  ctx.provide('storageDomain', facility)
+  await ctx.plugin(WorkspaceRegistry)
+  await ctx.plugin(SandboxPolicy, { mode: 'danger-full-access', workspaceRoot: directory })
+  await ctx.plugin(Approval, { policy: 'ask' })
   await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  await ctx.plugin(Spawn, { providerName: 'spawn' })
   cleanup.push(() => ctx.fiber.dispose())
   const adapter = new MockAdapter([
     textResponse('history '.repeat(150)),
@@ -52,15 +72,20 @@ async function harness() {
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(commandCompact, { handForward: { auditDirectory, batonPath: baton } })
   const agent = ctx.agentLoop.create(SessionId('same-parent'), { provider: 'mock', model: 'exact' }, { cwd: directory })
+  const workspace = await ctx.workspaceRegistry.create(directory)
+  await workspace.attachSession(agent.id)
+  setSandboxMode(agent.session, 'workspace-write')
+  setApprovalPolicy(agent.session, 'never')
   const call = (args: object) => ctx.tools.execute({
     callId: CallId('direct-fixture'), name: 'hand_forward', arguments: args,
     agent, signal: new AbortController().signal,
   })
   const audit = async () => {
     const [name] = await readdir(auditDirectory)
-    return await readFile(join(auditDirectory, name!, 'baton-generations.jsonl'), 'utf8')
+    const state = JSON.parse(await readFile(join(auditDirectory, name!, 'baton-state.json'), 'utf8')) as { records: object[] }
+    return state.records.map(record => JSON.stringify(record)).join('\n')
   }
-  return { ctx, agent, adapter, compact, compaction, call, audit, baton }
+  return { ctx, agent, adapter, compact, compaction, call, audit, baton, workspace, directory }
 }
 
 it('defers a real mid-turn tool, compacts same session at idle, and queues bootstrap once', async () => {
@@ -70,11 +95,33 @@ it('defers a real mid-turn tool, compacts same session at idle, and queues boots
   const session = h.agent.session
   const options = structuredClone(h.agent.options)
   const header = structuredClone(session.header)
+  const before = {
+    workspace: h.workspace.id, members: [...h.workspace.sessionIds], cwd: h.agent.session.header.cwd,
+    policy: h.ctx.sandboxPolicy.resolve({ session }), approval: effectiveApprovalPolicy(session.events),
+    model: session.requestHeader()?.config.model,
+  }
+  expect(before).toMatchObject({
+    members: [h.agent.id], cwd: h.directory, policy: { mode: 'workspace-write' }, approval: 'never', model: 'exact',
+  })
+  const childAdapter = new MockAdapter(['hang'])
+  h.ctx.llm.registerAdapter(['child-mock'], childAdapter)
+  const started = await h.ctx.subagents.startContinuable({
+    provider: 'spawn', label: 'fixture child', signal: new AbortController().signal,
+    request: { parent: h.agent, prompt: [{ type: 'text', text: 'wait for parent compaction' }],
+      agentOptions: { provider: 'child-mock', model: 'child' } },
+  })
+  await vi.waitFor(() => { expect(childAdapter.requests).toHaveLength(1) })
+  const child = h.ctx.agents.get(started.childId)!
   let statusAtCompact = ''
-  h.compaction.mockImplementation((...args) => {
+  h.compaction.mockImplementation(async (...args) => {
     statusAtCompact = h.agent.status
     expect(session.events.at(-1)?.type).toBe('turn/end')
-    return BasicCompactionEngine.prototype.compactNow.apply(h.compact, args)
+    const result = await BasicCompactionEngine.prototype.compactNow.apply(h.compact, args)
+    expect(session.events.some(event => event.type === 'compaction/summary')).toBe(true)
+    await h.ctx.subagents.reportFrom(child, [{ type: 'text', text: 'real late child report' }], {
+      delivery: 'quiet', signal: new AbortController().signal,
+    })
+    return result
   })
   let deferred = false
   h.ctx.on('tools/result', () => {
@@ -97,11 +144,18 @@ it('defers a real mid-turn tool, compacts same session at idle, and queues boots
   const log = (await h.audit()).trim().split('\n').map(line => JSON.parse(line) as { baton_sha256: string })
   expect(log[0]).toMatchObject({ generation: 1, session_id: h.agent.id, model: 'exact', status: 'scheduled' })
   expect(log[0]?.baton_sha256).toMatch(/^[0-9a-f]{64}$/u)
-  // Delivery uses durable parent identity, not the old context surface.
-  const parent = h.ctx.agents.get(SessionId('same-parent'))!
-  parent.steer(createUserMessage({ content: [{ type: 'text', text: 'late child report' }], source: { kind: 'plugin', plugin: 'child-report-fixture' } }))
-  await parent.whenIdle()
-  expect(JSON.stringify(h.adapter.requests.at(-1)?.messages)).toContain('late child report')
+  const bootstrap = h.adapter.requests.find(request => JSON.stringify(request.messages).includes('Baton generation start.'))
+  expect(JSON.stringify(bootstrap?.messages)).toContain('real late child report')
+  expect(session.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'subagent-report')).toHaveLength(1)
+  expect({
+    workspace: h.workspace.id, members: [...h.workspace.sessionIds], cwd: h.agent.session.header.cwd,
+    policy: h.ctx.sandboxPolicy.resolve({ session }), approval: effectiveApprovalPolicy(session.events),
+    model: session.requestHeader()?.config.model,
+  }).toEqual(before)
+  expect(bootstrap?.model).toBe('exact')
+  expect(JSON.stringify(bootstrap?.messages)).toContain('workspace-write')
+  expect(JSON.stringify(bootstrap?.messages)).toContain('Approval prompts are disabled')
+  expect(h.ctx.agents.get(started.childId)).toBe(child)
 })
 
 it('refuses a concurrent second call while the first waits for idle', async () => {
