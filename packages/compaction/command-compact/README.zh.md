@@ -63,7 +63,7 @@ busy 结果有意限定在进程范围内：活动的未匹配标记会阻塞，
 
 仅在目标 conductor 的组合中设置 `config.handForward: {}`，并提供 `tools`、`agents`、`sessions`、`llm`、`tokenMeter` 和 `fs`。默认组合不启用该工具。参数为 `{ reason, baton_path? }`；配置 `batonPath` 默认为 `/home/n8/forge-agent-os/tools/CONDUCTOR-BATON.md`，`maxBatonBytes` 默认为一 MiB。缺失、非普通文件、空白、非法 UTF-8、超限文件以及重复待执行调用均被拒绝。
 
-验证与审计完成后立即返回 `{ scheduled: true, generation, at_context_pct, context_tokens, context_capacity, provider, model }`，不等待压缩。百分比来自 tokenMeter 请求压力与日志中准确模型的容量（尚无请求时使用 agent options），不是累计计费。容量未知或测量期间模型变化时拒绝。
+验证与审计完成后立即返回 `{ scheduled: true, generation, at_context_pct, context_tokens, context_capacity, provider, model }`，不等待压缩。百分比来自 tokenMeter 请求压力与日志中准确模型的容量（尚无请求时使用 agent options），不是累计计费。容量未知或测量期间模型变化时拒绝。只读预检（resolve、stat、read、模型查询）从调用开始共享一个 idleTimeoutMs 截止时间，与之后的空闲等待分别计时。每个 await 同时等待结果、超时、调用者取消或插件关闭，即使后端忽略取消也会退出。超时返回可见工具错误 hand_forward abandoned: preflight timed out 并写主机日志，不创建代号或审计文件。从入口跟踪接纳过程，拒绝时释放本地 pending。迟到的成功或拒绝仅被观察，不继续验证、取得所有权或执行动作。审计取得与发布刻意不使用只读竞速，写入未结束时绝不解锁。
 
 工具等待整个 agent 空闲，再在同一 Agent/Session 上调用现有 `compactNow`。成功后（包括没有可压缩历史）仅排队一次普通下一轮提示：“Baton generation start. Read <baton_path> and Studio slug=conductor-relay, then give Nate one short state update.” 已有消息保持普通顺序；不优先处理 bootstrap，也不清空上下文。子任务路由、配置、重放不变。
 

@@ -71,6 +71,7 @@ async function harness(config: import('../src/hand-forward.ts').HandForwardConfi
   const compaction = vi.spyOn(compact, 'compactNow')
   const auditDirectory = join(directory, 'audit')
   await ctx.plugin(CommandRuntime)
+  const registrations = vi.spyOn(ctx.tools, 'register')
   const plugin = await ctx.plugin(commandCompact, { handForward: { auditDirectory, batonPath: baton, ...config } })
   const agent = ctx.agentLoop.create(SessionId('same-parent'), { provider: 'mock', model: 'exact' }, { cwd: directory })
   const workspace = await ctx.workspaceRegistry.create(directory)
@@ -86,8 +87,76 @@ async function harness(config: import('../src/hand-forward.ts').HandForwardConfi
     const state = JSON.parse(await readFile(join(auditDirectory, name!, 'baton-state.json'), 'utf8')) as { records: object[] }
     return state.records.map(record => JSON.stringify(record)).join('\n')
   }
-  return { ctx, agent, adapter, compact, compaction, call, audit, baton, workspace, directory, plugin }
+  const producer = registrations.mock.calls.find(([tool]) => tool.name === 'hand_forward')![0]
+  return { ctx, agent, adapter, compact, compaction, call, audit, baton, workspace, directory, plugin, producer }
 }
+
+it.each(['resolve', 'stat', 'readBytes', 'model'] as const)('bounds hung %s preflight, permits retry, and retires late results', async (stage) => {
+  const h = await harness({ idleTimeoutMs: 100 })
+  const gate = Promise.withResolvers<undefined>()
+  const entered = Promise.withResolvers<undefined>()
+  const hold = async (): Promise<void> => { entered.resolve(undefined); await gate.promise }
+  if (stage === 'model') {
+    const original = h.ctx.llm.resolveModelInfo.bind(h.ctx.llm)
+    vi.spyOn(h.ctx.llm, 'resolveModelInfo').mockImplementationOnce(async (...args) => { await hold(); return original(...args) })
+  } else if (stage === 'resolve') {
+    const original = h.ctx.fs.resolve.bind(h.ctx.fs)
+    vi.spyOn(h.ctx.fs, 'resolve').mockImplementationOnce(async (...args) => { await hold(); return original(...args) })
+  } else if (stage === 'stat') {
+    const original = h.ctx.fs.stat.bind(h.ctx.fs)
+    vi.spyOn(h.ctx.fs, 'stat').mockImplementationOnce(async (...args) => { await hold(); return original(...args) })
+  } else {
+    const original = h.ctx.fs.readBytes.bind(h.ctx.fs)
+    vi.spyOn(h.ctx.fs, 'readBytes').mockImplementationOnce(async (...args) => { await hold(); return original(...args) })
+  }
+  // Call the captured producer directly: no outer ToolRuntime deadline can hide a leak.
+  const exec = { agent: h.agent, signal: new AbortController().signal } as Parameters<typeof h.producer.execute>[1]
+  const result = h.producer.execute({ reason: 'hung preflight' }, exec)
+  const rejected = expect(result).rejects.toThrow('hand_forward abandoned: preflight timed out')
+  await entered.promise
+  await rejected
+  expect(h.compaction).not.toHaveBeenCalled()
+  await expect(readdir(join(h.directory, 'audit'))).rejects.toMatchObject({ code: 'ENOENT' })
+  try {
+    expect((await h.call({ reason: 'retry' })).isError).not.toBe(true)
+    await vi.waitFor(async () => { expect(await h.audit()).toContain('"status":"completed"') })
+    const before = await h.audit()
+    gate.resolve(undefined)
+    // A late fulfillment/rejection may settle its read-only operation, never admission.
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(await h.audit()).toBe(before)
+    expect(h.compaction).toHaveBeenCalledTimes(1)
+  } finally {
+    gate.resolve(undefined)
+  }
+})
+
+it.each(['disposal', 'caller'] as const)('settles hung resolve on %s and blocks its late continuation', async (mode) => {
+  const h = await harness({ idleTimeoutMs: 10000, disposeTimeoutMs: 20 })
+  const target = await h.ctx.fs.resolve(h.baton)
+  const gate = Promise.withResolvers<typeof target>()
+  const resolve = vi.spyOn(h.ctx.fs, 'resolve').mockReturnValueOnce(gate.promise)
+  const stat = vi.spyOn(h.ctx.fs, 'stat')
+  const controller = new AbortController()
+  const exec = { agent: h.agent, signal: controller.signal } as Parameters<typeof h.producer.execute>[1]
+  const result = h.producer.execute({ reason: 'cancel preflight' }, exec)
+  const rejected = expect(result).rejects.toThrow(mode === 'disposal' ? 'plugin disposed' : 'fixture cancellation')
+  expect(resolve).toHaveBeenCalled()
+  if (mode === 'disposal') await h.plugin.dispose()
+  else controller.abort(new Error('fixture cancellation'))
+  await rejected
+  gate.resolve(target)
+  await new Promise(resolve => setTimeout(resolve, 30))
+  expect(stat).not.toHaveBeenCalled()
+  expect(h.compaction).not.toHaveBeenCalled()
+  await expect(readdir(join(h.directory, 'audit'))).rejects.toMatchObject({ code: 'ENOENT' })
+  if (mode === 'caller') {
+    expect((await h.call({ reason: 'retry after cancellation' })).isError).not.toBe(true)
+    await vi.waitFor(async () => { expect(await h.audit()).toContain('"status":"completed"') })
+  } else {
+    await expect(h.producer.execute({ reason: 'late invocation' }, exec)).rejects.toThrow('plugin disposed')
+  }
+})
 
 it('defers a real mid-turn tool, compacts same session at idle, and queues bootstrap once', async () => {
   const h = await harness()

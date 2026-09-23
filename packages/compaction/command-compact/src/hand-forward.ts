@@ -23,7 +23,7 @@ export interface HandForwardConfig {
   maxBatonBytes?: number
   /** Abandoned-pending recovery age; never expires a live owner's kernel lock. Default 120 seconds, minimum five seconds. */
   staleMs?: number
-  /** Maximum pre-compaction idle wait; default ten minutes. */
+  /** Deadline for read-only preflight and, separately, scheduled idle waiting; default ten minutes each. */
   idleTimeoutMs?: number
   /** Per-phase warning deadline, NOT a lock expiry; default five minutes. */
   watchdogMs?: number
@@ -106,7 +106,35 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
         if (!agent) throw new Error('hand_forward requires a live agent')
         if (!args.reason.trim()) throw new Error('reason must not be empty')
         if (pending.has(agent.id)) throw new Error('hand_forward already pending')
+        shutdown.signal.throwIfAborted()
+        exec.signal.throwIfAborted()
         pending.add(agent.id)
+        // Track admission from entry, not only the later idle/compaction work.
+        const admission = Promise.withResolvers<void>()
+        active.set(admission.promise, (message) => { ctx.logger.error('%s (session=%s admission)', message, agent.id) })
+        const timeout = new AbortController()
+        const preflightSignal = AbortSignal.any([exec.signal, shutdown.signal, timeout.signal])
+        const expired = new Error('hand_forward abandoned: preflight timed out')
+        const deadline = Date.now() + idleTimeoutMs
+        const timer = setTimeout(() => { timeout.abort(expired) }, idleTimeoutMs)
+        const cancelled = Promise.withResolvers<never>()
+        // Also observe cancellation when validation throws before its first await.
+        void cancelled.promise.catch(() => {})
+        const abort = (): void => { cancelled.reject(preflightSignal.reason) }
+        preflightSignal.addEventListener('abort', abort, { once: true })
+        const checkPreflight = (): void => {
+          preflightSignal.throwIfAborted()
+          if (Date.now() >= deadline) throw expired
+        }
+        const readOnly = async <T>(value: Promise<T>): Promise<T> => {
+          const result = await Promise.race([value, cancelled.promise])
+          checkPreflight()
+          return result
+        }
+        const finishPreflight = (): void => {
+          clearTimeout(timer)
+          preflightSignal.removeEventListener('abort', abort)
+        }
         let audit: Awaited<ReturnType<typeof openAudit>> | undefined
         const fenceAbort = new AbortController()
         const operationSignal = AbortSignal.any([shutdown.signal, fenceAbort.signal])
@@ -114,19 +142,24 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
         try {
           const baton = args.baton_path ?? defaultBaton
           if (!baton.trim() || /[\r\n]/u.test(baton)) throw new Error('invalid baton path')
-          const target = await ctx.fs.resolve(baton, agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd })
-          const info = await ctx.fs.stat(target, exec.signal)
+          checkPreflight()
+          const base = agent.session.header.cwd === undefined ? {} : { cwd: agent.session.header.cwd }
+          const target = await readOnly(ctx.fs.resolve(baton, base))
+          const info = await readOnly(ctx.fs.stat(target, preflightSignal))
           if (!info || info.type !== 'file') throw new Error('baton file is missing or not regular')
-          const bytes = await ctx.fs.readBytes(target, exec.signal, config.maxBatonBytes ?? 1024 * 1024)
+          const bytes = await readOnly(ctx.fs.readBytes(target, preflightSignal, config.maxBatonBytes ?? 1024 * 1024))
           const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
           if (!text.trim()) throw new Error('baton file is empty')
           const selected = route(agent)
-          const capacity = (await ctx.llm.resolveModelInfo(selected.provider, selected.model, exec.signal)).context?.contextWindow
+          const modelInfo = await readOnly(ctx.llm.resolveModelInfo(selected.provider, selected.model, preflightSignal))
+          const capacity = modelInfo.context?.contextWindow
           if (!capacity || !Number.isFinite(capacity) || capacity <= 0) throw new Error('exact model context capacity unavailable')
           if (JSON.stringify(route(agent)) !== JSON.stringify(selected)) throw new Error('model changed during measurement; retry')
           const measurement = ctx.tokenMeter.measure(agent.session)
-          exec.signal.throwIfAborted()
+          checkPreflight()
           operationSignal.throwIfAborted()
+          // Publication is a side effect: never race its completion against unlock.
+          finishPreflight()
           const directory = join(auditRoot, digest(agent.id))
           const journal = await openAudit(directory, staleMs, (error) => { fenceAbort.abort(error) })
           audit = journal
@@ -221,10 +254,19 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
             scheduled: true, generation, at_context_pct: record.at_context_pct,
             context_tokens: measurement.totalTokens, context_capacity: capacity, ...selected,
           }
+        } catch (error) {
+          if (error === expired) ctx.logger.error('%s (session=%s)', expired.message, agent.id)
+          throw error
         } finally {
-          if (!handedOff) {
-            pending.delete(agent.id)
-            if (audit) await audit.release()
+          finishPreflight()
+          try {
+            if (!handedOff) {
+              pending.delete(agent.id)
+              if (audit) await audit.release()
+            }
+          } finally {
+            admission.resolve()
+            active.delete(admission.promise)
           }
         }
       },
