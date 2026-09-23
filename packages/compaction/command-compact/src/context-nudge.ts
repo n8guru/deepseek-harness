@@ -119,7 +119,7 @@ export function readTurnFacts(events: readonly SessionEvent[]): TurnFacts | unde
 
 /** Inputs to the one-line nudge decision. */
 export interface NudgeReading {
-  /** Floored `pressureTokens / contextWindow` percent; absent until a provider reports usage and capacity. */
+  /** Floored projected-first pressure percent; absent until a provider reports usage and capacity. */
   pressurePct?: number | undefined
   /** Open turns since the last `hand_forward` call. */
   turnsSinceForward: number
@@ -136,6 +136,7 @@ export interface NudgeReading {
  * @param config - resolved deployment thresholds.
  * @returns one short line, or `''` when the step needs no nudge.
  */
+// Precedence invariant: idle resume > act threshold > staleness > warn threshold.
 export function decideContextNudge(reading: NudgeReading, config: ResolvedContextNudgeConfig): string {
   if (reading.idleGapMs !== undefined && reading.idleGapMs > config.idleGapMs) {
     return 'resuming after idle; re-read baton state first'
@@ -170,9 +171,12 @@ function renderNudgeFor(
   const facts = readTurnFacts(agent.session.events)
   if (facts === undefined) return ''
   const pressure = scope.sessionProjections.snapshot(agent.session).values.contextPressure
+  // Projected first: pressureTokens is the last completed request's prompt size
+  // and cannot see surface growth or compaction until the next usage sample.
   // The registry schema-validates every value, so a present contextWindow is positive.
-  const pressurePct = pressure?.pressureTokens !== undefined && pressure.contextWindow !== undefined
-    ? Math.floor(pressure.pressureTokens / pressure.contextWindow * 100)
+  const usedTokens = pressure?.projectedTokens ?? pressure?.pressureTokens
+  const pressurePct = usedTokens !== undefined && pressure?.contextWindow !== undefined
+    ? Math.floor(usedTokens / pressure.contextWindow * 100)
     : undefined
   return decideContextNudge({ ...facts, pressurePct }, config)
 }

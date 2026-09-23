@@ -83,7 +83,7 @@ Set `config.contextNudge: {}` on this plugin only in the intended conductor comp
 - 40 turns (`maxTurnsWithoutForward`) without a `hand_forward` call: a staleness line naming the turn count;
 - an idle gap before the current turn longer than 90 minutes (`idleGapMs`): `resuming after idle; re-read baton state first`.
 
-Pressure is `pressureTokens / contextWindow` from the host's own `contextPressure` projection — the same source the Web client reads — never a recount. Turn position, forwarding staleness, and the idle gap fold from committed session events only. The nudge never compacts and never calls `hand_forward`; `handForward` (above) remains the only actor. All thresholds are validated config fields: `warnPct`, `actPct`, `maxTurnsWithoutForward`, `idleGapMs`, and `batonPath`.
+Pressure is `projectedTokens ?? pressureTokens` over `contextWindow` from the host's own `contextPressure` projection — the same projected-first reading the Web client uses — never a recount. Turn position, forwarding staleness, and the idle gap fold from committed session events only. The nudge never compacts and never calls `hand_forward`; `handForward` (above) remains the only actor. All thresholds are validated config fields: `warnPct`, `actPct`, `maxTurnsWithoutForward`, `idleGapMs`, and `batonPath`.
 
 Conductor opt-in (preset or profile patch layer; replaces the row's whole config):
 

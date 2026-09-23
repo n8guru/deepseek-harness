@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import LlmRuntime, { CallId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -325,6 +325,66 @@ describe('mounted context-nudge provider', () => {
         arguments: '{}',
       })
       session.append('turn/start', { turn: 41 })
+      expect(await nudgeText(ctx, session)).toBe('')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('reflects surface growth since the last usage sample', async () => {
+    const ctx = await harness({ contextNudge: {} })
+    try {
+      const session = ctx.sessions.create()
+      openTurn(session, 1)
+      reportUsage(session, 1, 200, 1000)
+      expect(await nudgeText(ctx, session)).toBe('')
+      session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'x'.repeat(600) }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      expect(await nudgeText(ctx, session)).toBe(
+        'context 35% — call hand_forward at the end of this turn (baton: tools/CONDUCTOR-BATON.md)',
+      )
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not re-emit the act line from a stale sample after compaction', async () => {
+    const ctx = await harness({ contextNudge: {} })
+    try {
+      const session = ctx.sessions.create()
+      openTurn(session, 1)
+      const bulky = session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'y'.repeat(2000) }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      reportUsage(session, 1, 320, 1000)
+      expect(await nudgeText(ctx, session)).toBe(
+        'context 32% — call hand_forward at the end of this turn (baton: tools/CONDUCTOR-BATON.md)',
+      )
+      session.append('tool/call', {
+        turn: 1,
+        step: 1,
+        callId: CallId('forward-then-compact'),
+        name: 'hand_forward',
+        arguments: '{}',
+      })
+      const messageTokens = ctx.sessionProjections.snapshot(session).values.contextBreakdown?.messageTokens
+      expect(messageTokens).toBeGreaterThan(300)
+      const prune = session.append('compaction/prune', {
+        shadowedRange: { start: bulky.seq, end: bulky.seq },
+        shadowedSeqs: [bulky.seq],
+        shadowedTokenCount: messageTokens ?? 0,
+      })
+      session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'checkpoint' }],
+        source: { kind: 'user' },
+      }), {
+        surfaceOp: { op: 'replace', start: bulky.seq, end: bulky.seq },
+        sourceEventSeqs: [bulky.seq, prune.seq],
+      })
+      session.append('turn/start', { turn: 2 })
       expect(await nudgeText(ctx, session)).toBe('')
     } finally {
       await ctx.fiber.dispose()
