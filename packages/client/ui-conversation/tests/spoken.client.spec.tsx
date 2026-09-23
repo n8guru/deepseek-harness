@@ -9,21 +9,60 @@ import { zh } from '../src/client/locales.ts'
 afterEach(cleanup)
 const t = makeTranslate(zh, commonZh)
 const props = { t, streaming: false, renderMessageImages: () => null }
-it('hides only real markers and renders Markdown and code inside the highlighted body', () => {
-  const text = 'Before\n\n<spoken>**Hello** [link](https://example.com)\n\n- first\n- second\n\n`code`</spoken>\n\nAfter `<spoken>`'
-  const view = render(<AssistantMarkdown {...props} blocks={[{ kind: 'text', text }]} />)
-  const spoken = view.container.querySelector('[data-spoken]')!
-  expect(spoken.querySelector('strong')?.textContent).toBe('Hello')
-  expect(spoken.querySelector('a')?.getAttribute('href')).toBe('https://example.com')
-  expect(spoken.querySelectorAll('li')).toHaveLength(2)
-  expect(spoken.querySelector('code')?.textContent).toBe('code')
-  expect(spoken.textContent).not.toContain('<spoken>')
+function show(text: string, streaming = false) {
+  return render(<AssistantMarkdown {...props} streaming={streaming} blocks={[{ kind: 'text', text }]} />)
+}
+it.each([false, true])('keeps inline prose, references and cross-boundary formatting in one document (streaming=%s)', (streaming) => {
+  const view = show('**before <spoken>[hello][r]</spoken> after**\n\n[r]: https://example.com', streaming)
+  expect(view.container.querySelectorAll('p')).toHaveLength(1)
+  expect(view.container.querySelector('strong')?.textContent).toBe('before hello after')
+  expect(view.container.querySelector('a')?.getAttribute('href')).toBe('https://example.com')
+  expect(view.container.querySelector('a [data-spoken]')?.textContent).toBe('hello')
+  expect(view.container.querySelectorAll('[data-spoken]')).toHaveLength(1)
+  expect(view.container.querySelector('p > div')).toBeNull()
+})
+it('preserves a link whose label spans a spoken boundary', () => {
+  const view = show('[before <spoken>hello</spoken> after](https://example.com)')
+  expect(view.container.querySelector('a')?.textContent).toBe('before hello after')
+  expect(view.container.querySelector('a [data-spoken]')?.textContent).toBe('hello')
+})
+it('renders lists and code normally with inline prose highlights', () => {
+  const view = show('Before\n\n<spoken>**Hello** [link](https://example.com)\n\n- first\n- second\n\n`code`</spoken>\n\nAfter `<spoken>`')
+  expect(view.container.querySelector('strong [data-spoken]')?.textContent).toBe('Hello')
+  expect(view.container.querySelector('a [data-spoken]')?.textContent).toBe('link')
+  expect(view.container.querySelectorAll('li [data-spoken]')).toHaveLength(2)
+  expect(view.container.querySelector('code')?.textContent).toBe('code')
+  expect(view.container.querySelector('code [data-spoken]')).toBeNull()
   expect(view.container.textContent).toContain('After <spoken>')
   expect(view.container.innerHTML).toMatchSnapshot()
 })
-it('keeps incomplete streaming markers literal until the pair closes', () => {
-  const view = render(<AssistantMarkdown {...props} streaming blocks={[{ kind: 'text', text: '<spoken>Hello' }]} />)
+it.each([
+  '~~~\n<spoken>silent</spoken>\n~~~', '    <spoken>silent</spoken>',
+  '``multi\n<spoken>silent</spoken>``', '"<spoken>silent</spoken>"',
+  '\\<spoken>silent\\</spoken>', '&lt;spoken&gt;silent&lt;/spoken&gt;', '[spoken]silent[/spoken]',
+])('does not highlight or hide literal mentions: %j', (text) => {
+  const view = show(text)
   expect(view.container.querySelector('[data-spoken]')).toBeNull()
-  view.rerender(<AssistantMarkdown {...props} blocks={[{ kind: 'text', text: '<spoken>Hello</spoken>' }]} />)
+  expect(view.container.textContent).toContain(text.includes('[spoken]') ? '[spoken]' : '<spoken>')
+})
+it.each([
+  ['before &amp; <spoken>A &amp; B</spoken> after', 'A & B'],
+  ['before \\* <spoken>hello</spoken> after', 'hello'],
+  ['- first\n  before <spoken>hello</spoken> after', 'hello'],
+  ['first\r\nbefore <spoken>hello</spoken> after', 'hello'],
+])('maps decoded text offsets without shifting highlight: %j', (text, expected) => {
+  const view = show(text)
+  expect(view.container.querySelector('[data-spoken]')?.textContent).toBe(expected)
+})
+it('retains multiple precise regions in a single text leaf', () => {
+  const view = show('before <spoken>one &amp; two</spoken> between <spoken>three</spoken> after')
+  expect(view.container.querySelectorAll('p')).toHaveLength(1)
+  expect(Array.from(view.container.querySelectorAll('[data-spoken]'), span => span.textContent)).toEqual(['one & two', 'three'])
+  expect(view.container.textContent).toBe('before one & two between three after')
+})
+it('keeps incomplete streaming markers literal until the pair closes', () => {
+  const view = show('<spoken>Hello', true)
+  expect(view.container.querySelector('[data-spoken]')).toBeNull()
+  view.rerender(<AssistantMarkdown {...props} streaming blocks={[{ kind: 'text', text: '<spoken>Hello</spoken>' }]} />)
   expect(view.container.querySelector('[data-spoken]')?.textContent).toBe('Hello')
 })

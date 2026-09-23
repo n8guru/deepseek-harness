@@ -12,7 +12,7 @@
 import { Fragment, memo, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import type { AssistantBlock } from '@deepseek-ai/dsh-client-runtime/client'
-import { JsonBlock, MarkdownText, parseSpokenSegments } from '@deepseek-ai/dsh-client-ui-primitives'
+import { JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownFileMentions } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatViewSlotProps } from '../contract/slots.ts'
 import { ReasoningRow } from './ReasoningRow.tsx'
@@ -52,19 +52,16 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
     if (block === undefined) continue
     switch (block.kind) {
       case 'text':
-        for (const segment of parseSpokenSegments(block.text)) {
-          const body = (
-            <MarkdownText
-              text={block.text.slice(segment.contentStart, segment.contentEnd)}
-              streaming={streaming}
-              codeLabels={codeLabels}
-              fileMentions={mentions}
-            />
-          )
-          rendered.push(segment.kind === 'spoken'
-            ? <div key={`${i}:${segment.start}`} className={css.spoken} data-spoken>{body}</div>
-            : <Fragment key={`${i}:${segment.start}`}>{body}</Fragment>)
-        }
+        rendered.push(
+          <MarkdownText
+            key={i}
+            text={block.text}
+            streaming={streaming}
+            codeLabels={codeLabels}
+            fileMentions={mentions}
+            highlightSpoken
+          />,
+        )
         break
       case 'reasoning':
         rendered.push(<ReasoningRow key={i} text={block.text} running={streaming && i === last} t={t} />)

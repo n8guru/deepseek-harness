@@ -1,21 +1,23 @@
-# Agent Note: Shared spoken parsing and assistant highlighting
+# Agent Note: Shared spoken parsing and inline highlighting
 
-Status: implemented, not activated
+Status: revised after failed independent review; not activated
 
 ## Decision
 
-The Cordis-free ui-primitives package owns `parseSpokenSegments`, shared through the existing shell-seeded module table. It already owns Markdown parsing and both conversation and voice depend downward on it, so no conversation-to-voice cycle or new plugin is needed. CommonMark code node offsets mask code without changing UTF-16 positions. HTML recognition is disabled during this code scan so a spoken block cannot conceal nested code fences.
+The Cordis-free ui-primitives package owns `parseSpokenSegments`, shared through the existing shell-seeded module table. Both conversation and voice depend downward on it, avoiding a conversation-to-voice cycle. CommonMark AST positions identify prose and mask code without changing original UTF-16 offsets. HTML recognition is disabled during recognition so spoken blocks cannot conceal code.
 
-Complete pairs are case-insensitive and preserve the legacy first-close and whitespace normalization behavior. Unclosed pairs remain literal. Tilde fences, indented code, multi-backtick and multiline code spans intentionally improve on the old regex. Speech omits code; display preserves it.
+Only bare prose pairs speak. Complete pairs are case-insensitive; first-close matching and whitespace normalization retain bare-prose legacy behavior. Unclosed pairs stay literal. Any CommonMark code, paired straight/curly quoted mentions, Markdown blockquotes, escaped tags, HTML entity forms and bracket forms cannot supply markers. Definitions and link destinations are not prose. Contractions do not start quotes. Speech inside recognized pairs omits code.
 
-## Presentation and limitations
+The operator explicitly approved code silence after independent review rejected a88aa66 for changing the old regex behavior. Tests now distinguish exact bare-prose parity from approved differences, and record both old and new outputs for tilde fences, indented code, multiline spans and quoted/escaped pairs. Valid Markdown differences are no longer described as malformed-input exceptions.
 
-AssistantMarkdown renders each spoken region with normal Markdown and a theme-token background and left accent. Logged text and playback input remain untouched. Each region is a separate Markdown document; references and formatting cannot cross the region boundary, and inline spoken regions become blocks. Incomplete streaming tags remain visible until their closing tag arrives. Parsing is linear in the current text and does not use the incremental Markdown cache.
+## Single-document rendering
 
-## Delivery
+AssistantMarkdown passes one raw text block to MarkdownText with `highlightSpoken`. The shared parser removes recognized markers and projects their content ranges into one Markdown source. One AST retains cross-boundary emphasis, link labels, external reference definitions, lists and footnotes. Only text leaves are split into inline spans at the mapped range boundaries; code stays unhighlighted. The existing React HTML escaping and URL allowlist remain unchanged.
 
-Build ui-primitives, ui-conversation and the web shell together. The out-of-tree dsh-voice candidate requires the new shell export. Its live source is symlinked into the web profile, so leave the old live client in place and stage the candidate until coordinated artifact activation. No server/RPC changes or restart are required by this source change; existing-server activation must be verified by the deploying owner.
+The maintained micromark decoder maps source positions past character references and backslash escapes; line alignment accounts for list continuation indentation. The inline tint uses existing light/dark theme tokens. Completed spoken documents reparse fully while streaming because a closing tag can change earlier ranges. Ordinary documents keep incremental rendering; unclosed tags stay literal.
 
-## Evidence
+## Delivery and evidence
 
-Parser tests pin legacy parity, source coverage and CommonMark code exclusion. AssistantMarkdown tests pin Markdown rendering, literal code mentions, streaming closure and a DOM snapshot. The voice mention/playback tests accept the real emitted shared parser and the staged client through explicit environment paths. Full assembled browser replay and independent review remain delivery gates.
+Build ui-primitives, ui-conversation and the web shell together. The staged out-of-tree voice candidate still delegates to the same parser; its runtime bytes need no change for this revision. Live voice remains untouched. Publishing the candidate alone is unsafe: verify the new shell export and quiesce/reload old-shell tabs before coordinated voice activation. No activation, restart or push is authorized here; restart-free shell publication is unproven.
+
+Parser and component tests cover approved exclusions, bare parity, source ranges, inline continuity, cross-boundary formatting/links, externally defined references, entities, escapes, indentation, streaming and a DOM snapshot. A voice differential test loads both actual clients against the emitted parser. Fresh independent review and assembled light/dark browser checks remain delivery gates.

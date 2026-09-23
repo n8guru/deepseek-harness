@@ -20,6 +20,8 @@ import { Fragment, createElement } from 'react'
 import type { Key, ReactNode } from 'react'
 import type * as Md from 'mdast'
 import type {} from 'mdast-util-math'
+import { decodeString } from 'micromark-util-decode-string'
+import type { SpokenRange } from './spoken.ts'
 import { normalizeUri } from 'micromark-util-sanitize-uri'
 import { CodeBlock } from './CodeBlock.tsx'
 import { renderTexToReact } from './katex.tsx'
@@ -119,6 +121,8 @@ export interface MarkdownFileMentions {
  * numbering accumulated in document order while references render.
  */
 export interface MarkdownRenderContext {
+  /** Marker-free full source and source ranges for prose-only inline highlighting. */
+  readonly spoken?: { text: string; ranges: readonly SpokenRange[] } | undefined
   /** Streaming arm: fences render plain and TeX stays literal. */
   readonly streaming: boolean
   /** Localized fence copy-button labels. */
@@ -202,10 +206,47 @@ function renderChildren(
   return nodes.map((node, index) => renderNode(node, index, context))
 }
 
+/** Split decoded text only at projected spoken boundaries; keep the surrounding AST intact. */
+function renderSpokenText(node: Md.Text, key: Key, context: MarkdownRenderContext): ReactNode {
+  const source = context.spoken
+  const start = node.position?.start.offset
+  const end = node.position?.end.offset
+  if (!source || start === undefined || end === undefined) return node.value
+  const ranges = source.ranges.filter(range => range.start < end && range.end > start)
+  if (!ranges.length) return node.value
+  const parts: ReactNode[] = []
+  let cursor = start
+  let decodedCursor = 0
+  // CommonMark also removes continuation indentation from text in lists.
+  // Align decoded source lines with the AST value before translating each boundary.
+  const sourceLines = decodeString(source.text.slice(start, end)).split('\n')
+  const valueLines = node.value.split('\n')
+  const decodedOffset = (offset: number): number => {
+    const prefixLines = decodeString(source.text.slice(start, offset)).split('\n')
+    const line = prefixLines.length - 1
+    const valueLine = valueLines[line] ?? ''
+    const indentation = Math.max(0, (sourceLines[line] ?? '').indexOf(valueLine))
+    return valueLines.slice(0, line).reduce((length, value) => length + value.length + 1, 0)
+      + Math.max(0, (prefixLines[line]?.length ?? 0) - indentation)
+  }
+  for (const range of ranges) {
+    const left = Math.max(start, range.start)
+    const right = Math.min(end, range.end)
+    const leftDecoded = decodedOffset(left)
+    const rightDecoded = decodedOffset(right)
+    if (cursor < left) parts.push(node.value.slice(decodedCursor, leftDecoded))
+    parts.push(<span key={left} className={css.spoken} data-spoken>{node.value.slice(leftDecoded, rightDecoded)}</span>)
+    cursor = right
+    decodedCursor = rightDecoded
+  }
+  if (cursor < end) parts.push(node.value.slice(decodedCursor))
+  return <Fragment key={key}>{parts}</Fragment>
+}
+
 function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderContext): ReactNode {
   switch (node.type) {
     case 'text':
-      return node.value
+      return renderSpokenText(node, key, context)
     case 'paragraph':
       return <p key={key}>{renderChildren(node.children, context)}</p>
     case 'heading':

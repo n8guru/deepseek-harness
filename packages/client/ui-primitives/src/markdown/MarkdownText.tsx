@@ -14,6 +14,7 @@
 import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { IncrementalMarkdownParser } from './incremental.ts'
+import { projectSpokenMarkdown } from './spoken.ts'
 import { parseGfm, parseGfmWithMath } from './parse.ts'
 import {
   collectReferenceTargets, createReferenceTargets, renderBlocks, renderFootnoteSection,
@@ -25,19 +26,22 @@ import css from './MarkdownText.module.css'
 
 export type { MarkdownCodeLabels, MarkdownFileMentions } from './render.tsx'
 
-/** One settled full render: parse with math, resolve references, append the footnote section. */
-function renderSettled(
+/** One full-document render: resolve all references and append the footnote section. */
+function renderDocument(
   text: string,
   codeLabels: MarkdownCodeLabels | undefined,
   fileMentions: MarkdownFileMentions | undefined,
+  spoken?: MarkdownRenderContext['spoken'],
+  streaming = false,
 ): ReactNode[] {
-  const root = parseGfmWithMath(text)
+  const root = streaming ? parseGfm(text) : parseGfmWithMath(text)
   const targets = createReferenceTargets()
   collectReferenceTargets(root.children, targets)
   const context: MarkdownRenderContext = {
-    streaming: false,
+    streaming,
     codeLabels,
-    fileMentions,
+    fileMentions: streaming ? undefined : fileMentions,
+    spoken,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
@@ -148,13 +152,17 @@ class StreamingRenderer {
  * links inline-code tokens its resolver recognizes as real files; this is
  * the single streaming gate — it applies to settled renders only, because a
  * streaming message's vocabulary is not final and frozen cached elements
- * must not bake in handlers that could go stale.
+ * must not bake in handlers that could go stale. `highlightSpoken` removes only
+ * recognized bare-prose markers and highlights their text within one document;
+ * completed spoken pairs use full-document parsing even while streaming.
  * @returns A GFM document with TeX math rendered through KaTeX; raw HTML,
  * relative links, and unsafe protocols are disabled, while absolute HTTP(S)
  * images render directly.
  */
-export const MarkdownText = memo(function MarkdownText({ text, streaming = false, codeLabels, fileMentions }: {
+export const MarkdownText = memo(function MarkdownText({ text, streaming = false, codeLabels, fileMentions, highlightSpoken = false }: {
   text: string
+  /** Recognize bare spoken pairs and highlight text inline within one Markdown document. */
+  highlightSpoken?: boolean
   streaming?: boolean
   codeLabels?: MarkdownCodeLabels | undefined
   fileMentions?: MarkdownFileMentions | undefined
@@ -162,15 +170,23 @@ export const MarkdownText = memo(function MarkdownText({ text, streaming = false
   const streamRef = useRef<StreamingRenderer | null>(null)
   const streamLabelsRef = useRef<MarkdownCodeLabels | undefined>(codeLabels)
   const children = useMemo(() => {
+    if (highlightSpoken) {
+      const projection = projectSpokenMarkdown(text)
+      if (projection.ranges.length > 0) {
+        // Closing markers can change earlier ranges: do not freeze this document mid-pair.
+        streamRef.current = null
+        return renderDocument(projection.text, codeLabels, fileMentions, projection, streaming)
+      }
+    }
     if (!streaming) {
       streamRef.current = null
-      return renderSettled(text, codeLabels, fileMentions)
+      return renderDocument(text, codeLabels, fileMentions)
     }
     if (streamRef.current === null || streamLabelsRef.current !== codeLabels) {
       streamRef.current = new StreamingRenderer(codeLabels)
       streamLabelsRef.current = codeLabels
     }
     return streamRef.current.render(text)
-  }, [text, streaming, codeLabels, fileMentions])
+  }, [text, streaming, codeLabels, fileMentions, highlightSpoken])
   return <div className={css.markdown}>{children}</div>
 })
