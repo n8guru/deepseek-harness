@@ -1,23 +1,29 @@
-# Agent Note: Shared spoken parsing and inline highlighting
+# Agent Note: Shared spoken text and inline highlighting
 
-Status: revised after failed independent review; not activated
+Status: revised after review 3; not activated
 
-## Decision
+## Shared authority
 
-The Cordis-free ui-primitives package owns `parseSpokenSegments`, shared through the existing shell-seeded module table. Both conversation and voice depend downward on it, avoiding a conversation-to-voice cycle. CommonMark AST positions identify prose and mask code without changing original UTF-16 offsets. HTML recognition is disabled during recognition so spoken blocks cannot conceal code.
+The conductor changed acceptance after review 3: the shared parser, not the legacy regex, is authoritative. ui-primitives owns recognition and `spokenTextParts`, the source-to-displayed-text mapping used by both voice speechText and React highlights. Both consumers depend downward on ui-primitives. Recognized source ranges remain half-open UTF-16 offsets; logs remain unchanged.
 
-Only bare prose pairs speak. Complete pairs are case-insensitive; first-close matching and whitespace normalization retain bare-prose legacy behavior. Unclosed pairs stay literal. Any CommonMark code, paired straight/curly quoted mentions, Markdown blockquotes, escaped tags, HTML entity forms and bracket forms cannot supply markers. Definitions and link destinations are not prose. Quotation exclusion is local: matching straight/curly quotes must immediately surround one marker token or one complete inline pair. Quotes elsewhere in prose, URLs, titles, measurements or apostrophes never pair across a bare speech region. Re-review 2 found the previous document-wide quote scanner incorrectly suppressed speech between quoted URL characters; that scanner has been replaced and ten real-client parity fixtures cover the regression and neighboring cases. Speech inside recognized pairs omits code.
+Only bare complete prose pairs supply markers. Code, escaped/entity markers, bracket forms (including bracket-wrapped angle-tag tokens and pairs), quoted adjacent wrappers, definitions and destinations are excluded. Unclosed pairs stay literal. Quotes elsewhere never pair across prose or URLs. The Markdown document remains whole; references and formatting cross speech boundaries normally.
 
-The operator explicitly approved code silence after independent review rejected a88aa66 for changing the old regex behavior. Tests now distinguish exact bare-prose parity from approved differences, and record both old and new outputs for tilde fences, indented code, multiline spans and quoted/escaped pairs. Valid Markdown differences are no longer described as malformed-input exceptions.
+## Intended differences: legacy bugs
 
-## Single-document rendering
+- Three backticks in a link URL do not start a fence: speech after that link remains audible.
+- Backticks inside link destinations/titles are data, not code. Speech uses displayed link labels, not URLs or titles.
+- Escaped backticks in prose remain literal audible backticks, not stripped code.
+- Formatting syntax is not spoken: emphasis, decoded entities and reference links contribute displayed prose.
+- Bracket-wrapped tags are literal; the legacy regex incorrectly treated them as speech.
 
-AssistantMarkdown passes one raw text block to MarkdownText with `highlightSpoken`. The shared parser removes recognized markers and projects their content ranges into one Markdown source. One AST retains cross-boundary emphasis, link labels, external reference definitions, lists and footnotes. Only text leaves are split into inline spans at the mapped range boundaries; code stays unhighlighted. The existing React HTML escaping and URL allowlist remain unchanged.
+Speech and highlight share text/HTML leaf slicing and a single settled GFM+math grammar even while streaming. Code, images, math and footnote definitions have no highlighted text or speech. Structural block/code boundaries become whitespace in spoken strings. Ordinary non-spoken documents retain incremental rendering.
 
-The maintained micromark decoder maps source positions past character references and backslash escapes; line alignment accounts for list continuation indentation. The inline tint uses existing light/dark theme tokens. Completed spoken documents reparse fully while streaming because a closing tag can change earlier ranges. Ordinary documents keep incremental rendering; unclosed tags stay literal.
+## HTML and safety
 
-## Delivery and evidence
+Raw HTML leaves remain React text, never HTML elements. They now pass through the same range mapper: `<div><spoken>yes</spoken></div>` displays literal div markers with only yes highlighted and spoken. Existing URL allowlisting is unchanged. Inline tint still uses existing theme tokens.
 
-Build ui-primitives, ui-conversation and the web shell together. The staged out-of-tree voice candidate still delegates to the same parser; its runtime bytes need no change for this revision. Live voice remains untouched. Publishing the candidate alone is unsafe: verify the new shell export and quiesce/reload old-shell tabs before coordinated voice activation. No activation, restart or push is authorized here; restart-free shell publication is unproven.
+## Proof and delivery
 
-Parser and component tests cover approved exclusions, bare parity, source ranges, inline continuity, cross-boundary formatting/links, externally defined references, entities, escapes, indentation, streaming and a DOM snapshot. A voice differential test loads both actual clients against the emitted parser. Fresh independent review and assembled light/dark browser checks remain delivery gates.
+One invariant test loops the shared acceptance corpus in streaming and settled modes, compares explicit expected speech, then compares the set of actual DOM-highlight strings grouped by speech region with the set of speech strings. The corpus includes legacy bugs, bracket wrappers, HTML-ish blocks, Markdown formatting/references, code, quotes, streaming partials and multiple regions. Actual live/staged voice clients additionally document intended old/new differences.
+
+The out-of-tree runtime candidate still delegates to the parser; its bytes and live runtime remain unchanged. Build ui-primitives, ui-conversation and the web shell together. Fresh review, actual-browser theme/audio checks and coordinated deployment remain required. Old-shell tabs must drain/reload before staged voice activation. No activation, restart or push is authorized here.

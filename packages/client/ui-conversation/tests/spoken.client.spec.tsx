@@ -5,8 +5,39 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { AssistantMarkdown } from '../src/client/chat/AssistantMarkdown.tsx'
 import { zh } from '../src/client/locales.ts'
+import { parseSpokenSegments } from '../../ui-primitives/src/markdown/spoken.ts'
+import { spokenFixtures } from '../../ui-primitives/tests/spoken-fixtures.ts'
 
 afterEach(cleanup)
+
+it('invariant: every fixture has exactly the same spoken and highlighted strings', () => {
+  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
+  for (const [text, expected, reason] of spokenFixtures) {
+    const speech = parseSpokenSegments(text).filter(s => s.kind === 'spoken' && s.speechText).map(s => s.speechText)
+    expect(speech, reason).toEqual(expected)
+    for (const streaming of [false, true]) {
+      const view = show(text, streaming)
+      const values = new Map<string, string>()
+      // Read actual rendered spans, preserving inline adjacency and block/code separators.
+      function walk(node: Node): void {
+        if (node instanceof HTMLElement && node.hasAttribute('data-spoken')) {
+          const id = node.getAttribute('data-spoken')!
+          values.set(id, (values.get(id) ?? '') + node.textContent)
+          return
+        }
+        for (const child of node.childNodes) walk(child)
+        if (node instanceof HTMLElement && /^(P|H[1-6]|LI|TD|TH|BR|CODE|PRE)$/.test(node.tagName)) {
+          for (const [id, value] of values) values.set(id, value + ' ')
+        }
+      }
+      walk(view.container)
+      const highlighted = [...values.values()].map(normalize).filter(Boolean)
+      expect(new Set(highlighted), reason + ' streaming=' + streaming).toEqual(new Set(speech))
+      expect(view.container.querySelector('script, img[onerror]'), reason).toBeNull()
+      view.unmount()
+    }
+  }
+})
 const t = makeTranslate(zh, commonZh)
 const props = { t, streaming: false, renderMessageImages: () => null }
 function show(text: string, streaming = false) {

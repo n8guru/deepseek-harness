@@ -2,8 +2,8 @@
 
 exports[`renders lists and code normally with inline prose highlights 1`] = `
 "<div class="_root_8df7b1"><div class="_body_8df7b1"><div class="_markdown_404681"><p>Before</p>
-<p><strong><span class="_spoken_404681" data-spoken="true">Hello</span></strong><span class="_spoken_404681" data-spoken="true"> </span><a href="https://example.com" target="_blank" rel="noopener noreferrer"><span class="_spoken_404681" data-spoken="true">link</span></a></p>
-<ul><li><span class="_spoken_404681" data-spoken="true">first</span></li><li><span class="_spoken_404681" data-spoken="true">second</span></li></ul>
+<p><strong><span class="_spoken_404681" data-spoken="0">Hello</span></strong><span class="_spoken_404681" data-spoken="0"> </span><a href="https://example.com" target="_blank" rel="noopener noreferrer"><span class="_spoken_404681" data-spoken="0">link</span></a></p>
+<ul><li><span class="_spoken_404681" data-spoken="0">first</span></li><li><span class="_spoken_404681" data-spoken="0">second</span></li></ul>
 <p><code>code</code></p>
 <p>After <code>&lt;spoken&gt;</code></p></div></div></div>"
 `;

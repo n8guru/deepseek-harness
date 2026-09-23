@@ -34,7 +34,7 @@ function renderDocument(
   spoken?: MarkdownRenderContext['spoken'],
   streaming = false,
 ): ReactNode[] {
-  const root = streaming ? parseGfm(text) : parseGfmWithMath(text)
+  const root = streaming && !spoken ? parseGfm(text) : parseGfmWithMath(text)
   const targets = createReferenceTargets()
   collectReferenceTargets(root.children, targets)
   const context: MarkdownRenderContext = {

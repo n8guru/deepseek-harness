@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseSpokenSegments, projectSpokenMarkdown } from '../src/markdown/spoken.ts'
+import { spokenFixtures } from './spoken-fixtures.ts'
 
 const speech = (text: string) => parseSpokenSegments(text).filter(s => s.kind === 'spoken' && s.speechText).map(s => s.speechText)
 // Frozen legacy extraction: parity applies to bare prose, not the explicitly approved exclusions.
@@ -23,12 +24,15 @@ describe('unrelated quotes cannot suppress bare prose', () => {
   })
 })
 
+describe('shared parser acceptance (legacy bugs are not compatibility requirements)', () => {
+  it.each(spokenFixtures)('%s', (text, expected) => expect(speech(text)).toEqual(expected))
+})
+
 describe('bare-prose parity', () => {
   it.each([
     '', 'plain', '<spoken> x  y </spoken>', '<SPOKEN>UP</SPOKEN>',
     'before <spoken>one</spoken> after <spoken>two</spoken>', '<spoken> </spoken>',
     '<spoken>unfinished', '<spoken>hi</spo', '<spoken>outer <spoken>inner</spoken> tail</spoken>',
-    '<spoken>**bold** [link][r]</spoken>\n\n[r]: https://example.com',
     '<spoken>one\n\ntwo</spoken>', '<spoken>Don\'t stop. "Hello."</spoken>',
   ])('retains exact legacy output for %j', text => expect(speech(text)).toEqual(legacy(text)))
 })
@@ -82,7 +86,7 @@ describe('literal mentions and code exclusions', () => {
     const s = segments[1]!
     expect(s.start).toBe(9)
     expect(text.slice(s.contentStart, s.contentEnd)).toBe('**hi** `code`')
-    expect(s.speechText).toBe('**hi**')
+    expect(s.speechText).toBe('hi')
     expect(segments.map(part => text.slice(part.start, part.end)).join('')).toBe(text)
   })
 })
