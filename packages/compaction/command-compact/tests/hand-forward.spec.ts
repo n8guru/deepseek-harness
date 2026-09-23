@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import * as commandCompact from '../src/index.ts'
+import { atomicState, openAudit } from '../src/baton-audit.ts'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
@@ -181,6 +182,56 @@ it('records a compaction failure without queueing bootstrap', async () => {
   await vi.waitFor(async () => { expect(await h.audit()).toContain('failed') })
   expect(h.agent.inbox.hasPending).toBe(false)
   expect(h.adapter.requests).toHaveLength(0)
+})
+
+it.each(['compaction', 'bootstrap'] as const)('rejects a persisted takeover immediately before %s', async (boundary) => {
+  const h = await harness()
+  h.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'history '.repeat(150) }], source: { kind: 'user' } }))
+  await h.agent.whenIdle()
+  let auditDirectory = ''
+  const takeover = async (): Promise<void> => {
+    const root = join(h.directory, 'audit')
+    const [name] = await readdir(root)
+    auditDirectory = join(root, name!)
+    const path = join(auditDirectory, 'baton-state.json')
+    const state = JSON.parse(await readFile(path, 'utf8')) as Parameters<typeof atomicState>[1]
+    // Simulate a displaced owner's authoritative snapshot, bypassing the mutex
+    // only in this fixture. The audit regression also proves live takeover is refused.
+    await atomicState(path, {
+      ...state, owner_epoch: state.owner_epoch + 1,
+      records: [...state.records, { generation: 2, status: 'scheduled' }],
+      pending: { token: 'successor', since: Date.now(), owner_epoch: state.owner_epoch + 1 },
+    })
+  }
+  const idle = Promise.withResolvers<undefined>()
+  let held: Promise<undefined> | undefined
+  if (boundary === 'compaction') {
+    held = h.agent.runMaintenance(() => idle.promise)
+  } else {
+    h.compaction.mockImplementation(async (...args) => {
+      const result = await BasicCompactionEngine.prototype.compactNow.apply(h.compact, args)
+      await takeover()
+      return result
+    })
+  }
+  await h.call({ reason: 'fence fixture' })
+  if (boundary === 'compaction') {
+    await takeover()
+    idle.resolve(undefined)
+    await held
+  }
+  await vi.waitFor(async () => {
+    expect(auditDirectory).not.toBe('')
+    // ELOCKED until the failed operation has drained; then the successor's recent
+    // pending state refuses recovery without changing its generation.
+    await expect(openAudit(auditDirectory, 120000, (error) => { throw error })).rejects.toThrow('recovery age')
+  })
+  expect(h.compaction).toHaveBeenCalledTimes(boundary === 'compaction' ? 0 : 1)
+  expect(JSON.stringify(h.adapter.requests)).not.toContain('Baton generation start.')
+  const current = JSON.parse(await readFile(join(auditDirectory, 'baton-state.json'), 'utf8')) as Parameters<typeof atomicState>[1]
+  expect(current.owner_epoch).toBe(2)
+  expect(current.records.at(-1)?.generation).toBe(2)
+  expect(current.pending?.token).toBe('successor')
 })
 
 it('rejects unknown exact model capacity', async () => {

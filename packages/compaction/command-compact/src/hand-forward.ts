@@ -21,7 +21,7 @@ export interface HandForwardConfig {
   batonPath?: string
   /** Maximum baton bytes read and hashed; default one MiB. */
   maxBatonBytes?: number
-  /** Renewable lease expiry and interrupted-pending recovery age; default 120 seconds, minimum five seconds. */
+  /** Abandoned-pending recovery age; never expires a live owner's kernel lock. Default 120 seconds, minimum five seconds. */
   staleMs?: number
 }
 
@@ -83,8 +83,8 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
         if (pending.has(agent.id)) throw new Error('hand_forward already pending')
         pending.add(agent.id)
         let audit: Awaited<ReturnType<typeof openAudit>> | undefined
-        const leaseAbort = new AbortController()
-        const operationSignal = AbortSignal.any([shutdown.signal, leaseAbort.signal])
+        const fenceAbort = new AbortController()
+        const operationSignal = AbortSignal.any([shutdown.signal, fenceAbort.signal])
         let handedOff = false
         try {
           const baton = args.baton_path ?? defaultBaton
@@ -103,7 +103,7 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
           exec.signal.throwIfAborted()
           operationSignal.throwIfAborted()
           const directory = join(auditRoot, digest(agent.id))
-          const journal = await openAudit(directory, staleMs, (error) => { leaseAbort.abort(error) })
+          const journal = await openAudit(directory, staleMs, (error) => { fenceAbort.abort(error) })
           audit = journal
           const generation = journal.generation
           const record = {
@@ -128,6 +128,7 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
               })
               operationSignal.throwIfAborted()
               if (ctx.agents.get(agent.id) !== agent) throw new Error('agent is no longer live')
+              // Persisted fence reads happen under the kernel reservation, held across both effects.
               journal.assertOwner()
               await ctx.compaction.compactNow(agent, operationSignal)
               journal.assertOwner()

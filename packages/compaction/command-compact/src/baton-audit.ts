@@ -1,11 +1,13 @@
 /**
- * Atomic host audit snapshot: history and pending state share one rename.
+ * Atomic host audit snapshot, fenced by a kernel-backed SQLite writer reservation.
+ * The database is only a mutex; session storage and replay are unchanged.
  * @module @deepseek-ai/dsh-command-compact/baton-audit
  */
 import { randomUUID } from 'node:crypto'
-import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import lockfile from 'proper-lockfile'
+import { DatabaseSync } from 'node:sqlite'
 
 interface RecordEntry {
   generation: number
@@ -13,15 +15,16 @@ interface RecordEntry {
   [key: string]: unknown
 }
 interface State {
-  version: 1
+  version: 2
+  owner_epoch: number
   records: RecordEntry[]
-  pending: { token: string; since: number } | null
+  pending: { token: string; since: number; owner_epoch: number } | null
 }
 
 /**
- * Replace a snapshot only after its complete bytes reach disk; then sync the directory.
+ * Publish complete audit bytes. Production callers must hold the audit mutex throughout.
  * @param path - destination in the audit directory.
- * @param state - complete journal and pending state.
+ * @param state - complete journal, owner epoch and pending state.
  */
 export async function atomicState(path: string, state: State): Promise<void> {
   const temporary = path + '.' + randomUUID() + '.tmp'
@@ -41,85 +44,104 @@ export async function atomicState(path: string, state: State): Promise<void> {
   }
 }
 
+function parseState(raw: string): State {
+  const parsed = JSON.parse(raw) as Partial<State> & { version?: number }
+  if (Number(parsed.version) !== 2 || !Number.isSafeInteger(parsed.owner_epoch) || Number(parsed.owner_epoch) < 0
+    || !Array.isArray(parsed.records)
+    || parsed.records.some(record => !Number.isSafeInteger(record.generation) || record.generation < 1)
+    || (parsed.pending !== null && (typeof parsed.pending?.token !== 'string'
+      || !Number.isFinite(parsed.pending.since) || parsed.pending.owner_epoch !== parsed.owner_epoch))) {
+    throw new Error('invalid baton audit snapshot (expected fenced version 2)')
+  }
+  return parsed as State
+}
+
 /**
- * Acquire a renewable lease and open the audit; expired leases self-heal on the next caller.
- * @param directory - deployment-owned session audit directory.
- * @param staleMs - minimum five seconds; heartbeat keeps live owners from expiring.
- * @param compromised - cancels the owner if lease ownership is lost.
- * @returns exclusively owned journal operations and release.
+ * Reserve the audit resource until release. A delayed live owner is never age-displaced.
+ * @param directory - deployment-owned session audit directory on a local filesystem.
+ * @param staleMs - minimum age before abandoned pending work may be cleared.
+ * @param compromised - cancels the owner on a persisted epoch mismatch.
+ * @returns journal operations that compare the persisted epoch while holding the same writer reservation.
  */
 export async function openAudit(directory: string, staleMs: number, compromised: (error: Error) => void) {
   await mkdir(directory, { recursive: true, mode: 0o700 })
   const path = join(directory, 'baton-state.json')
-  let expiredLease = false
+  const mutex = new DatabaseSync(join(directory, 'baton-mutex.sqlite'))
+  let closed = false
+  let closing = false
   try {
-    expiredLease = Date.now() - (await stat(path + '.lock')).mtimeMs > staleMs
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    // BEGIN IMMEDIATE holds an OS-backed writer reservation even while JS is paused.
+    // No timer may steal it; a dead process releases it through the kernel.
+    mutex.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE')
+  } catch (cause) {
+    mutex.close()
+    throw Object.assign(new Error('hand_forward audit owner is live or ambiguous', { cause }), { code: 'ELOCKED' })
   }
-  let lost: Error | undefined
-  const release = await lockfile.lock(path, {
-    realpath: false, stale: staleMs, update: Math.max(1000, Math.floor(staleMs / 3)), retries: 0,
-    onCompromised(error) { lost = error; compromised(error) },
-  })
-  const assertOwner = (): void => { if (lost) throw lost }
-  let state: State = { version: 1, records: [], pending: null }
+  let operations = Promise.resolve()
+  let released: Promise<void> | undefined
+  const release = (): Promise<void> => {
+    if (released) return released
+    closing = true
+    released = operations.then(() => {
+      closed = true
+      try { mutex.exec('ROLLBACK') } finally { mutex.close() }
+    })
+    return released
+  }
   try {
-    let raw: string | undefined
-    try { raw = await readFile(path, 'utf8') } catch (error) {
+    let state: State = { version: 2, owner_epoch: 0, records: [], pending: null }
+    try { state = parseState(await readFile(path, 'utf8')) } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    }
-    if (raw !== undefined) {
-      const parsed = JSON.parse(raw) as Partial<State> & { version?: number }
-      if (Number(parsed.version) !== 1 || !Array.isArray(parsed.records)
-        || parsed.records.some(record => !Number.isSafeInteger(record.generation) || record.generation < 1)
-        || (parsed.pending !== null && (typeof parsed.pending?.token !== 'string' || !Number.isFinite(parsed.pending.since)))) {
-        throw new Error('invalid baton audit snapshot')
-      }
-      state = parsed as State
     }
     if (state.pending !== null) {
       const age = Date.now() - state.pending.since
       if (age < staleMs) throw new Error('hand_forward pending recovery age not reached')
-      const previousGeneration = state.records.at(-1)?.generation
-      if (previousGeneration === undefined) throw new Error('pending audit has no generation')
+      const generation = state.records.at(-1)?.generation
+      if (generation === undefined) throw new Error('pending audit has no generation')
       state = {
         ...state, pending: null,
         records: [...state.records, {
-          generation: previousGeneration, status: 'recovered', time: new Date().toISOString(),
-          reason: 'expired pending operation recovered after exclusive lease acquisition; not replayed',
-          previous_token: state.pending.token, age_ms: age,
+          generation, status: 'recovered', time: new Date().toISOString(),
+          reason: 'abandoned pending recovered under kernel writer reservation; not replayed',
+          previous_token: state.pending.token, previous_epoch: state.owner_epoch, age_ms: age,
         }],
       }
-      assertOwner()
-      await atomicState(path, state)
     }
-    if (expiredLease && state.records.at(-1)?.status !== 'recovered') {
-      state = {
-        ...state,
-        records: [...state.records, {
-          generation: Math.max(1, ...state.records.map(record => record.generation)),
-          status: 'recovered', time: new Date().toISOString(),
-          reason: 'expired lease observed before exclusive acquisition; no pending operation to replay',
-        }],
+    const epoch = state.owner_epoch + 1
+    if (!Number.isSafeInteger(epoch)) throw new Error('baton owner epoch exhausted')
+    state = { ...state, owner_epoch: epoch }
+    await atomicState(path, state)
+    const assertOwner = (): void => {
+      if (closed || closing) throw new Error('stale baton owner: audit reservation released')
+      const current = parseState(readFileSync(path, 'utf8'))
+      if (current.owner_epoch !== epoch) {
+        const error = new Error('stale baton owner epoch')
+        compromised(error)
+        throw error
       }
-      assertOwner()
-      await atomicState(path, state)
     }
     const generation = state.records.reduce((max, record) => Math.max(max, record.generation), 0) + 1
     const token = randomUUID()
     return {
       generation,
+      epoch,
       assertOwner,
-      async record(record: RecordEntry, pending: boolean): Promise<void> {
-        assertOwner()
-        const next: State = {
-          version: 1, records: [...state.records, record],
-          pending: pending ? { token, since: state.pending?.since ?? Date.now() } : null,
-        }
-        await atomicState(path, next)
-        assertOwner()
-        state = next
+      record(record: RecordEntry, pending: boolean): Promise<void> {
+        const operation = operations.then(async () => {
+          assertOwner()
+          // Re-read under the reservation: never publish a cached prior owner's history.
+          const current = parseState(readFileSync(path, 'utf8'))
+          if (record.generation !== generation) throw new Error('stale baton generation')
+          const next: State = {
+            version: 2, owner_epoch: epoch,
+            records: [...current.records, { ...record, owner_epoch: epoch }],
+            pending: pending ? { token, since: current.pending?.since ?? Date.now(), owner_epoch: epoch } : null,
+          }
+          await atomicState(path, next)
+        })
+        // Release drains both successful and failed publications before unlocking.
+        operations = operation.then(() => {}, () => {})
+        return operation
       },
       release,
     }

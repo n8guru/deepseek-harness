@@ -67,7 +67,7 @@ busy 结果有意限定在进程范围内：活动的未匹配标记会阻塞，
 
 工具等待整个 agent 空闲，再在同一 Agent/Session 上调用现有 `compactNow`。成功后（包括没有可压缩历史）仅排队一次普通下一轮提示：“Baton generation start. Read <baton_path> and Studio slug=conductor-relay, then give Nate one short state update.” 已有消息保持普通顺序；不优先处理 bootstrap，也不清空上下文。子任务路由、配置、重放不变。
 
-审计历史与 pending 状态共同保存在 `<DSH_HOME>/hand-forward/<sha256(session-id)>/baton-state.json`（默认 home 为 `~/.dsh`），部署可用 `auditDirectory` 覆盖。每次变更先写私有临时文件并 fsync，再原子 rename 并 fsync 目录，避免半条记录或不匹配的 pending 状态。记录含代号、会话、时间、provider/model、原始字节 SHA256、原因与状态。proper-lockfile 可续租锁排除竞争进程；`staleMs` 默认 120000、最小 5000。崩溃租约过期后，下次调用自动清理达到此期限的中断 pending，记录 recovered 原因而不重放。活跃所有者续租，检测到丢锁即中止。审计与会话 inbox 仍为独立事务，不承诺跨崩溃的 exactly-once；会话格式与重放不变。
+审计历史与 pending 状态共同保存在 `<DSH_HOME>/hand-forward/<sha256(session-id)>/baton-state.json`（默认 home 为 `~/.dsh`），部署可用 `auditDirectory` 覆盖。每次变更先写私有临时文件并 fsync，再原子 rename 并 fsync 目录，避免半条记录或不匹配的 pending 状态。记录含代号、会话、时间、provider/model、原始字节 SHA256、原因与状态。相邻 `baton-mutex.sqlite` 上的 node:sqlite BEGIN IMMEDIATE 写入预留贯穿整个操作（包括空闲等待与 rename），由内核排除竞争所有者；它不是会话存储。延迟或暂停的活跃所有者不会因时间到期被取代，进程死亡释放预留。版本 2 快照持久化单调递增的 owner_epoch，pending 与日志也携带该值。每次写入在预留内重新读取并比较 epoch，压缩及 bootstrap 前同样检查，比较与 rename 之间不能被正常继任者抢占。`staleMs` 默认 120000、最小 5000，仅限制已失主 pending 的恢复年龄；取得预留后才清理旧 pending，记录原因且不重放。未知或旧快照版本拒绝，不在线迁移。要求本地文件系统支持可靠 SQLite 锁；主机可能持锁时不得删除或替换 mutex 文件。审计与会话 inbox 仍为独立事务，不承诺跨崩溃的 exactly-once；会话格式与重放不变。
 
 没有按钮、计时器、不活跃策略或模型切换。bootstrap 消耗正常一轮；压缩可能调用摘要模型。失败写审计，不自动重试；压缩失败不排队 bootstrap，但入队后的失败可能仍已交付。文件之后可以变化，哈希仅标识接受时的版本。持续排队工作可能延后空闲。
 
