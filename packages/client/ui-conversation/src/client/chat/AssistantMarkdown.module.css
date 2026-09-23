@@ -11,6 +11,13 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.spoken {
+  border-inline-start: 2px solid var(--dsw-alias-label-tertiary);
+  padding-inline: 12px;
+  border-radius: 4px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .body {
   display: flex;
   flex-direction: column;

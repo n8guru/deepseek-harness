@@ -1,0 +1,7 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`hides only real markers and renders Markdown and code inside the highlighted body 1`] = `
+"<div class="_root_8df7b1"><div class="_body_8df7b1"><div class="_markdown_404681"><p>Before</p></div><div class="_spoken_8df7b1" data-spoken="true"><div class="_markdown_404681"><p><strong>Hello</strong> <a href="https://example.com" target="_blank" rel="noopener noreferrer">link</a></p>
+<ul><li>first</li><li>second</li></ul>
+<p><code>code</code></p></div></div><div class="_markdown_404681"><p>After <code>&lt;spoken&gt;</code></p></div></div></div>"
+`;
