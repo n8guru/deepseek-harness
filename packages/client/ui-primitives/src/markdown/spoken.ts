@@ -25,8 +25,8 @@ export interface SpokenRange {
  * Partition source around complete, case-insensitive bare prose pairs.
  * Code, quoted mentions, escaped tags, definitions and link destinations cannot
  * supply markers. Unclosed pairs stay literal; nested pairs retain first-close
- * behavior. Quoted mentions use paired straight or curly quotes; apostrophes
- * within words are not quotation delimiters.
+ * behavior. Quoted mentions require matching straight/curly quotes immediately
+ * around a marker token or complete inline pair, never arbitrary surrounding prose.
  * @param text - Raw assistant Markdown.
  * @returns Ordered segments covering the original source.
  */
@@ -56,10 +56,22 @@ export function parseSpokenSegments(text: string): SpokenSegment[] {
   }
   masked += text.slice(cursor)
   const quotes: SpokenRange[] = []
-  for (const match of masked.matchAll(/"(?:\\.|[^"\\])*"|“[^”]*”|‘[^’]*’|(?<!\w)'(?:\\.|[^'\\])*'(?!\w)/g)) {
+  // Quotes must directly wrap one marker token or one complete inline pair.
+  // Never pair arbitrary prose/URL/title quotes around intervening bare speech.
+  const quotePattern = new RegExp([
+    /"(?:<\/?spoken>|<spoken>[^"\r\n]*?<\/spoken>)"/,
+    /'(?:<\/?spoken>|<spoken>[^'\r\n]*?<\/spoken>)'/,
+    /“(?:<\/?spoken>|<spoken>[^”\r\n]*?<\/spoken>)”/,
+    /‘(?:<\/?spoken>|<spoken>[^’\r\n]*?<\/spoken>)’/,
+  ].map(pattern => pattern.source).join('|'), 'gi')
+  for (const match of masked.matchAll(quotePattern)) {
     const start = match.index
     const end = start + match[0].length
-    quotes.push({ start, end })
+    // Wrapper markers themselves must be prose, not URL/title data.
+    const firstMarkerEnd = start + 1 + (masked[start + 2] === '/' ? 9 : 8)
+    if (prose.some(range => start + 1 >= range.start && firstMarkerEnd <= range.end)) {
+      quotes.push({ start, end })
+    }
   }
   const segments: SpokenSegment[] = []
   let opening: number | undefined

@@ -21,6 +21,31 @@ it.each([false, true])('keeps inline prose, references and cross-boundary format
   expect(view.container.querySelectorAll('[data-spoken]')).toHaveLength(1)
   expect(view.container.querySelector('p > div')).toBeNull()
 })
+it.each([false, true])('does not pair URL/title/prose quotes across bare speech (streaming=%s)', (streaming) => {
+  const cases = [
+    '[a](https://example.com/") <spoken>yes</spoken> [b](https://example.com/")',
+    'It is 6" tall. <spoken>yes</spoken> The next is 8".',
+    "[a](https://example.com/'x) <spoken>yes</spoken> [b](https://example.com/'x)",
+    '[a](https://example.com "one") <spoken>yes</spoken> [b](https://example.com "two")',
+    "[a](https://example.com 'one\"') <spoken>yes</spoken> [b](https://example.com 'two\"')",
+    "Don't worry. <spoken>yes</spoken> It's fine.",
+    "James' book. <spoken>yes</spoken> Chris' pen.",
+    '"unrelated prose <spoken>yes</spoken> more prose"',
+    '"&lt;spoken&gt;" mention <spoken>yes</spoken> "&lt;/spoken&gt;"',
+    "[a][r] <spoken>yes</spoken> [b][s]\n\n[r]: https://example.com/'x \"one\"\n[s]: https://example.com/'x \"two\"",
+  ]
+  for (const text of cases) {
+    const view = show(text, streaming)
+    expect(view.container.querySelector('[data-spoken]')?.textContent).toBe('yes')
+    if (text === cases[0]) {
+      expect(Array.from(view.container.querySelectorAll('a'), a => a.getAttribute('href'))).toEqual([
+        'https://example.com/%22', 'https://example.com/%22',
+      ])
+    }
+    view.unmount()
+  }
+})
+
 it('preserves a link whose label spans a spoken boundary', () => {
   const view = show('[before <spoken>hello</spoken> after](https://example.com)')
   expect(view.container.querySelector('a')?.textContent).toBe('before hello after')

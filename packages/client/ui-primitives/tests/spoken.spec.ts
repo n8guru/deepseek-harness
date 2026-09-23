@@ -5,6 +5,24 @@ const speech = (text: string) => parseSpokenSegments(text).filter(s => s.kind ==
 // Frozen legacy extraction: parity applies to bare prose, not the explicitly approved exclusions.
 const legacy = (text: string) => Array.from(text.replace(/\x60\x60\x60[\s\S]*?(\x60\x60\x60|$)/g, ' ').replace(/\x60[^\x60\n]*\x60/g, ' ').matchAll(/<spoken>([\s\S]*?)<\/spoken>/gi), m => (m[1] ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean)
 
+describe('unrelated quotes cannot suppress bare prose', () => {
+  it.each([
+    '[a](https://example.com/") <spoken>yes</spoken> [b](https://example.com/")',
+    'It is 6" tall. <spoken>yes</spoken> The next is 8".',
+    "[a](https://example.com/'x) <spoken>yes</spoken> [b](https://example.com/'x)",
+    '[a](https://example.com "one") <spoken>yes</spoken> [b](https://example.com "two")',
+    "[a](https://example.com 'one\"') <spoken>yes</spoken> [b](https://example.com 'two\"')",
+    "Don't worry. <spoken>yes</spoken> It's fine.",
+    "James' book. <spoken>yes</spoken> Chris' pen.",
+    '"unrelated prose <spoken>yes</spoken> more prose"',
+    '"&lt;spoken&gt;" mention <spoken>yes</spoken> "&lt;/spoken&gt;"',
+    "[a][r] <spoken>yes</spoken> [b][s]\n\n[r]: https://example.com/'x \"one\"\n[s]: https://example.com/'x \"two\"",
+  ])('retains speech despite surrounding punctuation: %j', (text) => {
+    expect(legacy(text)).toEqual(['yes'])
+    expect(speech(text)).toEqual(['yes'])
+  })
+})
+
 describe('bare-prose parity', () => {
   it.each([
     '', 'plain', '<spoken> x  y </spoken>', '<SPOKEN>UP</SPOKEN>',
