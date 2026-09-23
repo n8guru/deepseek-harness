@@ -23,6 +23,12 @@ export interface HandForwardConfig {
   maxBatonBytes?: number
   /** Abandoned-pending recovery age; never expires a live owner's kernel lock. Default 120 seconds, minimum five seconds. */
   staleMs?: number
+  /** Maximum pre-compaction idle wait; default ten minutes. */
+  idleTimeoutMs?: number
+  /** Per-phase warning deadline, NOT a lock expiry; default five minutes. */
+  watchdogMs?: number
+  /** Maximum plugin teardown wait; unfinished effects retain their reservation. Default ten seconds. */
+  disposeTimeoutMs?: number
 }
 
 function digest(value: string | Uint8Array): string {
@@ -44,7 +50,13 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
   const staleMs = config.staleMs ?? 120000
   if (!Number.isFinite(staleMs) || staleMs < 5000) throw new Error('handForward.staleMs must be at least 5000')
   const pending = new Set<string>()
-  const active = new Set<Promise<void>>()
+  const idleTimeoutMs = config.idleTimeoutMs ?? 600000
+  const watchdogMs = config.watchdogMs ?? 300000
+  const disposeTimeoutMs = config.disposeTimeoutMs ?? 10000
+  for (const [name, value] of Object.entries({ idleTimeoutMs, watchdogMs, disposeTimeoutMs })) {
+    if (!Number.isSafeInteger(value) || value <= 0 || value > 2147483647) throw new Error(`handForward.${name} must be a positive timer duration`)
+  }
+  const active = new Map<Promise<void>, (message: string) => void>()
   const shutdown = new AbortController()
   const auditRoot = config.auditDirectory ?? join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'hand-forward')
   const defaultBaton = config.batonPath ?? '/home/n8/forge-agent-os/tools/CONDUCTOR-BATON.md'
@@ -52,7 +64,20 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
   ctx.effect(function* () {
     yield async () => {
       shutdown.abort(new Error('hand_forward plugin disposed'))
-      await Promise.allSettled(active)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          Promise.allSettled(active.keys()),
+          new Promise<void>((resolve) => {
+            timer = setTimeout(() => {
+              for (const notice of active.values()) notice('hand_forward disposal deadline exceeded: reservation retained; supervised host recovery required')
+              resolve()
+            }, disposeTimeoutMs)
+          }),
+        ])
+      } finally {
+        clearTimeout(timer)
+      }
     }
     yield ctx.tools.register(defineTool({
       name: 'hand_forward',
@@ -114,12 +139,42 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
           await journal.record({ ...record, status: 'scheduled' }, true)
           // Work begins on the next microtask and waits for the driver AND maintenance.
           // The tool result must settle so its owning turn can itself finish.
+          // Existing plugin-source transcript messages are visible without waking a turn.
+          // No new session event, storage format, or replay semantics are introduced.
+          const notice = (message: string): void => {
+            ctx.logger.error('%s (session=%s generation=%s)', message, agent.id, generation)
+            try {
+              journal.assertOwner()
+              agent.session.append('user/message', createUserMessage({
+                content: [{ type: 'text', text: message }],
+                source: { kind: 'plugin', plugin: 'hand-forward' },
+              }), { surfaceOp: 'append' })
+            } catch (error) {
+              ctx.logger.error('hand_forward notice delivery failed: %s', error)
+            }
+          }
+          let watchdog: ReturnType<typeof setTimeout> | undefined
+          const watch = (phase: string): void => {
+            clearTimeout(watchdog)
+            watchdog = setTimeout(() => {
+              const message = `hand_forward watchdog: ${phase} exceeded ${watchdogMs}ms; reservation retained; supervised host recovery required`
+              notice(message)
+              void journal.record({ ...record, time: new Date().toISOString(), status: 'watchdog', phase, reason: message }, true)
+                .catch((error: unknown) => { ctx.logger.error('hand_forward watchdog audit failed: %s', error) })
+            }, watchdogMs)
+          }
+          const idleExpired = new Error('hand_forward abandoned: session never idle')
+          const idleDeadline = Date.now() + idleTimeoutMs
           const work = (async () => {
             try {
               await new Promise<void>((resolve, reject) => {
-                const abort = (): void => { reject(new Error('hand_forward scheduling cancelled')) }
+                const timer = setTimeout(() => { cleanup(); reject(idleExpired) }, idleTimeoutMs)
+                const cleanup = (): void => {
+                  clearTimeout(timer)
+                  operationSignal.removeEventListener('abort', abort)
+                }
+                const abort = (): void => { cleanup(); reject(new Error('hand_forward scheduling cancelled')) }
                 operationSignal.addEventListener('abort', abort, { once: true })
-                const cleanup = (): void => { operationSignal.removeEventListener('abort', abort) }
                 void agent.whenIdle().then(() => { cleanup(); resolve() }, (error: unknown) => {
                   cleanup()
                   reject(error instanceof Error ? error : new Error(String(error)))
@@ -127,26 +182,36 @@ export function installHandForward(ctx: Context, config: HandForwardConfig): voi
                 if (operationSignal.aborted) abort()
               })
               operationSignal.throwIfAborted()
+              if (Date.now() >= idleDeadline) throw idleExpired
               if (ctx.agents.get(agent.id) !== agent) throw new Error('agent is no longer live')
               // Persisted fence reads happen under the kernel reservation, held across both effects.
               journal.assertOwner()
+              watch('compaction')
               await ctx.compaction.compactNow(agent, operationSignal)
               journal.assertOwner()
               operationSignal.throwIfAborted()
+              watch('bootstrap')
               agent.followup(createUserMessage({
                 content: [{ type: 'text', text: `Baton generation start. Read ${target.displayPath} and Studio slug=conductor-relay, then give Nate one short state update.` }],
                 source: { kind: 'plugin', plugin: 'hand-forward' },
               }))
               await ctx.sessions.flush(agent.session)
-              await journal.record({ ...record, time: new Date().toISOString(), status: 'bootstrap-queued' }, false)
+              await journal.record({ ...record, time: new Date().toISOString(), status: 'bootstrap-queued' }, true)
+              // Include the bootstrap turn (and any coalesced work), not just enqueue/flush.
+              await agent.whenIdle()
+              clearTimeout(watchdog)
+              await journal.record({ ...record, time: new Date().toISOString(), status: 'completed' }, false)
             } catch (error) {
-              await journal.record({ ...record, time: new Date().toISOString(), status: 'failed', error: String(error) }, false)
+              clearTimeout(watchdog)
+              if (error === idleExpired) notice(idleExpired.message)
+              await journal.record({ ...record, time: new Date().toISOString(), status: error === idleExpired ? 'abandoned' : 'failed', error: String(error) }, false)
             } finally {
+              clearTimeout(watchdog)
               pending.delete(agent.id)
               await journal.release()
             }
           })()
-          active.add(work)
+          active.set(work, notice)
           void work.then(() => active.delete(work), (error: unknown) => {
             active.delete(work)
             ctx.logger.error('hand_forward audit/cleanup failed: %s', error)

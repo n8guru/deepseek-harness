@@ -69,7 +69,9 @@ busy 结果有意限定在进程范围内：活动的未匹配标记会阻塞，
 
 审计历史与 pending 状态共同保存在 `<DSH_HOME>/hand-forward/<sha256(session-id)>/baton-state.json`（默认 home 为 `~/.dsh`），部署可用 `auditDirectory` 覆盖。每次变更先写私有临时文件并 fsync，再原子 rename 并 fsync 目录，避免半条记录或不匹配的 pending 状态。记录含代号、会话、时间、provider/model、原始字节 SHA256、原因与状态。相邻 `baton-mutex.sqlite` 上的 node:sqlite BEGIN IMMEDIATE 写入预留贯穿整个操作（包括空闲等待与 rename），由内核排除竞争所有者；它不是会话存储。延迟或暂停的活跃所有者不会因时间到期被取代，进程死亡释放预留。版本 2 快照持久化单调递增的 owner_epoch，pending 与日志也携带该值。每次写入在预留内重新读取并比较 epoch，压缩及 bootstrap 前同样检查，比较与 rename 之间不能被正常继任者抢占。`staleMs` 默认 120000、最小 5000，仅限制已失主 pending 的恢复年龄；取得预留后才清理旧 pending，记录原因且不重放。未知或旧快照版本拒绝，不在线迁移。要求本地文件系统支持可靠 SQLite 锁；主机可能持锁时不得删除或替换 mutex 文件。审计与会话 inbox 仍为独立事务，不承诺跨崩溃的 exactly-once；会话格式与重放不变。
 
-没有按钮、计时器、不活跃策略或模型切换。bootstrap 消耗正常一轮；压缩可能调用摘要模型。失败写审计，不自动重试；压缩失败不排队 bootstrap，但入队后的失败可能仍已交付。文件之后可以变化，哈希仅标识接受时的版本。持续排队工作可能延后空闲。
+没有按钮、自动交接节奏计时器、不活跃策略或模型切换。bootstrap 消耗正常一轮；压缩可能调用摘要模型。失败写审计，不自动重试；压缩失败不排队 bootstrap，但入队后的失败可能仍已交付。文件之后可以变化，哈希仅标识接受时的版本。`idleTimeoutMs` 默认 600000，限制已排期的空闲等待；到期记录 abandoned，显示插件来源通知 `hand_forward abandoned: session never idle`（不唤醒轮次），审计写入结束后释放预留，迟到的空闲回调不能压缩。`watchdogMs` 默认 300000，对压缩和 bootstrap 阶段分别告警一次；bootstrap 包括等待整个 agent 恢复空闲。日志、审计和可见通知共同告警，绝不因超时解除运行中副作用的锁。`disposeTimeoutMs` 默认 10000，限制本插件的销毁等待；协作中止未完成时告警并返回，但保留预留。三个时长必须是 Node 计时器范围内的正安全整数毫秒。通知使用现有插件来源消息，会进入模型上下文，不改变事件格式或重放语义。计时器需要事件循环运行；进行中的文件写入不能因超时解锁。
+
+监督恢复：在外部停止新任务接纳，记录确切主机、会话、审计路径、epoch、generation 与阶段。取得操作员明确授权后通过现有 supervisor 重启该 DSH 主机，并确认旧 PID 已退出；其他会话可能中断。不得删除 mutex 或手改 pending。重启后检查快照及会话压缩/bootstrap 事件，在新预留下达到 staleMs 才能放弃中断的 pending。确认下次 epoch 严格递增、旧 generation 全部保留；不盲目重放可能已交付的 bootstrap。这里只限制本插件处置，其他插件仍可能阻塞根级关闭。
 
 ## 已知限制与暂缓事项
 

@@ -35,7 +35,7 @@ class Compact extends BasicCompactionEngine {
   }
 }
 
-async function harness() {
+async function harness(config: import('../src/hand-forward.ts').HandForwardConfig = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'hand-forward-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const baton = join(directory, 'baton.md')
@@ -71,7 +71,7 @@ async function harness() {
   const compaction = vi.spyOn(compact, 'compactNow')
   const auditDirectory = join(directory, 'audit')
   await ctx.plugin(CommandRuntime)
-  await ctx.plugin(commandCompact, { handForward: { auditDirectory, batonPath: baton } })
+  const plugin = await ctx.plugin(commandCompact, { handForward: { auditDirectory, batonPath: baton, ...config } })
   const agent = ctx.agentLoop.create(SessionId('same-parent'), { provider: 'mock', model: 'exact' }, { cwd: directory })
   const workspace = await ctx.workspaceRegistry.create(directory)
   await workspace.attachSession(agent.id)
@@ -86,7 +86,7 @@ async function harness() {
     const state = JSON.parse(await readFile(join(auditDirectory, name!, 'baton-state.json'), 'utf8')) as { records: object[] }
     return state.records.map(record => JSON.stringify(record)).join('\n')
   }
-  return { ctx, agent, adapter, compact, compaction, call, audit, baton, workspace, directory }
+  return { ctx, agent, adapter, compact, compaction, call, audit, baton, workspace, directory, plugin }
 }
 
 it('defers a real mid-turn tool, compacts same session at idle, and queues bootstrap once', async () => {
@@ -173,6 +173,85 @@ it('refuses a concurrent second call while the first waits for idle', async () =
   release.resolve(undefined)
   await held
   await vi.waitFor(async () => { expect(await h.audit()).toContain('bootstrap-queued') })
+})
+
+it('abandons a bounded idle wait and allows a successor without compacting late', async () => {
+  const h = await harness({ idleTimeoutMs: 30 })
+  const release = Promise.withResolvers<undefined>()
+  const held = h.agent.runMaintenance(() => release.promise)
+  try {
+    expect((await h.call({ reason: 'never idle' })).isError).not.toBe(true)
+    await vi.waitFor(async () => { expect(await h.audit()).toContain('"status":"abandoned"') })
+    expect(JSON.stringify(h.agent.session.events)).toContain('hand_forward abandoned: session never idle')
+    expect(h.compaction).not.toHaveBeenCalled()
+    const root = join(h.directory, 'audit')
+    const [name] = await readdir(root)
+    await vi.waitFor(async () => {
+      const next = await openAudit(join(root, name!), 120000, () => {})
+      await next.release()
+    })
+    const successor = await h.call({ reason: 'successor' })
+    expect(successor.isError).not.toBe(true)
+    expect(JSON.stringify(successor)).toContain('"generation":2')
+    release.resolve(undefined)
+    await held
+    await vi.waitFor(async () => { expect(await h.audit()).toContain('"status":"completed"') })
+    expect(h.compaction).toHaveBeenCalledTimes(1)
+  } finally {
+    release.resolve(undefined)
+    await held
+  }
+})
+
+it('warns on hung compaction, bounds disposal, and retains the kernel reservation', async () => {
+  const h = await harness({ watchdogMs: 25, disposeTimeoutMs: 25 })
+  const finish = Promise.withResolvers<null>()
+  h.compaction.mockImplementation(() => finish.promise)
+  try {
+    await h.call({ reason: 'hung compaction' })
+    await vi.waitFor(async () => { expect(await h.audit()).toContain('"status":"watchdog"') })
+    expect(JSON.stringify(h.agent.session.events)).toContain('hand_forward watchdog: compaction')
+    expect(JSON.stringify(h.adapter.requests)).not.toContain('Baton generation start.')
+    const root = join(h.directory, 'audit')
+    const [name] = await readdir(root)
+    const directory = join(root, name!)
+    await expect(openAudit(directory, 120000, () => {})).rejects.toMatchObject({ code: 'ELOCKED' })
+    expect((await h.call({ reason: 'duplicate' })).isError).toBe(true)
+    await h.plugin.dispose()
+    expect(JSON.stringify(h.agent.session.events)).toContain('disposal deadline exceeded')
+    await expect(openAudit(directory, 120000, () => {})).rejects.toMatchObject({ code: 'ELOCKED' })
+    finish.resolve(null)
+    await vi.waitFor(async () => {
+      const next = await openAudit(directory, 120000, () => {})
+      await next.release()
+    })
+    expect(JSON.stringify(h.adapter.requests)).not.toContain('Baton generation start.')
+  } finally {
+    finish.resolve(null)
+  }
+})
+
+it('watches the bootstrap turn until idle without expiring ownership', async () => {
+  const h = await harness({ watchdogMs: 25 })
+  const started = Promise.withResolvers<undefined>()
+  const finish = Promise.withResolvers<undefined>()
+  h.compaction.mockResolvedValue(null)
+  vi.spyOn(h.adapter, 'stream').mockImplementation(async function* () {
+    started.resolve(undefined)
+    await finish.promise
+    yield* textResponse('fixture bootstrap finished')
+  })
+  try {
+    await h.call({ reason: 'slow bootstrap' })
+    await started.promise
+    await vi.waitFor(async () => { expect(await h.audit()).toContain('"phase":"bootstrap"') })
+    expect(JSON.stringify(h.agent.session.events)).toContain('hand_forward watchdog: bootstrap')
+    expect((await h.call({ reason: 'duplicate' })).isError).toBe(true)
+  } finally {
+    finish.resolve(undefined)
+    await h.agent.whenIdle()
+  }
+  await vi.waitFor(async () => { expect(await h.audit()).toContain('"status":"completed"') })
 })
 
 it('records a compaction failure without queueing bootstrap', async () => {
