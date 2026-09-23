@@ -73,6 +73,28 @@ The agent chooses cadence; no button, cadence timer, inactivity policy or model 
 
 Supervised recovery: stop new admission externally; identify the exact owning DSH host and record session ID, audit path, epoch/generation and watchdog phase. With explicit operator authorization (other sessions may be interrupted), restart that host using its existing supervisor and confirm the old PID has exited. Never unlink the mutex or clear pending manually. Inspect the atomic snapshot and session compaction/bootstrap events after restart; interrupted pending work may be abandoned only after `staleMs` under a newly acquired reservation. Verify the next epoch strictly increases and all old generation records survive. Do not blindly replay a bootstrap that may already have been delivered. Root shutdown can still wait on other plugins; the bounded guarantee here is this plugin's disposal only.
 
+## Opt-in context nudge
+
+Set `config.contextNudge: {}` on this plugin only in the intended conductor composition, with `systemPrompt` and `sessionProjections` available. No shipped composition enables it. The plugin registers one dynamic prompt-context entry (`compaction:context-nudge`) that runs on every pre-step assembly for the composed scope and contributes at most one short line:
+
+- below `warnPct` (default 25): nothing — zero tokens, no notice;
+- at or above `warnPct`: `context 26% — look for a natural break; hand_forward at 30%`;
+- at or above `actPct` (default 30): `context 31% — call hand_forward at the end of this turn (baton: tools/CONDUCTOR-BATON.md)`;
+- 40 turns (`maxTurnsWithoutForward`) without a `hand_forward` call: a staleness line naming the turn count;
+- an idle gap before the current turn longer than 90 minutes (`idleGapMs`): `resuming after idle; re-read baton state first`.
+
+Pressure is `pressureTokens / contextWindow` from the host's own `contextPressure` projection — the same source the Web client reads — never a recount. Turn position, forwarding staleness, and the idle gap fold from committed session events only. The nudge never compacts and never calls `hand_forward`; `handForward` (above) remains the only actor. All thresholds are validated config fields: `warnPct`, `actPct`, `maxTurnsWithoutForward`, `idleGapMs`, and `batonPath`.
+
+Conductor opt-in (preset or profile patch layer; replaces the row's whole config):
+
+```yaml
+- id: command-compact
+  name: '@deepseek-ai/dsh-command-compact'
+  config:
+    handForward: {}
+    contextNudge: {}
+```
+
 ## Known Limitations and Deferred Work
 
 - **Idle-only** — `/compact` reports `busy` when a turn or already accepted waking prompt has right of way; the command itself is not queued.

@@ -7,11 +7,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { installHandForward, type HandForwardConfig } from './hand-forward.ts'
+import { installContextNudge, type ContextNudgeConfig } from './context-nudge.ts'
 
 /** Optional agent-callable self-compaction; absent keeps the human-only composition. */
 export interface Config {
   /** Explicit opt-in; mount only in the intended conductor scope. */
   handForward?: HandForwardConfig
+  /** Quiet per-turn context nudge; absent keeps every other session silent. Mount only in the intended conductor scope. */
+  contextNudge?: ContextNudgeConfig
 }
 
 export const name = 'command-compact'
@@ -94,6 +97,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     ctx.inject(['tools', 'agents', 'sessions', 'llm', 'tokenMeter', 'fs'], (scope) => {
       installHandForward(scope, handForward)
     })
+  }
+  const contextNudge = config.contextNudge
+  if (contextNudge !== undefined) {
+    installContextNudge(ctx, contextNudge)
   }
   const active = new Set<Promise<CommandResult>>()
   const handler = (invocation: CommandInvocation): Promise<CommandResult> => {

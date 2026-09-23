@@ -73,6 +73,28 @@ busy 结果有意限定在进程范围内：活动的未匹配标记会阻塞，
 
 监督恢复：在外部停止新任务接纳，记录确切主机、会话、审计路径、epoch、generation 与阶段。取得操作员明确授权后通过现有 supervisor 重启该 DSH 主机，并确认旧 PID 已退出；其他会话可能中断。不得删除 mutex 或手改 pending。重启后检查快照及会话压缩/bootstrap 事件，在新预留下达到 staleMs 才能放弃中断的 pending。确认下次 epoch 严格递增、旧 generation 全部保留；不盲目重放可能已交付的 bootstrap。这里只限制本插件处置，其他插件仍可能阻塞根级关闭。
 
+## 可选 context nudge
+
+仅在目标 conductor 的组合中设置 `config.contextNudge: {}`，并提供 `systemPrompt` 与 `sessionProjections`。默认组合不启用。插件注册一个动态 prompt-context 条目（`compaction:context-nudge`），在作用域内每轮预装配时运行，最多贡献一行短提示：
+
+- 低于 `warnPct`（默认 25）：无任何输出——零 token、无提示；
+- 达到 `warnPct`：`context 26% — look for a natural break; hand_forward at 30%`；
+- 达到 `actPct`（默认 30）：`context 31% — call hand_forward at the end of this turn (baton: tools/CONDUCTOR-BATON.md)`；
+- 40 轮（`maxTurnsWithoutForward`）未调用 `hand_forward`：提示轮次数的陈旧行；
+- 本轮之前空闲超过 90 分钟（`idleGapMs`）：`resuming after idle; re-read baton state first`。
+
+压力取自主机的 `contextPressure` 投影（`pressureTokens / contextWindow`，与 Web 客户端同源），不自行重算。轮次位置、交接陈旧度与空闲间隔只读已提交会话事件。提示绝不压缩、绝不调用 `hand_forward`；唯一的执行者仍是上面的 `handForward`。全部阈值均为校验配置项：`warnPct`、`actPct`、`maxTurnsWithoutForward`、`idleGapMs`、`batonPath`。
+
+Conductor 启用方式（preset 或 profile 补丁层，会整体替换该行配置）：
+
+```yaml
+- id: command-compact
+  name: '@deepseek-ai/dsh-command-compact'
+  config:
+    handForward: {}
+    contextNudge: {}
+```
+
 ## 已知限制与暂缓事项
 
 - **仅限空闲状态**：当一个轮次或已获接纳的唤醒提示词拥有优先权时，`/compact` 会报告 `busy`；命令本身不会排队。
