@@ -32,7 +32,7 @@ it('invariant: every fixture has exactly the same spoken and highlighted strings
       }
       walk(view.container)
       const highlighted = [...values.values()].map(normalize).filter(Boolean)
-      expect(new Set(highlighted), reason + ' streaming=' + streaming).toEqual(new Set(speech))
+      expect(highlighted, reason + ' streaming=' + streaming).toEqual(speech)
       expect(view.container.querySelector('script, img[onerror]'), reason).toBeNull()
       view.unmount()
     }

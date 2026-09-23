@@ -21,6 +21,7 @@ import type { Key, ReactNode } from 'react'
 import type * as Md from 'mdast'
 import type {} from 'mdast-util-math'
 import { spokenTextParts } from './spoken.ts'
+import { renderedTableCellCount } from './table.ts'
 import type { SpokenRange } from './spoken.ts'
 import { normalizeUri } from 'micromark-util-sanitize-uri'
 import { CodeBlock } from './CodeBlock.tsx'
@@ -428,7 +429,7 @@ function renderTableRow(
 ): ReactNode {
   // With column alignment present, every row renders exactly one cell per
   // column, padding or truncating the row (mdast-util-to-hast parity).
-  const length = align === null ? row.children.length : align.length
+  const length = renderedTableCellCount(row, align)
   const cells: ReactNode[] = []
   for (let index = 0; index < length; index++) {
     const cell = row.children[index]

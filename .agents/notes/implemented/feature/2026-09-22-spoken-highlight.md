@@ -1,6 +1,6 @@
 # Agent Note: Shared spoken text and inline highlighting
 
-Status: revised after review 3; not activated
+Status: revised after review 4; not activated
 
 ## Shared authority
 
@@ -24,6 +24,6 @@ Raw HTML leaves remain React text, never HTML elements. They now pass through th
 
 ## Proof and delivery
 
-One invariant test loops the shared acceptance corpus in streaming and settled modes, compares explicit expected speech, then compares the set of actual DOM-highlight strings grouped by speech region with the set of speech strings. The corpus includes legacy bugs, bracket wrappers, HTML-ish blocks, Markdown formatting/references, code, quotes, streaming partials and multiple regions. Actual live/staged voice clients additionally document intended old/new differences.
+One invariant test loops the shared acceptance corpus in streaming and settled modes, compares explicit expected speech, then compares ordered arrays of actual DOM-highlight strings grouped by speech region with speech strings, preserving order and multiplicity. Review 4 adds overflow/short table rows, repeated regions and multiline bracket wrappers. Speech and rendering use one shared renderedTableCellCount rule; invisible overflow cells never speak. Bracket wrappers exclude pairs across LF and CRLF lines. The corpus includes legacy bugs, bracket wrappers, HTML-ish blocks, Markdown formatting/references, code, quotes, streaming partials and multiple regions. Actual live/staged voice clients additionally document intended old/new differences.
 
 The out-of-tree runtime candidate still delegates to the parser; its bytes and live runtime remain unchanged. Build ui-primitives, ui-conversation and the web shell together. Fresh review, actual-browser theme/audio checks and coordinated deployment remain required. Old-shell tabs must drain/reload before staged voice activation. No activation, restart or push is authorized here.

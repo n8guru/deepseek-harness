@@ -5,6 +5,7 @@ import { fromMarkdown } from 'mdast-util-from-markdown'
 import type { Root, RootContent, Text, Html } from 'mdast'
 import { decodeString } from 'micromark-util-decode-string'
 import { parseGfmWithMath } from './parse.ts'
+import { renderedTableCellCount } from './table.ts'
 
 /** Half-open UTF-16 source offsets; content excludes markers only for spoken segments. */
 export interface SpokenSegment {
@@ -59,7 +60,7 @@ function recognizeSpokenSegments(text: string): SpokenSegment[] {
   masked += text.slice(cursor)
   const quotes: SpokenRange[] = []
   // Literal bracket wrappers include a single marker and a complete marked pair.
-  for (const match of masked.matchAll(/\[(?:<\/?spoken>|<spoken>[^\r\n]*?<\/spoken>)\]/gi)) {
+  for (const match of masked.matchAll(/\[(?:<\/?spoken>|<spoken>[\s\S]*?<\/spoken>)\]/gi)) {
     quotes.push({ start: match.index, end: match.index + match[0].length })
   }
   // Quotes must directly wrap one marker token or one complete inline pair.
@@ -180,6 +181,10 @@ export function parseSpokenSegments(text: string): SpokenSegment[] {
     if (node.type === 'text' || node.type === 'html') {
       for (const part of spokenTextParts(node, projection)) {
         if (part.region !== null) values[part.region] += part.text
+      }
+    } else if (node.type === 'table') {
+      for (const row of node.children) {
+        for (const cell of row.children.slice(0, renderedTableCellCount(row, node.align ?? null))) visit(cell)
       }
     } else if ('children' in node) {
       for (const child of node.children) visit(child)

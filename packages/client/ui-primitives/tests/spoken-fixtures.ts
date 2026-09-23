@@ -1,5 +1,11 @@
 // Shared acceptance corpus: expected displayed speech, not legacy regex output.
 export const spokenFixtures: readonly (readonly [string, readonly string[], string])[] = [
+  ['[<spoken>one\ntwo</spoken>]', [], 'multiline bracket wrapper'],
+  ['[<spoken>one\r\ntwo</spoken>]', [], 'CRLF bracket wrapper'],
+  ['<spoken>| a | b |\n|---|---|\n| c | d | hidden |\n</spoken>', ['a b c d'], 'overflow table cells omitted'],
+  ['<spoken>| a | b |\n|---|---|\n| c |\n</spoken>', ['a b c'], 'short table rows padded silently'],
+  ['<spoken>one</spoken> <spoken>two</spoken> <spoken>one</spoken>', ['one', 'two', 'one'], 'ordered repeated regions'],
+
   [
     '[a](https://example.com/```) <spoken>yes</spoken>',
     [
