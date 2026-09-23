@@ -6,6 +6,13 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
+import { installHandForward, type HandForwardConfig } from './hand-forward.ts'
+
+/** Optional agent-callable self-compaction; absent keeps the human-only composition. */
+export interface Config {
+  /** Explicit opt-in; mount only in the intended conductor scope. */
+  handForward?: HandForwardConfig
+}
 
 export const name = 'command-compact'
 export const inject = ['commands', 'compaction']
@@ -81,7 +88,13 @@ async function executeCompact(
  * Register `/compact` for every composed human-command adapter.
  * @param ctx - context carrying the command registry and the compaction seam.
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config = {}): void {
+  const handForward = config.handForward
+  if (handForward !== undefined) {
+    ctx.inject(['tools', 'agents', 'sessions', 'llm', 'tokenMeter', 'fs'], (scope) => {
+      installHandForward(scope, handForward)
+    })
+  }
   const active = new Set<Promise<CommandResult>>()
   const handler = (invocation: CommandInvocation): Promise<CommandResult> => {
     const operation = executeCompact(ctx, invocation)

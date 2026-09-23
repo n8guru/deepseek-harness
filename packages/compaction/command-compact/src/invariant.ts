@@ -15,8 +15,9 @@ export const name = 'command-compact-invariant'
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: this command adapter owns no state or event stream; the compaction seam owns
- * the balanced durable transaction and the command registry owns registration and dispatch lifecycle.
+ * No runtime invariant: the compaction seam owns balanced durable transactions and the command
+ * registry owns command lifecycle. Optional hand-forward audit state is host-local, not a session
+ * projection; checking tool metadata would not establish audit-to-inbox atomicity.
  */
 const install: InvariantInstaller = () => {}
 

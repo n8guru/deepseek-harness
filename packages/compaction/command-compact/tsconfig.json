@@ -8,6 +8,9 @@
     "src"
   ],
   "references": [
+    { "path": "../../core/tools" },
+    { "path": "../../llm/token-meter" },
+    { "path": "../../fs/fs" },
     {
       "path": "../../../vendor/cosmokit"
     },

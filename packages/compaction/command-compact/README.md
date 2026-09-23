@@ -59,6 +59,18 @@ The command lifecycle adds no model tokens. A successful compaction reduces late
 
 Discovery and command bookkeeping do not affect the cache. The accepted surface replacement invalidates reuse from the first shadowed history token.
 
+## Opt-in hand_forward tool
+
+Set `config.handForward: {}` on this plugin only in the intended conductor composition, with `tools`, `agents`, `sessions`, `llm`, `tokenMeter`, and `fs` available. No shipped composition enables it. The generic-rendered tool accepts `{ reason, baton_path? }`; `batonPath` config defaults to `/home/n8/forge-agent-os/tools/CONDUCTOR-BATON.md`. `maxBatonBytes` defaults to one MiB. Missing, nonregular, empty, invalid UTF-8, oversized batons and duplicate pending calls are refused.
+
+The tool returns `{ scheduled: true, generation, at_context_pct, context_tokens, context_capacity, provider, model }` after validation and audit, without waiting for compaction. Percentage uses tokenMeter request pressure and the exact logged request model's resolved capacity (agent options before a request); it is an estimate, not billing or an automatic threshold. Unknown capacity and concurrent route changes refuse scheduling.
+
+At whole-agent idle, the existing `compactNow` reserves maintenance on the same Agent and Session. Successful compaction, including no compactable history, queues exactly one ordinary next-turn prompt: “Baton generation start. Read <baton_path> and Studio slug=conductor-relay, then give Nate one short state update.” Existing pending input retains ordinary ordering; this is not a bootstrap-priority queue or a fresh empty context. Child routing, configuration and replay are unchanged.
+
+Audit records live in `<DSH_HOME>/hand-forward/<sha256(session-id)>/baton-generations.jsonl` (default home `~/.dsh`), overridable only by deployment `auditDirectory`. This host-owned location survives conversation compaction without extending session storage/replay. Each fsynced record includes generation, session, timestamp, provider/model, original-byte baton SHA256 and reason, plus scheduled/bootstrap-queued/failed status. A per-session exclusive lock rejects competing processes. A crash leaves the lock for manual inspection; scheduling is not replayed, and bootstrap exactly-once across crashes is not promised. Never delete a lock until its owning host has stopped and session/audit evidence has been reconciled.
+
+The agent chooses cadence; no button, timer, inactivity policy or model switch is installed. The bootstrap costs one normal turn and compaction may cost a summarization request. Failures are recorded in the audit, not retried. Compaction failure never queues bootstrap; a failure after enqueue may leave that prompt delivered. Baton contents can change after acceptance; the hash identifies the version accepted, not a frozen copy. Continuous queued activity can postpone whole-agent idle.
+
 ## Known Limitations and Deferred Work
 
 - **Idle-only** — `/compact` reports `busy` when a turn or already accepted waking prompt has right of way; the command itself is not queued.

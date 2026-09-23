@@ -59,6 +59,18 @@ busy 结果有意限定在进程范围内：活动的未匹配标记会阻塞，
 
 命令发现与簿记不会影响缓存。已获接纳的 surface 替换会从第一个被遮蔽的历史 token 起使复用失效。
 
+## 可选 hand_forward 工具
+
+仅在目标 conductor 的组合中设置 `config.handForward: {}`，并提供 `tools`、`agents`、`sessions`、`llm`、`tokenMeter` 和 `fs`。默认组合不启用该工具。参数为 `{ reason, baton_path? }`；配置 `batonPath` 默认为 `/home/n8/forge-agent-os/tools/CONDUCTOR-BATON.md`，`maxBatonBytes` 默认为一 MiB。缺失、非普通文件、空白、非法 UTF-8、超限文件以及重复待执行调用均被拒绝。
+
+验证与审计完成后立即返回 `{ scheduled: true, generation, at_context_pct, context_tokens, context_capacity, provider, model }`，不等待压缩。百分比来自 tokenMeter 请求压力与日志中准确模型的容量（尚无请求时使用 agent options），不是累计计费。容量未知或测量期间模型变化时拒绝。
+
+工具等待整个 agent 空闲，再在同一 Agent/Session 上调用现有 `compactNow`。成功后（包括没有可压缩历史）仅排队一次普通下一轮提示：“Baton generation start. Read <baton_path> and Studio slug=conductor-relay, then give Nate one short state update.” 已有消息保持普通顺序；不优先处理 bootstrap，也不清空上下文。子任务路由、配置、重放不变。
+
+审计保存在 `<DSH_HOME>/hand-forward/<sha256(session-id)>/baton-generations.jsonl`（默认 home 为 `~/.dsh`），部署可用 `auditDirectory` 覆盖。主机拥有的日志独立于会话重放，压缩不删除它。fsync 记录包含代号、会话、时间、provider/model、原始字节 SHA256、原因以及 scheduled/bootstrap-queued/failed 状态。排他锁拒绝其他进程；崩溃后保留锁供人工核查，不重放计划，也不承诺跨崩溃的 exactly-once。仅在所属主机停止且审计与会话状态核对后才能删除锁。
+
+没有按钮、计时器、不活跃策略或模型切换。bootstrap 消耗正常一轮；压缩可能调用摘要模型。失败写审计，不自动重试；压缩失败不排队 bootstrap，但入队后的失败可能仍已交付。文件之后可以变化，哈希仅标识接受时的版本。持续排队工作可能延后空闲。
+
 ## 已知限制与暂缓事项
 
 - **仅限空闲状态**：当一个轮次或已获接纳的唤醒提示词拥有优先权时，`/compact` 会报告 `busy`；命令本身不会排队。
