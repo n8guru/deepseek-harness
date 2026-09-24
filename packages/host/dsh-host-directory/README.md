@@ -36,6 +36,7 @@ Mount alongside `plugin-inventory`, before the API gateway:
       - machine: n8razer
         authority: 100.102.77.86:3080
         sessionCookie: 'dsh-auth-<hash>=<signed-value>'   # see below
+        pollPendingInput: false   # optional; see "Pending-input classification" below
 ```
 
 `peers`, `pollIntervalMs`, and `machine` are ordinary `.volatile()` Config
@@ -82,6 +83,33 @@ An absent or expired `sessionCookie` fails closed and visibly: the peer's row
 in `list()` reports `status: { state: 'unreachable', message: '...' }`
 naming the cause (missing cookie vs. `401`/`403`) — it is never silently
 skipped, and no session for that peer is ever fabricated or guessed.
+
+### Pending-input classification (`pollPendingInput`, dsh-mesh-session-view step 6)
+
+Set `peers[].pollPendingInput: true` to also classify each of that peer's
+sessions' most recent UNRESOLVED human-input request — an open
+`ask_user_question` tool call with no answer yet, or an open
+`approval/asked` with no `approval/decided` yet — and publish it as
+`DshHostRemoteSession.pendingInput`. This is what lets a consumer render
+"waiting on a question/approval — answer on owning host" instead of a dead
+control, matching the read-only notice `app/session_inspector.py` (Hub
+side) already renders from the same event vocabulary.
+
+It costs one extra `POST /api/session.history` per session per poll tick —
+the SAME wire endpoint and envelope the Hub's `read_host_history` already
+calls, not a new route — so it is **off by default**: R2's original
+`session/list`-only poll shape is unchanged unless an operator opts a peer
+in. A session with nothing pending simply has no `pendingInput` key at all
+(never `pendingInput: undefined` on the wire). A failed per-session read
+(timeout, transient error) silently omits that one session's classification
+for the tick; it never marks the whole peer `unreachable` — `session/list`
+already succeeded for that peer this tick, and one history read hiccup
+should not hide every session on it.
+
+This is read-only observation, same as the rest of this package: nothing
+here answers, decides, or steers a peer session. See
+`packages/client/ui-peer-sessions/README.md` for how a Client-side consumer
+is expected to render `pendingInput` (deep-link only, never a form control).
 
 ## Understand the implementation
 
@@ -135,3 +163,5 @@ None; this package never assembles model input.
 - **No push, only poll** — a session started/ended on a peer is reflected within one `pollIntervalMs` window on this Host, never instantly; pushing via `host/remote-event` would need a core allowlist entry the review flagged as out of scope for a plugin.
 - **Cookie rotation is manual** — if a peer's operator revokes its `client-connection/browser-session` credential record, every configured cookie for that peer goes stale simultaneously and must be re-bootstrapped by hand; there is no automatic re-exchange (the launch token is one-shot and only printed at peer process start).
 - **No write path** — this package never opens, steers, or answers a peer's session; that is out of scope for R2 and belongs to the deep-link (row 4) and allow-remote-steer (row 5) steps.
+- **Pending-input classification is opt-in and best-effort** — `pollPendingInput` reads only the most recent page of a session's history (`maxMessages: 20`); a question/approval buried deeper than that page (unusual — it would mean the session kept working after asking, which the classifier by definition would already see as answered) is not detected. It also does not currently expose the same `summary` truncation/sanitization the Hub applies; a consumer publishing this to an untrusted surface should still bound the text it displays.
+- **The Mac Host cannot be polled at all yet** — its `dsh web` binds `127.0.0.1` only and has no `--trusted-host` tailnet authority (`dsh-fleet-health/RESULT.md` compatibility matrix, confirmed again for this step). Adding a `peers` entry for the Mac to any Host's config today would just poll a loopback address that Host cannot reach — configuring the Mac as a peer here requires, in order: (1) the Mac's `dsh web` launch config (launchd plist) gains `--trusted-host <mac-tailnet-authority>:3080`, matching forge/n8razer/droplet's existing pattern; (2) the Mac Host stops binding loopback-only and exposes that trusted authority, the same `tailscale serve` fronting pattern already live on the other three hosts; (3) a Mac Host restart to pick up both — gated the same as every other restart in this project, through the drain, in a window Nate OKs. This is a **host config + restart change, not a code change in this package**, and is not applied by dsh-mesh-session-view step 6 — see `/home/n8/forge-agent-os/tools/fleet-fix/results/dmsv-6.md` and dmsv-2's RESULT.md deploy item 4 for the exact steps. Once done, the Mac becomes an ordinary `peers` entry like any other.
