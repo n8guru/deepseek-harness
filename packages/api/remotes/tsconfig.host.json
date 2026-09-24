@@ -78,6 +78,9 @@
       "path": "../../boot/plugin-manager"
     },
     {
+      "path": "../../host/dsh-host-directory"
+    },
+    {
       "path": "../../host/plugin-inventory"
     },
     {
