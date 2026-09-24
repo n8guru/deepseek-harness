@@ -40,6 +40,9 @@
       "path": "../../feedback/message-feedback"
     },
     {
+      "path": "../../host/dsh-host-directory"
+    },
+    {
       "path": "../../host/plugin-inventory"
     },
     {
