@@ -56,8 +56,11 @@ describe('DshHostDirectoryService', () => {
       expect(init?.method).toBe('POST')
       const headers = init?.headers as Record<string, string>
       expect(headers.cookie).toBe('dsh-auth-abc=signed-value')
-      const body = JSON.parse(init?.body as string) as { method: string; type: string }
+      const body = JSON.parse(init?.body as string) as { method: string; type: string; payload: unknown }
       expect(body).toMatchObject({ type: 'client-request', method: 'session/list' })
+      // 0.1.7 Typert gateway contract, verified live against a staged
+      // dsh 0.1.7-rc.1 Host: exactly one `args` object keyed by parameter name.
+      expect(body.payload).toEqual({ args: { _request: {} } })
       return new Response(JSON.stringify({
         type: 'server-response',
         rpcId: 'x',

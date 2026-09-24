@@ -251,7 +251,11 @@ export class DshHostDirectoryService extends TypertRemoteService {
           type: 'client-request',
           rpcId: randomUUID(),
           method: 'session/list',
-          payload: {},
+          // Typert Remote HTTP envelope (0.1.7): the payload carries exactly one
+          // `args` object keyed by the method's parameter names; session/list's
+          // sole parameter is the reserved empty `_request`. A bare `{}` is
+          // rejected by the gateway ("exactly one plain-object args field").
+          payload: { args: { _request: {} } },
         }),
         signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
       })
