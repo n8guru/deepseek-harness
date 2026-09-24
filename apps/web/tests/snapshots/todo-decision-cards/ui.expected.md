@@ -31,14 +31,28 @@
   - img
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
-- status:
-  - text: "This turn failedweb e2e scaffold: a model call was issued by a scenario that declared no replay fixture — pass replayFixture, or keep the scenario free of model calls"
-  - code: UNKNOWN
+- button "Think The user is asking for a one-sentence description of event sourcing. This is a straightforward knowledge question that doesn't require any skill loading or tool calls.":
+  - img
+  - img
+  - text: Think The user is asking for a one-sentence description of event sourcing. This is a straightforward knowledge question that doesn't require any skill loading or tool calls.
+- paragraph: Event sourcing is a pattern where all changes to an application's state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.
+- button "Copy":
+  - img
+- button "Good response":
+  - img
+- button "Bad response":
+  - img
+- button "Branch into a new conversation":
+  - img
+- text: {{clock}} Ran for {{duration}} TTFT {{duration}} {{throughput}} tok/s
 - region "To-dos":
-  - button "To-dos" [expanded]
+  - button "To-dos 2 pending" [expanded]
   - paragraph: Nate
-  - paragraph: No open items
-  - list
+  - list:
+    - listitem:
+      - 'button "Foundry: authorize the Amy sheet-to-rig shape spike (local Hunyuan3D-2mv shape guide vs current G9 fit, one leased 5090, local nude-reference test, no export)? A yes / B no / C yes + TRELLIS.2 comparator"'
+    - listitem:
+      - 'button "Grove charter: set promo duration to 30–{{duration}} with success = ''conveys the idea of what Grove is'' (edit needs your browser login; agents can only read)."'
   - paragraph: Cadence
   - paragraph: No open items
   - list
@@ -49,5 +63,6 @@
 - button "Select model, current DeepSeek-V4-Flash":
   - text: DeepSeek-V4-Flash
   - img
+- button "6% of context used"
 - button "Send message" [disabled]
-- text: 2 turns · 2 steps LLM {{duration}}
+- text: 2 turns · 2 steps LLM {{duration}} TTFT avg {{duration}} · {{throughput}} tok/s Cache hit 99% Input 7.8K tok · Output 79 tok

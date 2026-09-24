@@ -1,16 +1,19 @@
 // Web e2e scenario for mesh-dsh-merge step 52 (always-visible to-dos and
 // inline decision cards): boots the REAL shipped Web composition (built
-// dist, real chromium, real HTTP/SSE wire) with zero model calls, seeds one
-// session whose assistant turn emits a fenced ```decision-card block plus a
+// dist, real chromium, real HTTP/SSE wire) with one keyless replayed model
+// response after the card click. It seeds a session whose assistant turn emits a fenced ```decision-card block plus a
 // `todo/write` event, and drives the actual rendered DOM: the pinned Cadence
 // todo strip appears expanded by default with status rows, the decision card
 // renders exactly one highlighted recommendation, and clicking an option
 // sends a normal tagged user message that locks the card on durable replay
 // (page reload re-renders from the persisted log, not client memory).
 import { fileURLToPath } from 'node:url'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
 import { createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-title'
@@ -30,6 +33,11 @@ const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/todo-decision-cards', im
 const UI_EXPECTED = fileURLToPath(new URL('./snapshots/todo-decision-cards/ui.expected.md', import.meta.url))
 const MODE = webSnapshotMode()
 const SEED_ID = 'todo-decision-cards-web-e2e'
+// Two source rows copied from tools/nate-todo.json; committed so CI is hermetic.
+const NATE_SOURCE = join(SNAPSHOT_DIR, 'nate-todo.source.json')
+const DIST_NATE = fileURLToPath(new URL('../dist/local/nate-todo.json', import.meta.url))
+const REPLAY_FIXTURE = fileURLToPath(new URL('./snapshots/live-interactions/session.jsonl', import.meta.url))
+const EVIDENCE_DIR = process.env.STEP52_EVIDENCE_DIR
 
 const CARD_ID = 'ship-gate'
 const CARD_JSON = JSON.stringify({
@@ -103,9 +111,26 @@ describe('web e2e: pinned to-dos and inline decision cards', () => {
   let browser: Browser
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
+  let fixtureDir: string
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({})
+    // The source list currently has no open rows. Exercise the real feed shape
+    // with two reopened rows in a temp COPY; never mutate Nate's source file.
+    fixtureDir = await mkdtemp(join(tmpdir(), 'dsh-step52-todos-'))
+    const fixturePath = join(fixtureDir, 'nate-todo.json')
+    await copyFile(NATE_SOURCE, fixturePath)
+    const feed = JSON.parse(await readFile(fixturePath, 'utf8')) as {
+      items: { id: string; status: string; answer?: string; closed_at?: string }[]
+    }
+    for (const item of feed.items.filter(row => row.id === 'nate-8' || row.id === 'nate-9')) {
+      item.status = 'open'
+      delete item.answer
+      delete item.closed_at
+    }
+    await writeFile(fixturePath, JSON.stringify(feed, null, 2))
+    await mkdir(dirname(DIST_NATE), { recursive: true })
+    await copyFile(fixturePath, DIST_NATE)
+    scaffold = await launchWebScaffold({ replayFixture: REPLAY_FIXTURE })
     await seedSession(scaffold, seedFixture(), SEED_ID)
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
@@ -117,6 +142,8 @@ describe('web e2e: pinned to-dos and inline decision cards', () => {
   afterAll(async () => {
     await browser?.close()
     await scaffold?.close()
+    await rm(DIST_NATE, { force: true })
+    await rm(fixtureDir, { recursive: true, force: true })
   })
 
   it.skipIf(MODE === 'record')('renders the pinned Cadence todo strip and an inline decision card, then locks it on a tagged reply', async () => {
@@ -131,11 +158,13 @@ describe('web e2e: pinned to-dos and inline decision cards', () => {
     // Pinned Cadence todo strip: default-open, status rows visible without a click.
     const panel = page.locator('[data-testid="todo-panel"]')
     await panel.waitFor({ timeout: 15_000 })
-    await expect.poll(() => panel.locator('li').count(), { timeout: 10_000 }).toBe(3)
+    await expect.poll(() => panel.locator('li').count(), { timeout: 10_000 }).toBe(5)
     const statuses = await panel.locator('li').evaluateAll(
       nodes => nodes.map(node => node.getAttribute('data-status')),
     )
-    expect(statuses).toEqual(['completed', 'in_progress', 'pending'])
+    expect(statuses).toEqual(['pending', 'pending', 'completed', 'in_progress', 'pending'])
+    const nateRows = panel.locator('li').filter({ has: page.locator('button') })
+    await expect.poll(() => nateRows.count()).toBe(2)
 
     // Inline decision card: exactly one highlighted recommendation, malformed
     // fence never leaks as raw text.
@@ -145,6 +174,33 @@ describe('web e2e: pinned to-dos and inline decision cards', () => {
     expect(await recommended.getAttribute('data-recommended')).toBe('true')
     const discuss = page.getByRole('button', { name: 'Discuss' })
     expect(await discuss.getAttribute('data-recommended')).not.toBe('true')
+    if (EVIDENCE_DIR !== undefined) {
+      await mkdir(EVIDENCE_DIR, { recursive: true })
+      await page.screenshot({ path: join(EVIDENCE_DIR, 'step52-populated.png'), fullPage: true })
+    }
+
+    // An explanation is an actual actionable host-open control, not plain text.
+    const openPath = vi.spyOn(scaffold.ctx.apiProxy.host, 'openPath')
+      .mockImplementation(async request => ({ rpcId: request.rpcId, result: { ok: true, value: { opened: true as const } } }))
+    try {
+      const explanation = nateRows.first().locator('button')
+      await explanation.click()
+      await expect.poll(() => openPath.mock.calls.length).toBe(1)
+      expect(openPath.mock.calls[0]![0].payload.path).toContain('tools/foundry-3d/RESEARCH.md')
+    } finally { openPath.mockRestore() }
+
+    // The real /embed boot graph, not a resized desktop route, must retain both
+    // populated lists and the recommendation at a phone-width viewport.
+    const phone = await newEnglishPage(browser)
+    await phone.setViewportSize({ width: 390, height: 844 })
+    try {
+      await phone.goto(`${scaffold.baseUrl}/embed?session=${SEED_ID}`, { waitUntil: 'load' })
+      await expect.poll(() => phone.locator('[data-testid="todo-panel"] li').count(), { timeout: 15_000 }).toBe(5)
+      await expect.poll(() => phone.locator('[data-testid="decision-card"] [data-recommended="true"]').count()).toBe(1)
+      expect(await phone.evaluate(() => document.documentElement.dataset.dshSurface)).toBe('embed')
+      expect(await phone.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+      if (EVIDENCE_DIR !== undefined) await phone.screenshot({ path: join(EVIDENCE_DIR, 'step52-phone.png'), fullPage: true })
+    } finally { await phone.close() }
 
     // Clicking sends a normal tagged user message through the composer path
     // (not an authenticated Studio operator approval) and the card locks.
@@ -168,6 +224,6 @@ describe('web e2e: pinned to-dos and inline decision cards', () => {
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
-    await assertFixtureInventory(SNAPSHOT_DIR, ['ui.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, ['nate-todo.source.json', 'ui.expected.md'])
   }, 90_000)
 })

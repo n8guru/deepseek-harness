@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "id": "nate-8",
+      "opened": "2026-09-24",
+      "question": "Foundry: authorize the Amy sheet-to-rig shape spike (local Hunyuan3D-2mv shape guide vs current G9 fit, one leased 5090, local nude-reference test, no export)? A yes / B no / C yes + TRELLIS.2 comparator",
+      "explained_at": "tools/foundry-3d/RESEARCH.md#one-proposed-spike-step--do-not-mint",
+      "status": "closed",
+      "answer": "A: Amy shape spike with local Hunyuan3D-2mv only",
+      "closed_at": "2026-09-24"
+    },
+    {
+      "id": "nate-9",
+      "opened": "2026-09-24",
+      "question": "Grove charter: set promo duration to 30–120s with success = 'conveys the idea of what Grove is' (edit needs your browser login; agents can only read).",
+      "explained_at": "tools/grove-status/MINTED.md",
+      "status": "closed",
+      "answer": "yes",
+      "closed_at": "2026-09-24T22:14:50+00:00",
+      "answered_via": "nate-todo-form"
+    }
+  ]
+}
