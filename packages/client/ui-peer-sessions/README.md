@@ -35,6 +35,21 @@ stack already uses (`AGENTS.md` "Stores" rule) — it does not construct a
 second `createDshPeerSessionsStore()` and does not poll `ctx.remote` a
 second time.
 
+### `pendingInput` (dsh-mesh-session-view step 6)
+
+When a peer's `dsh-host-directory` has `pollPendingInput` enabled for it,
+some `snapshot.sessions[]` rows may carry a read-only `pendingInput: {
+kind: 'question' | 'approval', toolName?, summary? }` — that session's
+most recent unresolved `ask_user_question` or `approval/asked`, passed
+through verbatim from the Host's snapshot; this package computes nothing
+about it. A future consumer (step 4's sidebar rows, or any other read-only
+surface reading this store) should render a plain notice naming the owning
+host plus a deep link the operator opens themselves — matching
+`app/session_inspector.py` / `hub-session-inspector.js`'s Hub-side pattern —
+**never** a form control that answers, decides, or steers from here. This
+package/store owns no write path into any peer session (R2/R6 invariant),
+and `pendingInput` does not change that.
+
 ## Understand the implementation
 
 <details>
