@@ -1,0 +1,53 @@
+- banner:
+  - navigation "Session hierarchy":
+    - button "Pinned to-dos and decision card" [disabled]
+  - button "Session log":
+    - text: Session log
+    - img
+  - tablist:
+    - tab "Chat" [selected]
+    - tab "Trajectory"
+- text: Show the pinned to-dos and a ship decision card. {{clock}}
+- button "Copy":
+  - img
+- paragraph: Both lists are pinned and visible below.
+- region "Ship the pinned to-dos and decision cards now?":
+  - paragraph: Ship the pinned to-dos and decision cards now?
+  - button "Approve Recommended" [disabled]
+  - button "Discuss" [disabled]
+  - paragraph: "Answered: Approve"
+- button "Copy":
+  - img
+- button "Good response":
+  - img
+- button "Bad response":
+  - img
+- button "Branch into a new conversation":
+  - img
+- text: {{clock}} Ran for {{duration}} [decision-card ship-gate] Approve {{clock}}
+- button "Copy":
+  - img
+- button "Context injection @deepseek-ai/dsh-system-prompt":
+  - img
+  - img
+  - text: Context injection @deepseek-ai/dsh-system-prompt
+- status:
+  - text: "This turn failedweb e2e scaffold: a model call was issued by a scenario that declared no replay fixture — pass replayFixture, or keep the scenario free of model calls"
+  - code: UNKNOWN
+- region "To-dos":
+  - button "To-dos" [expanded]
+  - paragraph: Nate
+  - paragraph: No open items
+  - list
+  - paragraph: Cadence
+  - paragraph: No open items
+  - list
+- textbox "Message the agent"
+- button "Commands":
+  - img
+- 'button "Access mode, current: Workspace Write"': Workspace Write
+- button "Select model, current DeepSeek-V4-Flash":
+  - text: DeepSeek-V4-Flash
+  - img
+- button "Send message" [disabled]
+- text: 2 turns · 2 steps LLM {{duration}}
