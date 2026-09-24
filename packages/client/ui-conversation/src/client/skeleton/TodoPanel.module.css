@@ -34,6 +34,59 @@
      styles/scrollbar.css for the rebinding contract). */
   --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+  animation: todo-dock-slide-in 180ms ease-out;
+}
+
+/* Narrow viewports: the dock slides in from the right edge and gives up its
+   side clearance, so the compact header row still fits beside the composer. */
+@media (max-width: 720px) {
+  .root {
+    width: 100%;
+    max-width: none;
+    animation-name: todo-dock-slide-in-right;
+  }
+
+  .list {
+    max-height: 120px;
+  }
+}
+
+@keyframes todo-dock-slide-in {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+}
+
+@keyframes todo-dock-slide-in-right {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    animation: none;
+  }
+}
+
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.sectionLabel {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .body {
@@ -96,8 +149,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 180px;
-  overflow-y: auto;
 }
 
 .item {
@@ -143,4 +194,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+button.content {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }

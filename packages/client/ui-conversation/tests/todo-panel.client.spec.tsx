@@ -36,18 +36,19 @@ const PARALLEL: TodoItem[] = [
 ]
 
 describe('TodoPanel', () => {
-  it('renders nothing while the list is empty', () => {
-    const { container } = render(<TodoPanel todos={[]} t={t} />)
-    expect(container.innerHTML).toBe('')
+  it('keeps both sections visible while the list is empty', () => {
+    render(<TodoPanel todos={[]} t={t} />)
+    expect(screen.getByText('Nate')).toBeTruthy()
+    expect(screen.getByText('Cadence')).toBeTruthy()
   })
 
-  it('starts collapsed with the per-status count summary visible', () => {
+  it('starts expanded with the per-status count summary visible', () => {
     render(<TodoPanel todos={LIST} t={t} />)
     expect(screen.getByTestId('todo-panel')).toBeTruthy()
     expect(screen.getByText('任务')).toBeTruthy()
     expect(screen.getByText('1 已完成 · 1 进行中 · 1 待处理')).toBeTruthy()
-    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
-    expect(screen.queryByRole('list')).toBeNull()
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(screen.getAllByRole('list')).toHaveLength(2)
   })
 
   it('omits the completed segment while nothing is done yet', () => {
@@ -61,7 +62,6 @@ describe('TodoPanel', () => {
 
   it('expands to show one row per item with its status glyph', () => {
     render(<TodoPanel todos={LIST} t={t} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     const items = screen.getAllByRole('listitem')
     expect(items.map(li => li.getAttribute('data-status'))).toEqual(['completed', 'in_progress', 'pending'])
     expect(screen.getByText('搭骨架')).toBeTruthy()
@@ -72,7 +72,6 @@ describe('TodoPanel', () => {
 
   it('collapse hides an expanded list; expand restores; header keeps the count summary', () => {
     render(<TodoPanel todos={LIST} t={t} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     const header = screen.getByRole('button', { expanded: true })
     fireEvent.click(header)
     expect(screen.queryByRole('list')).toBeNull()
@@ -85,7 +84,6 @@ describe('TodoPanel', () => {
 
   it('marks every parallel active item, and counts them all in the header', () => {
     render(<TodoPanel todos={PARALLEL} t={t} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
     // An unconditional in-progress cap would make this list unreachable: three
     // items carry the in-progress glyph at once, and the header counts all three.
     const statuses = screen.getAllByRole('listitem').map(li => li.getAttribute('data-status'))
@@ -97,8 +95,8 @@ describe('TodoPanel', () => {
 
   it('an all-completed list collapses the summary to the done count alone', () => {
     render(<TodoPanel todos={[{ content: '都完了', status: 'completed' }]} t={t} />)
-    expect(screen.getByRole('button', { expanded: false })).toBeTruthy()
-    expect(screen.queryByText('都完了')).toBeNull()
+    expect(screen.getByRole('button', { expanded: true })).toBeTruthy()
+    expect(screen.getByText('都完了')).toBeTruthy()
     expect(screen.getByText('1 已完成')).toBeTruthy()
     expect(screen.queryByText(/进行中|待处理/)).toBeNull()
   })
@@ -116,21 +114,21 @@ describe('TodoDock', () => {
     const store = createSnapshotStore<{ value: readonly TodoItem[] | null | undefined }>({ value: undefined })
     render(<TodoDock {...dockProps(store)} />)
     // Capability absent (no baseline/frame yet) renders nothing.
-    expect(screen.queryByTestId('todo-panel')).toBeNull()
+    expect(screen.getByTestId('todo-panel')).toBeTruthy()
     act(() => { store.set({ value: LIST }) })
     expect(screen.getByText('1 已完成 · 1 进行中 · 1 待处理')).toBeTruthy()
     // The pre-first-write whole value (null) retires the strip (the panel owns no data).
     act(() => { store.set({ value: null }) })
-    expect(screen.queryByTestId('todo-panel')).toBeNull()
+    expect(screen.getByTestId('todo-panel')).toBeTruthy()
   })
 
   it('registers before the goal and queue entries', () => {
     expect(todoDockEntry.name).toBe('conversation-todo-dock')
-    expect(todoDockEntry.inject).toEqual(['slots'])
+    expect(todoDockEntry.inject).toEqual(['slots', 'sessions', 'workspaces'])
     const register = vi.fn(() => () => undefined)
     const inject = vi.fn((_name: string, callback: () => () => void) => callback())
     todoDockEntry.apply({ slots: { inject, register } } as never)
     expect(inject).toHaveBeenCalledWith('conversation.input.dock', expect.any(Function))
-    expect(register).toHaveBeenCalledWith({ name: 'conversation.input.dock', id: 'todo', order: 0, locale: NS }, TodoDock)
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ name: 'conversation.input.dock', id: 'todo', order: 0, locale: NS }), TodoDock)
   })
 })

@@ -5,8 +5,9 @@
 // dock adapter does the selecting, so the panel takes the plain list and stays
 // framework-free. Visual: figma 772:51905 / 772:52972 / 772:53419.
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
+import { resolveWorkspacePath, type SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // The domain's client-namespace pure-type outlet: one import edge delivers
 // the `todos` projection-key merge (single source, no consumer-side restated
@@ -17,9 +18,66 @@ import { IconChecklistOutline14, IconChevronDownOutline14, IconChevronUpOutline1
 import { NS } from '../locales.ts'
 import css from './TodoPanel.module.css'
 
+/** Static operator feed polled by {@link useNateTodos}; see apps/web/public/local/nate-todo.json. */
+export const NATE_TODO_URL = '/local/nate-todo.json'
+
+/** Operator item, including the file reference needed to inspect the premise. */
+export interface NateTodoItem extends TodoItem {
+  readonly id: string
+  readonly explained_at: string
+}
+
+/**
+ * Coerce the operator feed into plan items.
+ * @param data - parsed JSON: `{ items: [...] }` or a bare array.
+ * @returns well-formed items; anything unrecognized is dropped, not thrown.
+ */
+export function readNateTodos(data: unknown): readonly NateTodoItem[] {
+  const raw = Array.isArray(data) ? data : (data as { items?: unknown } | null)?.items
+  if (!Array.isArray(raw)) return []
+  const items: NateTodoItem[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const { id, question, explained_at, status } = entry as Record<string, unknown>
+    if (status !== 'open' || typeof id !== 'string' || typeof question !== 'string'
+      || typeof explained_at !== 'string' || question.length > 1000) continue
+    items.push({ id, content: question, explained_at, status: 'pending' })
+  }
+  return items
+}
+
+/**
+ * Nate's standing list, polled from a static JSON asset.
+ * ponytail: polling a public file is the whole transport; move to a projection
+ * key (like `todos`) once the host actually owns this list.
+ * @param url - feed location.
+ * @param intervalMs - poll period.
+ * @returns the latest items ([] before the first response, and on any failure).
+ */
+export function useNateTodos(url: string = NATE_TODO_URL, intervalMs = 60_000): readonly NateTodoItem[] {
+  const [items, setItems] = useState<readonly NateTodoItem[]>([])
+  useEffect(() => {
+    let alive = true
+    const load = () => {
+      void fetch(url, { cache: 'no-store' })
+        .then(response => response.ok ? response.json() : null)
+        .then((data) => { if (alive && data !== null) setItems(readNateTodos(data)) })
+        .catch(() => { /* offline or no feed: the section simply stays empty */ })
+    }
+    load()
+    const timer = setInterval(load, intervalMs)
+    return () => { alive = false; clearInterval(timer) }
+  }, [url, intervalMs])
+  return items
+}
+
 export interface TodoPanelProps {
   /** The session's current plan (empty renders nothing) — selected by the dock adapter. */
   todos: readonly TodoItem[]
+  /** Nate's standing list; rendered as its own labelled section above the session plan. */
+  nate?: readonly NateTodoItem[] | undefined
+  /** Open the item's explanation through the host workspace path service. */
+  onOpenFile?: ((path: string) => void) | undefined
   /** The dock entry's locale seat, passed down as a plain prop. */
   t: TodoDockProps['t']
 }
@@ -92,10 +150,32 @@ function progressLabel(todos: readonly TodoItem[], t: TodoPanelProps['t']): stri
   ].join('\u2002·\u2002')
 }
 
-export function TodoPanel({ todos, t }: TodoPanelProps) {
-  const [collapsed, setCollapsed] = useState(true)
-  if (todos.length === 0) return null
+/** One labelled list section; the label is omitted while only the session plan exists. */
+function TodoSection({ label, items, onOpenFile }: {
+  label?: string | undefined
+  items: readonly TodoItem[]
+  onOpenFile?: ((path: string) => void) | undefined
+}) {
+  return (
+    <>
+      {label !== undefined && <p className={css.sectionLabel}>{label}</p>}
+      {items.length === 0 && <p className={css.sectionLabel}>No open items</p>}
+      <ul className={css.list}>
+        {items.map(item => (
+          <li key={item.content} className={css.item} data-status={item.status}>
+            <span className={css.glyph} aria-hidden><StatusGlyph status={item.status} /></span>
+            {'explained_at' in item && typeof item.explained_at === 'string'
+              ? <button type="button" className={css.content} onClick={() => { onOpenFile?.(item.explained_at as string) }}>{item.content}</button>
+              : <span className={css.content}>{item.content}</span>}
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
 
+export function TodoPanel({ todos, nate = [], onOpenFile, t }: TodoPanelProps) {
+  const [collapsed, setCollapsed] = useState(false)
   return (
     <section className={css.root} data-testid="todo-panel" aria-label={t('todo.title')}>
       <div className={css.body}>
@@ -107,20 +187,16 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
         >
           <span className={css.lead} aria-hidden><IconChecklistOutline14 /></span>
           <span className={css.title}>{t('todo.title')}</span>
-          <span className={css.progress}>{progressLabel(todos, t)}</span>
+          <span className={css.progress}>{progressLabel([...nate, ...todos], t)}</span>
           <span className={css.chevron} aria-hidden>
             {collapsed ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}
           </span>
         </button>
         {!collapsed && (
-          <ul className={css.list}>
-            {todos.map(item => (
-              <li key={item.content} className={css.item} data-status={item.status}>
-                <span className={css.glyph} aria-hidden><StatusGlyph status={item.status} /></span>
-                <span className={css.content}>{item.content}</span>
-              </li>
-            ))}
-          </ul>
+          <div className={css.sections}>
+            <TodoSection label={t('todo.section.nate')} items={nate} onOpenFile={onOpenFile} />
+            <TodoSection label={t('todo.section.cadence')} items={todos} />
+          </div>
         )}
       </div>
     </section>
@@ -129,11 +205,13 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
 
 /** Full props of a dock entry: InputZone owner share + session standard kit + global seat + the locale seat. */
 export type TodoDockProps = PropsRuntime<'conversation.input.dock'> & PropsLocale<'conversation'>
+  & { openFile: (path: string) => void }
 
-/** Dock adapter: reads the host-computed 'todos' projection (whole list; absent or null renders nothing). */
-export function TodoDock({ useProjection, t }: TodoDockProps) {
+/** Dock adapter: host-computed 'todos' projection for Cadence + the polled operator feed for Nate. */
+export function TodoDock({ useProjection, openFile, t }: TodoDockProps) {
   const todos = useProjection('todos')
-  return <TodoPanel todos={todos ?? []} t={t} />
+  const nate = useNateTodos()
+  return <TodoPanel todos={todos ?? []} nate={nate} onOpenFile={openFile} t={t} />
 }
 
 /**
@@ -142,13 +220,21 @@ export function TodoDock({ useProjection, t }: TodoDockProps) {
  */
 export const todoDockEntry = {
   name: 'conversation-todo-dock',
-  inject: ['slots'],
+  inject: ['slots', 'sessions', 'workspaces'],
   /**
    * Register the plan strip before the goal and queue entries (order 0).
    * @param ctx - registrant context (disposal rides ctx.effect inside slots.register).
    */
   apply(ctx: Context): void {
     ctx.slots.inject('conversation.input.dock', () =>
-      ctx.slots.register({ name: 'conversation.input.dock', id: 'todo', order: 0, locale: NS }, TodoDock))
+      ctx.slots.register({
+        name: 'conversation.input.dock', id: 'todo', order: 0, locale: NS,
+        inject: (sessionId: SessionId) => ({
+          openFile: (path: string) => {
+            const cwd = ctx.sessions.list.getSnapshot().byId[sessionId]?.cwd
+            void ctx.workspaces.openPath(resolveWorkspacePath(cwd, path.split('#', 1)[0] ?? path))
+          },
+        }),
+      }, TodoDock))
   },
 }

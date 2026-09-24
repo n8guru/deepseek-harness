@@ -1,0 +1,69 @@
+{
+ "schema_version": 1,
+ "items": [
+  {
+   "id": "nate-1",
+   "opened": "2026-09-24",
+   "question": "Grove promo: target is now 30s (Nate 22:20Z). Open: status report on what's produced and why QC misses intent (Cadence owes it), then the shot plan for 30s.",
+   "explained_at": "tools/grove-status/REPORT.md",
+   "status": "open"
+  },
+  {
+   "id": "nate-2",
+   "opened": "2026-09-24",
+   "question": "Character foundry: which approved references calibrate face/body/hair acceptance, and who makes the final per-character visual call?",
+   "explained_at": "tools/stall-audit/SYNTHESIS.md#5-q3",
+   "status": "closed",
+   "answer": "Official 3-view sheet + face; silhouette, hairstyle, skin tone must match; face must beat the generic face. 3D pipeline idea (splat/TRELLIS/Hunyuan3D) being researched.",
+   "closed_at": "2026-09-24"
+  },
+  {
+   "id": "nate-3",
+   "opened": "2026-09-24",
+   "question": "Meet film: grant (or not) use/transfer of the private identity + voice assets and the destination transport",
+   "explained_at": "tools/stall-audit/RESCOPE-REVIEW-ASTRA.md#additional-blocked-on-nate",
+   "status": "open"
+  },
+  {
+   "id": "nate-4",
+   "opened": "2026-09-24",
+   "question": "Voice step order 11 → 10 → 7 → 8 → early-guess (mint early-guess?)",
+   "explained_at": "tools/CONDUCTOR-BATON-STATE.md#live-work",
+   "status": "open"
+  },
+  {
+   "id": "nate-5",
+   "opened": "2026-09-24",
+   "question": "Jev computer-use spike: plan-then-Jev was 1.5–1.7x faster, 18/18 both ways — next step?",
+   "explained_at": "tools/jev-cu-spike/RESULT.md#bottom-line",
+   "status": "open"
+  },
+  {
+   "id": "nate-6",
+   "opened": "2026-09-24",
+   "question": "Grove step 32 / Muse cap renewal before 10-01 19:34Z (make permanent via 713939/206?)",
+   "explained_at": "tools/local-llm-trace/MUSE-CAP.md",
+   "status": "closed",
+   "answer": "Muse is a subscription peer like Claude/Grok; parity audit + step running.",
+   "closed_at": "2026-09-24"
+  },
+  {
+   "id": "nate-closed-1",
+   "opened": "2026-09-24",
+   "question": "Ledger re-scope (decision 1)",
+   "explained_at": "tools/stall-audit/RESCOPE-PLAN-v2.md",
+   "status": "closed",
+   "answer": "yes, careful; Astra-reviewed plan v2",
+   "closed_at": "2026-09-24"
+  },
+  {
+   "id": "nate-7",
+   "opened": "2026-09-24",
+   "question": "Finish the 7 stopped re-scope edits: A (recommended) blocked rows now, pending rows after the claim-guard fix / B fix first / C apply all now",
+   "explained_at": "tools/stall-audit/APPLY-LOG.md",
+   "status": "open"
+  }
+ ]
+}
+
+(End of file - total 67 lines)

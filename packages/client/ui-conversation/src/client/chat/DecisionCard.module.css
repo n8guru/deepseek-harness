@@ -1,0 +1,118 @@
+/* Inline decision card inside assistant prose: same tip surface and 12px
+   radius as the composer dock cards, so an asked question reads as chrome the
+   user can act on rather than as quoted code. */
+
+.root {
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-specific-tip);
+}
+
+.question {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: transparent;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.option:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.option[data-recommended='true'] {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.option[data-chosen='true'] {
+  border-color: var(--dsw-alias-state-success-primary);
+  opacity: 1;
+}
+
+.label {
+  flex: none;
+  font-weight: 500;
+}
+
+.detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--dsw-alias-state-business-primary);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.custom {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.customInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: transparent;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.send {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid var(--dsw-alias-state-business-primary);
+  border-radius: 10px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.answered {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
