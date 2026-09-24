@@ -25,7 +25,14 @@
 - paragraph: partial
 - status: Deep diving...
 - region "To-dos":
-  - button "To-dos 1 completed · 1 in progress"
+  - button "To-dos 1 completed · 1 in progress" [expanded]
+  - paragraph: Nate
+  - paragraph: No open items
+  - list
+  - paragraph: Cadence
+  - list:
+    - listitem: Confirm the panel order
+    - listitem: Align the panel widths
 - img
 - text: Ongoing Goal Keep the composer context panels aligned
 - button "Pause goal":

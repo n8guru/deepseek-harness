@@ -22,6 +22,14 @@
 - 'button "Failed Bash Error: tool call aborted before dispatch"':
   - img
   - text: "Failed Bash Error: tool call aborted before dispatch"
+- region "To-dos":
+  - button "To-dos" [expanded]
+  - paragraph: Nate
+  - paragraph: No open items
+  - list
+  - paragraph: Cadence
+  - paragraph: No open items
+  - list
 - textbox "Message the agent"
 - button "Commands":
   - img

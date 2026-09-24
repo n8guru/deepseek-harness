@@ -27,6 +27,14 @@
 - button "Branch into a new conversation":
   - img
 - text: {{clock}} Ran for {{duration}} TTFT {{duration}}
+- region "To-dos":
+  - button "To-dos" [expanded]
+  - paragraph: Nate
+  - paragraph: No open items
+  - list
+  - paragraph: Cadence
+  - paragraph: No open items
+  - list
 - button "2 queued messages" [expanded]
 - list:
   - listitem:

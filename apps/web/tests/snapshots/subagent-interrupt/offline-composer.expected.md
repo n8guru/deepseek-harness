@@ -20,6 +20,14 @@
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - paragraph: partial
 - status: Deep diving...
+- region "To-dos":
+  - button "To-dos" [expanded]
+  - paragraph: Nate
+  - paragraph: No open items
+  - list
+  - paragraph: Cadence
+  - paragraph: No open items
+  - list
 - textbox "Parent session offline; sending is unavailable but you can still stop the run" [disabled]
 - button "Commands" [disabled]:
   - img

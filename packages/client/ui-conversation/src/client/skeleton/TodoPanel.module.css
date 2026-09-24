@@ -39,7 +39,7 @@
 
 /* Narrow viewports: the dock slides in from the right edge and gives up its
    side clearance, so the compact header row still fits beside the composer. */
-@media (max-width: 720px) {
+@media (max-width: 480px) {
   .root {
     width: 100%;
     max-width: none;

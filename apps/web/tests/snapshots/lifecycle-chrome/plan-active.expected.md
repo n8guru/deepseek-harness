@@ -29,6 +29,14 @@
   - img
   - text: Standard mode
   - img
+- region "To-dos":
+  - button "To-dos" [expanded]
+  - paragraph: Nate
+  - paragraph: No open items
+  - list
+  - paragraph: Cadence
+  - paragraph: No open items
+  - list
 - textbox "Describe what you want to build"
 - button "Commands":
   - img
