@@ -186,8 +186,8 @@ describe('DshHostDirectoryService', () => {
 // SAME rule app/session_inspector.py::classify_pending_input applies to the
 // Hub's own history poll — kept in sync by design, tested independently here.
 describe('classifyPendingInput', () => {
-  const call = (callId: string, name = 'ask_user_question', args?: unknown) => (
-    { type: 'tool/call', data: { callId, name, arguments: args } }
+  const call = (callId: string, name = 'ask_user_question', args?: { questions?: { question?: string; header?: string }[] }) => (
+    { type: 'tool/call', data: { callId, name, ...(args === undefined ? {} : { arguments: args }) } }
   )
   const result = (callId: string) => ({ type: 'tool/result', data: { callId } })
   const asked = (id: string, toolName = 'dsh-bash-local', reason = 'escalation needed') => (
