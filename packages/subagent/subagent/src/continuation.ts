@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, contentHasImage, createUserMessage, projectContentImagesForTextModel } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -305,14 +305,15 @@ export class SubagentContinuationManager {
         if (disposal !== undefined) {
           return disposal.then(() => undefined, () => undefined)
         }
+        let deliveredContent = content
         if (contentHasImage(content)) {
-          await this.assertImageCapable(activation.handle.agent, options.signal)
+          deliveredContent = await this.imageCapableContent(activation.handle.agent, content, options.signal)
           if (activation.inbox.closing !== undefined) {
             await Promise.allSettled([activation.inbox.closing])
             return undefined
           }
         }
-        const messageId = this.submitAdmitted(activation, content, options, parent)
+        const messageId = this.submitAdmitted(activation, deliveredContent, options, parent)
         activation.announced = true
         return messageId
       })
@@ -464,13 +465,14 @@ export class SubagentContinuationManager {
     commit?: () => void,
   ): Promise<MessageId> {
     try {
+      let deliveredContent = content
       if (contentHasImage(content)) {
-        await this.assertImageCapable(activation.handle.agent, options.signal)
+        deliveredContent = await this.imageCapableContent(activation.handle.agent, content, options.signal)
         if (activation.inbox.closing !== undefined) {
           throw new SubagentError(`subagent "${activation.childId}" is closing`, 'ACTIVATION_CLOSING')
         }
       }
-      const messageId = this.submitAdmitted(activation, content, options, parent)
+      const messageId = this.submitAdmitted(activation, deliveredContent, options, parent)
       commit?.()
       activation.announced = true
       return messageId
@@ -505,23 +507,37 @@ export class SubagentContinuationManager {
     )
   }
 
-  /** Refuse image content for a child whose fixed model accepts text only. */
-  private async assertImageCapable(
+  /**
+   * Content safe to deliver to a child whose fixed model may accept text
+   * only. A genuinely text-only model never sees the failing whole-turn
+   * `UNSUPPORTED_CONTENT` an image would otherwise trip deep in dispatch:
+   * each image block is instead replaced with a stable text placeholder
+   * naming the omitted file, via the same {@link projectContentImagesForTextModel}
+   * projection the top-level request path uses for a text-only route. The
+   * original content — including the image block — is untouched; only the
+   * value delivered to this one child's inbox changes, so durable
+   * provenance for the sender's own turn is unaffected.
+   * @param agent - the live child Agent whose fixed provider/model to check.
+   * @param content - the content the sender addressed to this child.
+   * @param signal - abort signal for the capability read.
+   * @returns `content` unchanged when the child accepts images or its
+   *   capability is unknown; otherwise a copy with images projected to text.
+   */
+  private async imageCapableContent(
     agent: Agent,
+    content: ContentBlock[],
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<ContentBlock[]> {
     const { provider, model } = agent.options
-    if (provider === undefined || model === undefined) return
+    if (provider === undefined || model === undefined) return content
     const llm = this.ctx.get('llm')
     /* v8 ignore next -- without an LLM registry, delivery defers to projection. */
-    if (llm === undefined) return
+    if (llm === undefined) return content
     const info = await llm.resolveModelInfo(provider, model, signal)
     if (info.inputModalities !== undefined && !info.inputModalities.includes('image')) {
-      throw new SubagentError(
-        `Model "${model}" does not support image input.`,
-        'MODEL_DOES_NOT_SUPPORT_IMAGES',
-      )
+      return projectContentImagesForTextModel(content)
     }
+    return content
   }
 
   /** Resolve the persistence service continuable children require, or fail loud. */

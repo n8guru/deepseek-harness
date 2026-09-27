@@ -331,8 +331,23 @@ export function requiredImageOffload(
   return offloadedImagePrefixCount(lengths, budget)
 }
 
-/** Replace every image occurrence for a text-only model. */
-function replaceImagesForTextModel(blocks: readonly ContentBlock[]): ContentBlock[] {
+/**
+ * Replace every image occurrence in one content array with a stable text
+ * placeholder naming the omitted attachment, for delivery to a genuinely
+ * text-only model. Shared by every caller that must degrade one image-bearing
+ * content array gracefully instead of failing the whole request or turn:
+ * request-history projection ({@link projectImagesForTextModel}) and
+ * continuable-subagent message delivery both route through this so an image
+ * destined for a text-only model becomes readable text naming the file
+ * rather than an `UNSUPPORTED_CONTENT`/capability failure. Durable
+ * provenance is preserved — only the model-visible projection changes; the
+ * original content, including the image block, is untouched by callers that
+ * log or persist it separately from what a text-only model receives.
+ * @param blocks - one message's content blocks.
+ * @returns the original array when it holds no image, otherwise a shallow
+ *   copy with every image block replaced by {@link textOnlyImageText}.
+ */
+export function projectContentImagesForTextModel(blocks: readonly ContentBlock[]): ContentBlock[] {
   let next: ContentBlock[] | undefined
   for (const [index, block] of blocks.entries()) {
     if (block.type === 'image') {
@@ -360,7 +375,7 @@ export function projectImagesForTextModel(messages: readonly RequestMessage[]): 
 export function projectImagesForTextModel(messages: readonly RequestMessage[]): readonly RequestMessage[] {
   if (!messages.some(message => contentHasImage(message.content))) return messages
   return messages.map((message) => {
-    const content = replaceImagesForTextModel(message.content)
+    const content = projectContentImagesForTextModel(message.content)
     return content === message.content ? message : { ...message, content }
   })
 }

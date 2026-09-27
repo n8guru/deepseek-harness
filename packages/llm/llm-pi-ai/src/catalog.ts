@@ -66,6 +66,52 @@ function declaredInput(configured: readonly PiAiModality[] | undefined): Model<A
 }
 
 /**
+ * Exact Anthropic model ids verified image-capable regardless of what any
+ * layer declares. Every current Claude release accepts images, so a same-day
+ * id the installed pi-ai catalog has not caught up with (no `base` entry)
+ * depends entirely on the settings write that named it; an Anthropic-OAuth
+ * catalog sync or a Host restart that (re)writes that entry without an
+ * `input` field — the bridge's own live model rows carry no such field —
+ * would otherwise resolve straight to {@link RouteCatalogRequest.defaultInput},
+ * which is text-only by default. That is a silent capability downgrade an
+ * operator is unlikely to notice until an image-bearing turn fails deep in
+ * dispatch. This is a floor, not merely a fallback-when-absent default: it
+ * wins even over an explicit narrower `input` (entry or catalog) naming one
+ * of these exact ids, because no real deployment of these models is
+ * text-only and a narrower declaration here can only be sync drift, never an
+ * operator's considered correction. Keyed by model id rather than provider
+ * route name: the invariant is about the model, not about a route naming
+ * convention configuration does not enforce.
+ */
+const VERIFIED_VISION_CLAUDE_MODEL_IDS: ReadonlySet<string> = new Set([
+  'claude-opus-5-5',
+  'claude-opus-5',
+  'claude-sonnet-5',
+])
+
+/**
+ * One resolved model's `input`, raised to include `image` when it is a
+ * {@link VERIFIED_VISION_CLAUDE_MODEL_IDS} entry reached over the Anthropic
+ * wire protocol. Runs after every other input source (entry, catalog,
+ * route default) has already produced its answer, so it is strictly a floor:
+ * a wider declaration from an earlier layer is preserved untouched, and only
+ * a narrower or absent one is corrected.
+ * @param id - the model id being resolved.
+ * @param api - the model's resolved wire protocol.
+ * @param resolved - the `input` every earlier layer produced.
+ * @returns `resolved`, or a copy with `image` added when the floor applies and it was missing.
+ */
+function withVerifiedVisionFloor(
+  id: string,
+  api: string,
+  resolved: Model<Api>['input'],
+): Model<Api>['input'] {
+  if (api !== 'anthropic-messages') return resolved
+  if (!VERIFIED_VISION_CLAUDE_MODEL_IDS.has(id)) return resolved
+  return resolved.includes('image') ? resolved : [...resolved, 'image']
+}
+
+/**
  * Every pi-ai thinking level, in pi-ai's canonical escalation order. The
  * `Record` key type is a drift gate: a pi-ai upgrade that adds or removes a
  * level fails compilation here naming the drifted key, instead of silently
@@ -921,7 +967,11 @@ export function resolveRouteModels(
       api,
       provider,
       baseUrl,
-      input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput],
+      input: withVerifiedVisionFloor(
+        entry.id,
+        api,
+        declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput],
+      ),
       cost: base?.cost ?? NO_COST,
       contextWindow,
       maxTokens,

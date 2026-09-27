@@ -932,22 +932,39 @@ describe('continuable image Queue prompts', () => {
     },
   }
 
-  it('refuses an image follow-up when the child model declines image input, leaving no partial message', async () => {
-    const { ctx, parent } = await setup([textResponse('child work')])
+  it('projects an image follow-up to a text placeholder on cold resume when the child model declines image input, instead of failing the turn', async () => {
+    const { ctx, parent } = await setup([textResponse('child work'), textResponse('placeholder ack')])
     const started = await ctx.subagents.startContinuable(startSpec(parent))
+    // The first (auto-triggered) turn settles and the Activation is disposed,
+    // so the queued delivery below re-materializes through coldResume ->
+    // submitMaterialized, exercising that source distinctly from the live
+    // deliverFollowup path covered below.
     await waitNoActivation(ctx, started.childId)
     const resolve = vi.spyOn(ctx.llm, 'resolveModelInfo')
       .mockResolvedValue({ inputModalities: ['text'] } as never)
 
-    await expect(queuePrompt(ctx, parent, started.childId, [
+    const messageId = await queuePrompt(ctx, parent, started.childId, [
       { type: 'text' as const, text: 'see this' },
       imageBlock,
-    ]))
-      .rejects.toMatchObject({ code: 'MODEL_DOES_NOT_SUPPORT_IMAGES' })
+    ])
+    expect(messageId).toBeDefined()
+    await waitNoActivation(ctx, started.childId)
 
     expect(resolve).toHaveBeenCalledWith('mock', 'mock', testSignal)
     const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
-    expect(hasUserText(loaded.events, 'see this')).toBe(false)
+    // The text alongside the image is preserved verbatim.
+    expect(hasUserText(loaded.events, 'see this')).toBe(true)
+    // The image block itself never reaches the text-only child: it is
+    // replaced by a stable placeholder naming the omitted attachment, not
+    // dropped silently and not delivered as an image block.
+    const delivered = loaded.events.find(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'text' && block.text === 'see this'))
+    expect(delivered?.type === 'user/message' && delivered.data.content).toEqual([
+      { type: 'text', text: 'see this' },
+      { type: 'text', text: expect.stringContaining('image omitted') as unknown as string },
+    ])
+    expect(loaded.events.some(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'image'))).toBe(false)
     await drainManager(ctx)
   })
 
@@ -979,6 +996,42 @@ describe('continuable image Queue prompts', () => {
       { type: 'text', text: 'compare' },
       imageBlock,
     ])
+    await drainManager(ctx)
+  })
+
+  it('projects an image follow-up to a text placeholder for a resident (live, not cold-resumed) child whose model declines image input', async () => {
+    const releaseFirst = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('child work'), gate: releaseFirst.promise },
+      { chunks: textResponse('placeholder ack') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => {
+      expect(adapter.requests).toHaveLength(1)
+    })
+    // The child Agent is still resident (mid-turn, held by the gate) — this
+    // delivery exercises the live `deliverFollowup` branch, not cold resume.
+    vi.spyOn(ctx.llm, 'resolveModelInfo')
+      .mockResolvedValue({ inputModalities: ['text'] } as never)
+
+    const messageId = await queuePrompt(ctx, parent, started.childId, [
+      { type: 'text' as const, text: 'compare' },
+      imageBlock,
+    ])
+    expect(messageId).toBeDefined()
+    releaseFirst.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    const delivered = loaded.events.find(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'text' && block.text === 'compare'))
+    expect(delivered?.type === 'user/message' && delivered.data.content).toEqual([
+      { type: 'text', text: 'compare' },
+      { type: 'text', text: expect.stringContaining('image omitted') as unknown as string },
+    ])
+    expect(loaded.events.some(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'image'))).toBe(false)
     await drainManager(ctx)
   })
 

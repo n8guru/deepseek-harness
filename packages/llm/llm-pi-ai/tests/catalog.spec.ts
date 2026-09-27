@@ -214,6 +214,111 @@ describe('hand-declared providers', () => {
     expect(inputOf('anthropic', vision.id)).toEqual(vision.input)
   })
 
+  describe('verified vision-capable Claude models never resolve text-only', () => {
+    // The Anthropic-OAuth bridge pulls its model catalog live from
+    // `/v1/models` and rewrites `llm-pi-ai.providers.anthropic.models` on
+    // every sync pass. Its rows carry no `input` field, so a same-day model
+    // id the installed pi-ai catalog has not caught up with (no `base` entry)
+    // would otherwise resolve straight to the route's `defaultInput` —
+    // text-only unless a deployment declared otherwise — the moment a sync
+    // or restart (re)writes that settings section. These tests exercise the
+    // resolver-level floor directly: they do not depend on the bridge
+    // package (a separate repository, installed as a plugin), only on the
+    // exact settings shape a sync pass produces.
+    const VERIFIED_IDS = ['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5'] as const
+
+    it('resolves image input for a same-day id the installed pi-ai catalog does not ship, with no input declared', () => {
+      // claude-opus-5-5 has no builtin entry in the installed pi-ai catalog
+      // (verified against the installed @earendil-works/pi-ai version this
+      // package targets), so `base` is undefined for it and only the entry
+      // or the route default could otherwise supply `input`.
+      expect(getBuiltinModels('anthropic').some(model => model.id === 'claude-opus-5-5')).toBe(false)
+      const resolved = resolveProfiles({
+        anthropic: {
+          baseURL: 'https://api.anthropic.com',
+          // Mirrors exactly what a sync pass writes: id, name, context
+          // window, output cap — no `input` field at all.
+          models: VERIFIED_IDS.map(id => ({ id, name: id, contextWindow: 200_000, maxTokens: 64_000 })),
+        },
+      })
+      const inputOf = (id: string): readonly string[] | undefined =>
+        resolved.get('anthropic')?.piProvider?.getModels().find(model => model.id === id)?.input
+      for (const id of VERIFIED_IDS) {
+        expect(inputOf(id)).toContain('image')
+      }
+    })
+
+    it('overrides an explicit narrower input on the exact verified ids — sync drift cannot downgrade them', () => {
+      // A settings write that explicitly names `input: ['text']` for one of
+      // these exact ids is drift (the bridge race the REPORT documented, or
+      // a hand edit), never a real deployment fact: no current release of
+      // these models is text-only. The floor wins even over an explicit
+      // narrower declaration, unlike an ordinary route default.
+      const resolved = resolveProfiles({
+        anthropic: {
+          baseURL: 'https://api.anthropic.com',
+          models: VERIFIED_IDS.map(id => ({ id, input: ['text'] })),
+        },
+      })
+      const inputOf = (id: string): readonly string[] | undefined =>
+        resolved.get('anthropic')?.piProvider?.getModels().find(model => model.id === id)?.input
+      for (const id of VERIFIED_IDS) {
+        expect(inputOf(id)).toContain('image')
+      }
+    })
+
+    it('survives a simulated OAuth-sync rewrite that drops the input field on an already-registered route', () => {
+      // Models materialize once at the input a sync first wrote (no field),
+      // then a later pass rewrites the section — mirroring the bridge's
+      // periodic re-sync — again without an `input` field. The floor applies
+      // identically both times: a resync is not a one-shot initialization
+      // effect.
+      const first = resolveProfiles({
+        anthropic: {
+          baseURL: 'https://api.anthropic.com',
+          models: VERIFIED_IDS.map(id => ({ id, name: id, contextWindow: 200_000, maxTokens: 64_000 })),
+        },
+      })
+      const second = resolveProfiles({
+        anthropic: {
+          baseURL: 'https://api.anthropic.com',
+          models: VERIFIED_IDS.map(id => ({ id, name: `${id} (resynced)`, contextWindow: 200_000, maxTokens: 64_000 })),
+        },
+      })
+      for (const resolved of [first, second]) {
+        const models = resolved.get('anthropic')?.piProvider?.getModels() ?? []
+        for (const id of VERIFIED_IDS) {
+          expect(models.find(model => model.id === id)?.input).toContain('image')
+        }
+      }
+    })
+
+    it('does not float onto an unrelated route or an unrelated model id sharing no protocol', () => {
+      // The floor is keyed by exact model id and the Anthropic wire protocol
+      // together: a route naming one of these ids over a different protocol
+      // (a rename, a proxy, an unrelated gateway reusing the string) gets no
+      // special treatment, and a route legitimately declaring text-only for
+      // an unrelated model is unaffected.
+      const resolved = resolveProfiles({
+        'openai-gateway': {
+          api: 'openai-completions',
+          baseURL: 'https://openai-gateway.test',
+          models: [{ id: 'claude-sonnet-5', input: ['text'] }],
+        },
+        anthropic: {
+          baseURL: 'https://api.anthropic.com',
+          models: [{ id: 'claude-haiku-4-5', input: ['text'] }],
+        },
+      })
+      expect(
+        resolved.get('openai-gateway')?.piProvider?.getModels().find(model => model.id === 'claude-sonnet-5')?.input,
+      ).toEqual(['text'])
+      expect(
+        resolved.get('anthropic')?.piProvider?.getModels().find(model => model.id === 'claude-haiku-4-5')?.input,
+      ).toEqual(['text'])
+    })
+  })
+
   it('carries a written modality declaration all the way to the seam’s model metadata', async () => {
     // The resolver-level cases above cannot see a break between the settings
     // document and `LlmModelInfo`, so each rung is asserted once more through
