@@ -43,6 +43,7 @@ import {
   LlmAdapter,
   LlmError,
   ReasoningEffortId,
+  replaceImagesForTextModel,
 } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
@@ -52,6 +53,7 @@ import type {
   LlmResolvedModelInfo,
   PreparedAdapterCall,
   ReasoningEffortId as ReasoningEffortIdType,
+  RequestMessage,
   ResolvedRetryPolicy,
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
@@ -355,20 +357,32 @@ export class PiAiAdapter extends LlmAdapter {
     using watchdog = idleWatchdog(upstream, streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
 
     try {
-      const containsImage = options.messages.some(message => contentHasImage(message.content))
+      // The Runtime layer already projects images to text before dispatch
+      // whenever its own capability read says this model is text-only
+      // (packages/llm/llm/src/index.ts adapterStream), so this is normally a
+      // no-op backstop. It stays defense-in-depth: a config swap between that
+      // read and this snapshot, or a caller that reaches `stream()` directly,
+      // must degrade the same way rather than fail the whole turn.
+      let messages: readonly RequestMessage[] = options.messages
+      const containsImage = messages.some(message => contentHasImage(message.content))
       if (containsImage && !model.input.includes('image')) {
-        throw new LlmError(`pi-ai model "${model.id}" does not support image input`, 'UNSUPPORTED_CONTENT')
+        messages = messages.map((message) => {
+          const content = replaceImagesForTextModel(message.content)
+          return content === message.content ? message : { ...message, content }
+        })
       }
-      const attachments = containsImage ? this.config.resolveAttachments?.() : undefined
-      if (containsImage && attachments === undefined) {
+      const projectedOptions = messages === options.messages ? options : { ...options, messages: messages as RequestMessage[] }
+      const stillHasImage = messages.some(message => contentHasImage(message.content))
+      const attachments = stillHasImage ? this.config.resolveAttachments?.() : undefined
+      if (stillHasImage && attachments === undefined) {
         throw new LlmError('pi-ai image input requires the durable attachment service', 'UNSUPPORTED_CONTENT')
       }
       const onReplayDegrade = (reason: string): void => {
         this.config.onReplayDegrade?.({ provider: options.provider, model: options.model, reason })
       }
       const context = attachments === undefined
-        ? toPiContext(options, undefined, onReplayDegrade)
-        : await toPiContext({ ...options, signal: watchdog.signal }, {
+        ? toPiContext(projectedOptions, undefined, onReplayDegrade)
+        : await toPiContext({ ...projectedOptions, signal: watchdog.signal }, {
           attachments,
           resolveImageAccess: ref => this.config.resolveImageAccess?.(attachments, ref),
           maxRequestImageBytes: profile.maxRequestImageBytes,

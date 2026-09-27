@@ -1053,6 +1053,35 @@ describe('continuable image Queue prompts', () => {
     expect(resolve).not.toHaveBeenCalled()
     await drainManager(ctx)
   })
+
+  it('degrades an agent-authored (unattributed) follow-up to text instead of refusing it', async () => {
+    const { ctx, parent } = await setup([textResponse('child work')])
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    vi.spyOn(ctx.llm, 'resolveModelInfo').mockResolvedValue({ inputModalities: ['text'] } as never)
+
+    // sendMessage with no host `source` is the agent-relay path (steerPrompt
+    // with `options.source === undefined`): no human is present to switch
+    // models, so this must degrade rather than throw MODEL_DOES_NOT_SUPPORT_IMAGES.
+    const messageId = await ctx.subagents.sendMessage(parent, started.childId, [
+      { type: 'text' as const, text: 'see this' },
+      imageBlock,
+    ], { signal: testSignal })
+    expect(messageId).toBeTypeOf('string')
+
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    const delivered = loaded.events.find(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'text' && block.text === 'see this'))
+    expect(delivered?.type === 'user/message' && delivered.data.content).toEqual([
+      { type: 'text', text: `Agent ${parent.id} sent a message: ` },
+      { type: 'text', text: 'see this' },
+      { type: 'text', text: '[image omitted because this model accepts text only; attachment sha256:]' },
+    ])
+    // No image block reached the durable log for the text-only target.
+    expect(loaded.events.some(event => event.type === 'user/message'
+      && event.data.content.some(block => block.type === 'image'))).toBe(false)
+  })
 })
 
 describe('direct-child Queue residency routing', () => {
@@ -2690,6 +2719,50 @@ describe('continuable adjacent-Agent delivery', () => {
     await vi.waitFor(() => {
       expect(adapter.requests.filter(request => request.sessionId === parent.id)).toHaveLength(2)
     })
+  })
+
+  it('degrades an image in a child report to text instead of refusing delivery to a text-only parent', async () => {
+    const releaseChild = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([
+      { chunks: textResponse('child answer'), gate: releaseChild.promise },
+      { chunks: textResponse('parent report ack') },
+    ])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => {
+      expect(adapter.requests.filter(request => request.sessionId === started.childId)).toHaveLength(1)
+    })
+    const child = ctx.agents.get(started.childId)
+    expect(child).toBeDefined()
+    vi.spyOn(ctx.llm, 'resolveModelInfo').mockResolvedValue({ inputModalities: ['text'] } as never)
+
+    const imageBlock = {
+      type: 'image' as const,
+      attachment: {
+        attachmentId: 'att-report' as never, mediaType: 'image/png' as const, bytes: 1, width: 1, height: 1,
+      },
+    }
+    const messageId = await ctx.subagents.sendMessage(child!, parent.id, [
+      { type: 'text' as const, text: 'see my finding' },
+      imageBlock,
+    ], { signal: testSignal })
+    expect(messageId).toBeTypeOf('string')
+
+    await vi.waitFor(() => {
+      expect(adapter.requests.filter(request => request.sessionId === parent.id)).toHaveLength(1)
+    })
+    const delivered = parent.session.snapshotEvents().flatMap(event => event.type === 'user/message'
+      && event.data.source.kind === 'agent-message' ? [event.data] : [])[0]
+    expect(delivered?.id).toBe(messageId)
+    expect(delivered?.content).toEqual([
+      { type: 'text', text: `Agent ${started.childId} sent a message: ` },
+      { type: 'text', text: 'see my finding' },
+      { type: 'text', text: '[image omitted because this model accepts text only; attachment sha256:ort]' },
+    ])
+    expect(delivered?.content.some(block => block.type === 'image')).toBe(false)
+
+    releaseChild.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
   })
 
   it('rejects child-to-parent delivery when the direct parent is not live', async () => {

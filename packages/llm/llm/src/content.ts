@@ -331,8 +331,15 @@ export function requiredImageOffload(
   return offloadedImagePrefixCount(lengths, budget)
 }
 
-/** Replace every image occurrence for a text-only model. */
-function replaceImagesForTextModel(blocks: readonly ContentBlock[]): ContentBlock[] {
+/**
+ * Replace every image occurrence in one content-block list with the stable
+ * text-only placeholder, for a model or delivery target that cannot accept
+ * images. Blocks without an image pass through unchanged; the list itself
+ * is returned by identity when it contains no image.
+ * @param blocks - content blocks to project.
+ * @returns the original list, or a shallow copy with images replaced by text.
+ */
+export function replaceImagesForTextModel(blocks: readonly ContentBlock[]): ContentBlock[] {
   let next: ContentBlock[] | undefined
   for (const [index, block] of blocks.entries()) {
     if (block.type === 'image') {

@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId, contentHasImage, createUserMessage, replaceImagesForTextModel } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -219,7 +219,7 @@ export class SubagentContinuationManager {
       && senderActivation.handle.agent === sender
       && senderActivation.parentSession === targetId) {
       options.signal.throwIfAborted()
-      return this.sendToParent(senderActivation, sender, content)
+      return await this.sendToParent(senderActivation, sender, content, options.signal)
     }
     if (sender.session.header.parentSession === targetId) {
       throw new SubagentError(
@@ -305,14 +305,17 @@ export class SubagentContinuationManager {
         if (disposal !== undefined) {
           return disposal.then(() => undefined, () => undefined)
         }
+        let deliverable = content
         if (contentHasImage(content)) {
-          await this.assertImageCapable(activation.handle.agent, options.signal)
+          deliverable = await this.degradeImageContent(
+            activation.handle.agent, content, options.signal, options.source !== undefined,
+          )
           if (activation.inbox.closing !== undefined) {
             await Promise.allSettled([activation.inbox.closing])
             return undefined
           }
         }
-        const messageId = this.submitAdmitted(activation, content, options, parent)
+        const messageId = this.submitAdmitted(activation, deliverable, options, parent)
         activation.announced = true
         return messageId
       })
@@ -335,12 +338,17 @@ export class SubagentContinuationManager {
     this.activations.interrupt(targetSessionId, authority)
   }
 
-  /** Deliver one resident continuable child's message to its live direct parent. */
-  private sendToParent(
+  /**
+   * Deliver one resident continuable child's message (its report) to its live
+   * direct parent. An image the parent's fixed model cannot accept degrades
+   * to a text placeholder rather than failing the report.
+   */
+  private async sendToParent(
     activation: Activation,
     sender: Agent,
     content: ContentBlock[],
-  ): MessageId {
+    signal: AbortSignal,
+  ): Promise<MessageId> {
     /* v8 ignore next 6 -- only synchronous re-entrant teardown can open this
      * transaction between exact-agent authorization and this no-await span. */
     if (activation.inbox.closing !== undefined) {
@@ -356,7 +364,16 @@ export class SubagentContinuationManager {
         'PARENT_UNAVAILABLE',
       )
     }
-    const message = createAgentMessage(sender, content)
+    const deliverable = await this.degradeImageContent(parent, content, signal, false)
+    /* v8 ignore next 6 -- disposal during the capability read is the same
+     * closing race already covered synchronously above. */
+    if (activation.inbox.closing !== undefined) {
+      throw new SubagentError(
+        `subagent "${sender.id}" activation is being disposed; the message was not delivered`,
+        'ACTIVATION_CLOSING',
+      )
+    }
+    const message = createAgentMessage(sender, deliverable)
     this.sendAgentMessage(parent, message)
     return message.id
   }
@@ -464,13 +481,16 @@ export class SubagentContinuationManager {
     commit?: () => void,
   ): Promise<MessageId> {
     try {
+      let deliverable = content
       if (contentHasImage(content)) {
-        await this.assertImageCapable(activation.handle.agent, options.signal)
+        deliverable = await this.degradeImageContent(
+          activation.handle.agent, content, options.signal, options.source !== undefined,
+        )
         if (activation.inbox.closing !== undefined) {
           throw new SubagentError(`subagent "${activation.childId}" is closing`, 'ACTIVATION_CLOSING')
         }
       }
-      const messageId = this.submitAdmitted(activation, content, options, parent)
+      const messageId = this.submitAdmitted(activation, deliverable, options, parent)
       commit?.()
       activation.announced = true
       return messageId
@@ -505,23 +525,46 @@ export class SubagentContinuationManager {
     )
   }
 
-  /** Refuse image content for a child whose fixed model accepts text only. */
-  private async assertImageCapable(
+  /**
+   * Reconcile image content against one exact target agent's fixed model.
+   * A human or host prompt (`source` attributed) still refuses loudly —
+   * the caller is present to switch models or drop the attachment. An
+   * agent-authored relay (no attributed `source`: a report to the parent or
+   * an injected/continued message into a child) has no such caller, so it
+   * degrades instead: images the target cannot accept become the stable
+   * text-only placeholder rather than failing the whole message. Durable
+   * provenance survives in that placeholder text (the image's attachment
+   * id); only the request-visible bytes are omitted.
+   * @param agent - exact live target agent the content is about to reach.
+   * @param content - model-visible content to reconcile for that target.
+   * @param signal - caller cancellation for the capability read.
+   * @param attributed - true when the content carries a human/host source.
+   * @returns the original content, or a copy with images replaced by text.
+   * @throws {SubagentError} `MODEL_DOES_NOT_SUPPORT_IMAGES` only when `attributed`.
+   */
+  private async degradeImageContent(
     agent: Agent,
+    content: ContentBlock[],
     signal: AbortSignal,
-  ): Promise<void> {
+    attributed: boolean,
+  ): Promise<ContentBlock[]> {
+    if (!contentHasImage(content)) return content
     const { provider, model } = agent.options
-    if (provider === undefined || model === undefined) return
+    if (provider === undefined || model === undefined) return content
     const llm = this.ctx.get('llm')
     /* v8 ignore next -- without an LLM registry, delivery defers to projection. */
-    if (llm === undefined) return
+    if (llm === undefined) return content
     const info = await llm.resolveModelInfo(provider, model, signal)
     if (info.inputModalities !== undefined && !info.inputModalities.includes('image')) {
-      throw new SubagentError(
-        `Model "${model}" does not support image input.`,
-        'MODEL_DOES_NOT_SUPPORT_IMAGES',
-      )
+      if (attributed) {
+        throw new SubagentError(
+          `Model "${model}" does not support image input.`,
+          'MODEL_DOES_NOT_SUPPORT_IMAGES',
+        )
+      }
+      return replaceImagesForTextModel(content)
     }
+    return content
   }
 
   /** Resolve the persistence service continuable children require, or fail loud. */

@@ -903,35 +903,66 @@ describe('provider profile lifecycle', () => {
     expect(new LlmError('x', 'X')).toBeInstanceOf(Error)
   })
 
-  it('rejects unsupported or unresolved image input before provider I/O', async () => {
-    const adapter = adapterOf({ openai: {}, deepseek: {} })
+  it('degrades image input to a text placeholder for a text-only model, as a Runtime-layer backstop', async () => {
+    // The Runtime layer (dsh-llm index.ts adapterStream) already projects
+    // images to text before dispatch whenever ITS OWN capability read says a
+    // model is text-only, so this adapter-level gate is normally a no-op:
+    // this test reaches `stream()` directly (bypassing Runtime, as e.g. a
+    // stale config snapshot between that read and this one could), and the
+    // adapter itself must still degrade rather than fail the whole request --
+    // exactly the same policy, not a route-specific exception. No attachment
+    // service is configured; degrading before any attachment work is the point.
+    // deepseek-v4-flash is text-only in the pi-ai built-in catalog; gpt-4.1
+    // is image-capable there, so an image reaching gpt-4.1 still needs the
+    // durable attachment service and is unaffected by this backstop.
+    const server = await mockServer([{ events: textEvents }, { events: textEvents }])
+    const adapter = adapterOf({
+      openai: { baseURL: `${server.url}/v1` },
+      deepseek: { baseURL: server.url },
+    })
     const drain = async (options: Parameters<PiAiAdapter['stream']>[0]): Promise<void> => {
       for await (const _chunk of adapter.stream(options)) { /* drain */ }
     }
 
-    await expect(drain({
+    await drain({
       provider: 'deepseek',
       model: 'deepseek-v4-flash',
       messages: [createUserMessage({
         content: [{ type: 'image', attachment: IMAGE_REF }],
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       })],
-    })).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT' })
+    })
+    await drain({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      messages: [createToolResultMessage({
+        callId: 'call-outer' as never,
+        content: [{ type: 'image', attachment: IMAGE_REF }],
+        isError: false,
+      })],
+    })
+
+    // Both requests reached the mock server (no UNSUPPORTED_CONTENT thrown),
+    // and neither outgoing body carries the raw image bytes -- stringifying
+    // the placeholder text catches whatever wire shape the route uses
+    // without coupling this test to it.
+    expect(server.requests).toHaveLength(2)
+    for (const request of server.requests) {
+      const body = JSON.stringify(request)
+      expect(body).not.toContain('image_url')
+      expect(body).not.toContain(IMAGE_REF.attachmentId)
+      expect(body).toContain('image omitted because this model accepts text only')
+    }
+
+    // An image-capable model without a configured attachment service still
+    // refuses -- this backstop only degrades a genuinely unsupported image,
+    // it does not invent a way to serve one a capable model was owed.
     await expect(drain({
       provider: 'openai',
       model: 'gpt-4.1',
       messages: [createUserMessage({
         content: [{ type: 'image', attachment: IMAGE_REF }],
         source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      })],
-    })).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT' })
-    await expect(drain({
-      provider: 'openai',
-      model: 'gpt-4.1',
-      messages: [createToolResultMessage({
-        callId: 'call-outer' as never,
-        content: [{ type: 'image', attachment: IMAGE_REF }],
-        isError: false,
       })],
     })).rejects.toMatchObject({ code: 'UNSUPPORTED_CONTENT' })
   })
