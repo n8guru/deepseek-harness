@@ -58,6 +58,18 @@ export function DecisionCard({ card, answer, onAnswer, t }: DecisionCardProps) {
 
   return (
     <section className={css.root} data-testid="decision-card" data-decision={card.id} aria-label={card.question}>
+      {card.board !== undefined && (
+        <a
+          className={css.board}
+          href={card.board.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid="decision-card-board"
+          title={t('decision.openBoard')}
+        >
+          <img className={css.boardThumb} src={card.board.thumbnail} alt={t('decision.openBoard')} />
+        </a>
+      )}
       <p className={css.question}>{card.question}</p>
       <div className={css.options}>
         {card.options.map(option => (

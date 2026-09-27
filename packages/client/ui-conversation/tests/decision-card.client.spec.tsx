@@ -100,3 +100,45 @@ describe('answer delivery', () => {
     expect(findDecisionAnswer(snapshotWith('[decision-card other] 紧凑'), 'dock-shape')).toBeUndefined()
   })
 })
+
+// Scratchboard S5 (forage project 1975408 step 6): the Forage card painted as a
+// sealed board. The inline card shows its thumbnail; clicking opens the board.
+describe('decision-card board thumbnail', () => {
+  const THUMB = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4='
+  const URL_ = 'https://forage.ink/studio/decision/1563461/board'
+  const withBoard = (board: unknown) => splitDecisionCards(
+    `\`\`\`decision-card\n${JSON.stringify({ ...JSON.parse(CARD_JSON), board })}\n\`\`\``)
+
+  it('parses a well-formed board and renders a thumbnail link that opens it', () => {
+    const [segment] = withBoard({ url: URL_, thumbnail: THUMB })
+    expect(segment).toMatchObject({ kind: 'card', card: { board: { url: URL_, thumbnail: THUMB } } })
+    if (segment?.kind !== 'card') throw new Error('expected card')
+    render(<DecisionCard card={segment.card} onAnswer={() => {}} t={t} />)
+    const link = screen.getByTestId('decision-card-board')
+    expect(link.getAttribute('href')).toBe(URL_)
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toContain('noopener')
+    expect(link.querySelector('img')?.getAttribute('src')).toBe(THUMB)
+  })
+
+  it('drops an unsafe board but keeps the card', () => {
+    for (const board of [
+      { url: 'javascript:alert(1)', thumbnail: THUMB },
+      { url: 'http://forage.ink/x', thumbnail: THUMB },
+      { url: URL_, thumbnail: 'https://evil.example/pixel.png' },
+      { url: URL_, thumbnail: 'data:text/html;base64,PHNjcmlwdD4=' },
+      'not-an-object',
+    ]) {
+      const [segment] = withBoard(board)
+      expect(segment?.kind).toBe('card')
+      expect(segment?.kind === 'card' && segment.card.board).toBeUndefined()
+    }
+  })
+
+  it('renders no thumbnail when the card has no board', () => {
+    const [segment] = splitDecisionCards(TEXT).filter(s => s.kind === 'card')
+    if (segment?.kind !== 'card') throw new Error('expected card')
+    render(<DecisionCard card={segment.card} onAnswer={() => {}} t={t} />)
+    expect(screen.queryByTestId('decision-card-board')).toBeNull()
+  })
+})

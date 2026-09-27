@@ -12,6 +12,16 @@ export interface DecisionCardOption {
   readonly recommended?: boolean
 }
 
+/**
+ * Scratchboard S5: the Forage card painted as a sealed board. `url` opens the
+ * board host page (https only); `thumbnail` is an inline SVG/PNG data URI so it
+ * renders in the DSH origin without any cross-site request or cookie.
+ */
+export interface DecisionCardBoard {
+  readonly url: string
+  readonly thumbnail: string
+}
+
 /** Decision payload carried by one fenced block. */
 export interface DecisionCardSpec {
   readonly id: string
@@ -21,6 +31,8 @@ export interface DecisionCardSpec {
   readonly context_link?: string
   /** Allow a free-text answer beside the options (default true). */
   readonly allowCustom?: boolean
+  /** Optional board thumbnail that opens the card as a board. */
+  readonly board?: DecisionCardBoard
 }
 
 /** Assistant text split into prose runs and decision cards, in source order. */
@@ -41,6 +53,17 @@ export function optionId(option: DecisionCardOption): string {
   return option.id ?? option.label
 }
 
+const BOARD_THUMB = /^data:image\/(?:svg\+xml|png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/
+
+/** A malformed board is dropped, never fatal: the card still renders without it. */
+function toBoard(raw: unknown): DecisionCardBoard | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const { url, thumbnail } = raw as Record<string, unknown>
+  if (typeof url !== 'string' || url.length > 500 || !/^https:\/\/[^\s"'<>]+$/.test(url)) return undefined
+  if (typeof thumbnail !== 'string' || thumbnail.length > 60_000 || !BOARD_THUMB.test(thumbnail)) return undefined
+  return { url, thumbnail }
+}
+
 function toCard(json: string): DecisionCardSpec | undefined {
   let parsed: unknown
   try {
@@ -49,7 +72,7 @@ function toCard(json: string): DecisionCardSpec | undefined {
     return undefined
   }
   if (typeof parsed !== 'object' || parsed === null) return undefined
-  const { id, question, context_link, options, allow_free_text, allowCustom } = parsed as Record<string, unknown>
+  const { id, question, context_link, options, allow_free_text, allowCustom, board } = parsed as Record<string, unknown>
   if (typeof id !== 'string' || !/^[A-Za-z0-9._:-]{1,96}$/.test(id)) return undefined
   if (typeof question !== 'string' || question.trim() === '' || question.length > 1000) return undefined
   if (context_link !== undefined && (typeof context_link !== 'string' || context_link.length > 500)) return undefined
@@ -68,8 +91,10 @@ function toCard(json: string): DecisionCardSpec | undefined {
   }
   if (clean.length !== options.length || clean.filter(option => option.recommended).length !== 1) return undefined
   if (new Set(clean.map(option => option.id ?? option.label)).size !== clean.length) return undefined
+  const cleanBoard = toBoard(board)
   return {
     id, question, options: clean,
+    ...cleanBoard !== undefined ? { board: cleanBoard } : {},
     ...typeof context_link === 'string' ? { context_link } : {},
     ...allow_free_text === false || allowCustom === false ? { allowCustom: false } : {},
   }

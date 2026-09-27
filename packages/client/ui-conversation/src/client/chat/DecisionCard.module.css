@@ -116,3 +116,25 @@
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* Scratchboard S5: board thumbnail that opens the card as a board. */
+.board {
+  display: block;
+  margin-bottom: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 480px;
+}
+
+.board:focus-visible {
+  outline: 1.5px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+.boardThumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
