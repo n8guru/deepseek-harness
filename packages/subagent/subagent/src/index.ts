@@ -82,9 +82,10 @@ import { deliverSubagentPrompt } from './internal.ts'
 
 export type {} from './catalog.ts'
 export * from './out-of-process.ts'
-export { AssistantOutputFold, finalAssistantOutput } from './assistant-output.ts'
+export { AssistantOutputFold, finalAssistantOutput, finalAssistantSource } from './assistant-output.ts'
 export { SubagentRunId } from './types.ts'
 export type {
+  ActualModelRoute,
   ContinuableCreateRequest,
   ContinuableCreateSpec,
   ContinuableStart,
@@ -100,6 +101,22 @@ export type {
   SubagentStopReason,
   SubagentStopReasonMap,
 } from './types.ts'
+export {
+  assertValidModelSelection,
+  DEFAULT_MODEL_TIER_CLASS_NAMES,
+  isModelTier,
+  MODEL_TIERS,
+  ModelTierResolver,
+  resolveModelSelection,
+} from './model-tier.ts'
+export type {
+  ModelSelectionRequest,
+  ModelTier,
+  ModelTierClassNames,
+  ModelTierRegistryClient,
+  ModelTierResolverConfig,
+  ResolvedTierRoute,
+} from './model-tier.ts'
 export {
   foldSubagentDescriptor,
   snapshotSubagentDescriptor,

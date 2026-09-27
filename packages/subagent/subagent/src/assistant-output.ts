@@ -10,7 +10,7 @@
  * @module @deepseek-ai/dsh-subagent/assistant-output
  */
 
-import { joinAssistantStreamText, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { joinAssistantStreamText, type ContentBlock, type ModelMessageSource } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /**
@@ -21,18 +21,23 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
  */
 export class AssistantOutputFold {
   private message: readonly ContentBlock[] | undefined
+  private messageSource: ModelMessageSource | undefined
   private partial: string[] = []
 
   /**
    * Fold one session event: a non-empty assistant message becomes the
-   * candidate final answer, while its embedded stream and any log-only attempt
-   * extend the streamed fallback; every other event contributes nothing.
+   * candidate final answer (and its provider/model source the candidate
+   * final route), while its embedded stream and any log-only attempt extend
+   * the streamed fallback; every other event contributes nothing.
    * @param event - the next observed session event.
    */
   push(event: SessionEvent): void {
     if (event.type === 'assistant/message') {
       const content = event.data.message.content
-      if (content.length > 0) this.message = content
+      if (content.length > 0) {
+        this.message = content
+        this.messageSource = event.data.message.source
+      }
     }
     if (event.type === 'assistant/message' || event.type === 'assistant/attempt') {
       this.pushText(joinAssistantStreamText(event.data.stream))
@@ -57,6 +62,17 @@ export class AssistantOutputFold {
     const text = this.partial.join('')
     return text.length > 0 ? [{ type: 'text', text }] : undefined
   }
+
+  /**
+   * The provider/model that actually produced the selected final message.
+   * Present only when a non-empty `assistant/message` was folded (the
+   * streamed-text fallback carries no reliable per-chunk source); this is
+   * the ACTUAL executed route, independent of what the caller requested.
+   * @returns the last non-empty assistant message's source, or `undefined`.
+   */
+  collectSource(): ModelMessageSource | undefined {
+    return this.messageSource
+  }
 }
 
 /**
@@ -72,4 +88,20 @@ export function finalAssistantOutput(events: readonly SessionEvent[]): readonly 
   const fold = new AssistantOutputFold()
   for (const event of events) fold.push(event)
   return fold.collect()
+}
+
+/**
+ * The ACTUAL provider/model that produced a child's final output — recorded
+ * from the same last non-empty `assistant/message` {@link finalAssistantOutput}
+ * selects, so a persisted route always answers "what really executed",
+ * independent of any requested tier or pin (mesh-dsh-merge step 55).
+ * @param events - the child-owned events (after any seed or epoch boundary).
+ * @returns the last non-empty assistant message's source, or `undefined`
+ *   when the child produced no message (e.g. streamed-text-only fallback,
+ *   or no output at all).
+ */
+export function finalAssistantSource(events: readonly SessionEvent[]): ModelMessageSource | undefined {
+  const fold = new AssistantOutputFold()
+  for (const event of events) fold.push(event)
+  return fold.collectSource()
 }

@@ -38,6 +38,13 @@ export interface Config {
   agentRouteDefaults?: Readonly<{ provider: string; model: string }>
   /** Structured value returned when the request asks for one. */
   structured?: unknown
+  /**
+   * The provider/model that ACTUALLY produced the reply, when it differs from
+   * (or should simply be recorded alongside) the requested route. Omit to
+   * leave the result's `actualRoute` unset, matching a provider that recorded
+   * no route (e.g. a remote/no-session backend).
+   */
+  actualRoute?: Readonly<{ provider: string; model: string }>
   /** Observes each start; the child's result additionally waits for the returned promise. */
   onStart?: (request: SubagentStartRequest) => Promise<void> | void
 }
@@ -78,6 +85,7 @@ class ScriptedSubagentProvider implements SubagentProvider {
         ...this.config.diagnostic !== undefined && terminal !== 'completed'
           ? { diagnostic: this.config.diagnostic }
           : {},
+        ...this.config.actualRoute === undefined ? {} : { actualRoute: this.config.actualRoute },
         stopReason: terminal,
       }
     }

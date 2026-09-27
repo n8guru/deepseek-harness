@@ -4,6 +4,8 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import z from '@deepseek-ai/schemastery'
+import { isModelTier, MODEL_TIERS } from '@deepseek-ai/dsh-subagent'
+import type { ModelTier, ModelTierResolver } from '@deepseek-ai/dsh-subagent'
 
 /** One exact child LLM route authorized by a user setting. */
 export interface AllowedModelRoute {
@@ -66,23 +68,53 @@ export interface DelegationModelRequest {
   readonly provider?: string
   readonly model?: string
   readonly reasoning_effort?: string
+  /**
+   * A named complexity tier (`basic`, `mid`, or `capable`) resolved dynamically
+   * from the Forage LLM class registry at call time (mesh-dsh-merge step 55).
+   * Mutually exclusive with `provider`/`model`: a tier names a policy-owned
+   * route, an explicit pin names a fixed one, and mixing the two forms is
+   * ambiguous about which one wins.
+   */
+  readonly tier?: string
 }
 
 /**
- * Whether a call explicitly selects any child LLM value.
+ * Whether a call explicitly selects any child LLM value, including a named tier.
  * @param request - Model-facing route fields from the tool call.
- * @returns Whether at least one route or effort field is present.
+ * @returns Whether at least one route, tier, or effort field is present.
  */
 export function hasDelegationModelRequest(request: DelegationModelRequest): boolean {
   return request.provider !== undefined
     || request.model !== undefined
     || request.reasoning_effort !== undefined
+    || request.tier !== undefined
 }
 
 /** Reject an empty model-facing route value at the tool JSON boundary. */
 function assertNonEmpty(value: string | undefined, field: keyof DelegationModelRequest): void {
   if (value !== undefined && value.length === 0) {
     throw new Error(`child LLM \`${field}\` must be non-empty`)
+  }
+}
+
+/**
+ * Reject a call that names both a complexity tier and an explicit
+ * provider/model pin, and reject an unknown tier name, before any registry
+ * read or route merge. A caller may always name exactly one selection form,
+ * or neither.
+ * @param request - Model-facing route fields from the tool call.
+ * @throws when `tier` is unknown, or both `tier` and an explicit `provider`/`model` are present.
+ */
+export function assertValidTierSelection(request: DelegationModelRequest): asserts request is
+  DelegationModelRequest & { readonly tier?: ModelTier } {
+  if (request.tier === undefined) return
+  if (!isModelTier(request.tier)) {
+    throw new Error(`unknown model tier "${request.tier}": expected one of ${MODEL_TIERS.join(', ')}`)
+  }
+  if (request.provider !== undefined || request.model !== undefined) {
+    throw new Error(
+      'model selection is ambiguous: pass either `tier` or explicit `provider`/`model`, not both',
+    )
   }
 }
 
@@ -193,4 +225,38 @@ export async function preflightChildLlmRoute(
     model,
     ...reasoningEffort === undefined ? {} : { reasoningEffort },
   }, signal)
+}
+
+/**
+ * Resolve a validated `tier` field into concrete `provider`/`model` fields,
+ * so every downstream step (`requestedAgentOptions`, `assertAllowedModelSelection`,
+ * `preflightChildLlmRoute`) keeps treating the call as an ordinary explicit
+ * route selection. Call {@link assertValidTierSelection} first. A request
+ * without `tier` passes through unchanged with no registry read.
+ * @param request - the model-facing request, already tier-validated.
+ * @param resolver - the tier resolver to consult, or `undefined` when this
+ *   tool instance has no registry-backed tier resolution configured.
+ * @param signal - caller cancellation, forwarded to the registry read.
+ * @returns an equivalent request with `tier` resolved into `provider`/`model`.
+ * @throws when `request.tier` is present but no resolver is configured, or
+ *   when the resolver itself fails closed (see {@link ModelTierResolver.resolve}).
+ */
+export async function resolveTierIntoRoute(
+  request: DelegationModelRequest,
+  resolver: ModelTierResolver | undefined,
+  signal: AbortSignal,
+): Promise<DelegationModelRequest> {
+  if (request.tier === undefined) return request
+  if (!isModelTier(request.tier)) {
+    // assertValidTierSelection already rejected this synchronously; this is
+    // an internal-consistency guard, not a new user-facing validation path.
+    throw new Error(`unknown model tier "${request.tier}": expected one of ${MODEL_TIERS.join(', ')}`)
+  }
+  if (resolver === undefined) {
+    throw new Error('model tier selection is not configured for this tool instance (no registry-backed resolver)')
+  }
+  const tier: ModelTier = request.tier
+  const route = await resolver.resolve(tier, signal)
+  const { tier: _tier, ...rest } = request
+  return { ...rest, provider: route.provider, model: route.model }
 }

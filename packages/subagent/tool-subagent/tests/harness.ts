@@ -35,6 +35,7 @@ type SetupConfig = tool.Config & {
 const TEST_ALLOWED_MODELS = [
   'allowed-model', 'child-model', 'configured-model', 'current-model', 'fast-model',
   'other-model', 'parent-model', 'selected-model', 'unlisted-model',
+  'basic-model', 'mid-model', 'capable-model', 'actual-model',
 ].flatMap(model => [
   { provider: 'alpha', model },
   { provider: 'current-provider', model },

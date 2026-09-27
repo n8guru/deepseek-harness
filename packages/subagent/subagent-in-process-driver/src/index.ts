@@ -26,6 +26,7 @@ import {
   captureDelegatedPolicyOverrides,
   childSessionMeta,
   finalAssistantOutput,
+  finalAssistantSource,
   resolveChildAgentOptions,
   resolveChildDepth,
 } from '@deepseek-ai/dsh-subagent'
@@ -224,15 +225,17 @@ function readResult(
   const lastEnd = foldConsumedWork(own).end
   // The seam's canonical selection rule; a partial answer survives cancel and truncation.
   const output: readonly ContentBlock[] = finalAssistantOutput(own) ?? []
+  const source = finalAssistantSource(own)
+  const actualRoute = source === undefined ? {} : { actualRoute: { provider: source.provider, model: source.model } }
   const recorded = toStopReason(lastEnd?.data.reason)
   // Disposal can tear the owner down before the loop records its ordinary
   // `aborted` end, yielding `disposed` instead.
   const stopReason: SubagentStopReason = cancelled && recorded !== 'completed' ? 'aborted' : recorded
   if (structured !== undefined) {
     if (structured.captured !== undefined) {
-      return { output, structured: structured.captured.value, stopReason }
+      return { output, structured: structured.captured.value, stopReason, ...actualRoute }
     }
-    if (stopReason === 'completed') return { output, stopReason: cancelled ? 'aborted' : 'error' }
+    if (stopReason === 'completed') return { output, stopReason: cancelled ? 'aborted' : 'error', ...actualRoute }
   }
-  return { output, stopReason }
+  return { output, stopReason, ...actualRoute }
 }

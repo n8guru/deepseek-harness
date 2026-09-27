@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, ModelMessageSource } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { AssistantOutputFold, finalAssistantOutput } from '../src/assistant-output.ts'
+import { AssistantOutputFold, finalAssistantOutput, finalAssistantSource } from '../src/assistant-output.ts'
 
-function message(content: ContentBlock[]): SessionEvent {
-  return { type: 'assistant/message', data: { stream: [], message: { content } } } as unknown as SessionEvent
+function message(content: ContentBlock[], source?: Partial<ModelMessageSource>): SessionEvent {
+  return {
+    type: 'assistant/message',
+    data: {
+      stream: [],
+      message: { content, source: { kind: 'model', provider: 'mock', model: 'mock', ...source } },
+    },
+  } as unknown as SessionEvent
 }
 
 function textDelta(text: string): SessionEvent {
@@ -92,5 +98,39 @@ describe('AssistantOutputFold', () => {
 
   it('collects undefined until any output is folded', () => {
     expect(new AssistantOutputFold().collect()).toBeUndefined()
+  })
+})
+
+describe('finalAssistantSource', () => {
+  it('reads the actual provider/model that produced the selected final message', () => {
+    const events = [
+      message([{ type: 'text', text: 'first' }], { provider: 'anthropic', model: 'claude-opus-5-5' }),
+      message([{ type: 'text', text: 'second' }], { provider: 'openai-codex', model: 'gpt-6-sol' }),
+    ]
+    // The actual route follows the SAME last-non-empty-message selection rule
+    // as finalAssistantOutput — a requested route and an actual route can
+    // differ (mesh-dsh-merge step 55's core observability gap).
+    expect(finalAssistantSource(events)).toEqual({
+      kind: 'model',
+      provider: 'openai-codex',
+      model: 'gpt-6-sol',
+    })
+  })
+
+  it('is undefined when the child produced no non-empty assistant message', () => {
+    expect(finalAssistantSource([])).toBeUndefined()
+    expect(finalAssistantSource([textDelta('streamed only'), message([])])).toBeUndefined()
+  })
+
+  it('ignores an empty trailing message and keeps the earlier route', () => {
+    const events = [
+      message([{ type: 'text', text: 'answer' }], { provider: 'anthropic', model: 'claude-sonnet-5' }),
+      message([]),
+    ]
+    expect(finalAssistantSource(events)).toEqual({
+      kind: 'model',
+      provider: 'anthropic',
+      model: 'claude-sonnet-5',
+    })
   })
 })

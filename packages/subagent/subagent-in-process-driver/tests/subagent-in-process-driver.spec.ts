@@ -360,10 +360,12 @@ describe('startInProcessRun', () => {
     await new Promise(resolve => setTimeout(resolve, 30))
     controller.abort('stop child')
     // No step completed a message, so the text streamed before the abort is
-    // the cancelled run's output.
+    // the cancelled run's output. The interrupted assistant/message still
+    // carries its route, so the actual model is recorded even for a partial answer.
     await expect(signalled.result).resolves.toEqual({
       output: [{ type: 'text', text: 'partial' }],
       stopReason: 'aborted',
+      actualRoute: { provider: 'mock', model: 'mock' },
     })
     expect(adapter.requests[0]?.signal?.reason).toEqual({ kind: 'parent' })
     const child = parent.ctx.agents.get(signalled.id)

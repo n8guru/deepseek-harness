@@ -16,6 +16,20 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { SubagentDescriptorData } from './descriptor.ts'
 
+/**
+ * The provider/model that ACTUALLY produced a child's final output, read from
+ * that message's own recorded source rather than from any request — so a
+ * mismatch between a requested tier/pin and what really executed is always
+ * observable (mesh-dsh-merge step 55). Absent when the child produced no
+ * non-empty assistant message (e.g. it was cancelled before its first reply).
+ */
+export interface ActualModelRoute {
+  /** Provider route that actually served the child's final message. */
+  readonly provider: string
+  /** Model id that actually produced the child's final message. */
+  readonly model: string
+}
+
 /** Identifies one accepted subagent run across its lifecycle event pair. */
 export type SubagentRunId = Branded<'SubagentRunId'>
 
@@ -114,6 +128,12 @@ export interface SubagentRunEndInfo {
    * the child produced none.
    */
   readonly lastAssistantMessage?: readonly ContentBlock[]
+  /**
+   * The provider/model that actually produced {@link lastAssistantMessage},
+   * independent of any requested tier or pin. Absent under the same
+   * conditions as `lastAssistantMessage`.
+   */
+  readonly actualRoute?: ActualModelRoute
 }
 
 /**
@@ -294,6 +314,13 @@ export interface SubagentResult {
   readonly diagnostic?: string
   /** Why the run ended. A non-`completed` reason means `output` may be partial. */
   readonly stopReason: SubagentStopReason
+  /**
+   * The provider/model that ACTUALLY produced {@link output}, read from that
+   * message's own recorded source — never from the request. Absent when the
+   * child produced no non-empty assistant message. A caller comparing this to
+   * its requested tier/pin detects silent substitution (mesh-dsh-merge step 55).
+   */
+  readonly actualRoute?: ActualModelRoute
 }
 
 /**

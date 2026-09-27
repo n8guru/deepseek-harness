@@ -13,6 +13,7 @@ import z from '@deepseek-ai/schemastery'
 import { scopeChainOf, scopeOf } from '@deepseek-ai/dsh-scope'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -20,17 +21,21 @@ import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import {
   assertSubagentMaxDepth,
+  MODEL_TIERS,
+  ModelTierResolver,
   parentAgentOptionsForDelegation,
   settleRun,
 } from '@deepseek-ai/dsh-subagent'
-import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
+import type { ModelTierRegistryClient, SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
 import {
   assertAllowedModelSelection,
+  assertValidTierSelection,
   hasConfiguredLlmSelection,
   hasDelegationModelRequest,
   preflightChildLlmRoute,
   requestedAgentOptions,
+  resolveTierIntoRoute,
 } from './model-selection.ts'
 import type { DelegationModelRequest, ModelSelectionPolicy } from './model-selection.ts'
 import { registerListSubagentModels } from './list-models.ts'
@@ -40,6 +45,7 @@ import {
   subagentModelSelectionProjectionDefinition,
   subagentModelSelectionPolicy,
 } from './model-selection-state.ts'
+import { createModelTierHttpClient } from './model-tier-http-client.ts'
 
 export const name = 'tool-subagent'
 export const inject = ['tools', 'subagents', 'systemPrompt', 'sessionProjections']
@@ -101,6 +107,30 @@ export interface Config {
    * the current Host subagent depth setting (default `1`) at each delegation.
    */
   maxDepth?: number | 'provider-managed'
+  /**
+   * Registry-backed complexity-tier model selection (mesh-dsh-merge step 55).
+   * When configured, the model-facing tool exposes a `tier` field
+   * (`basic`/`mid`/`capable`) resolved dynamically from the Forage LLM class
+   * registry at call time — never a hardcoded model table — subject to the
+   * SAME `modelSelectionSettings` allowlist fence as an explicit
+   * `provider`/`model` pin. Requires `modelSelectionSettings: true`.
+   *
+   * `client` is a direct-apply()-only escape hatch (like `maxDepth`'s capless
+   * bypass): Schemastery's JSON schema cannot carry a function, so a
+   * config the loader validates always builds the real HTTP-backed client
+   * from `registryBaseURL`/`bearerCredentialRef`, while a test calling
+   * `apply()` directly may inject a fake {@link ModelTierRegistryClient}.
+   */
+  modelTiers?: {
+    /** Base URL of the Forage LLM gateway, e.g. `https://forage.ink`. */
+    readonly registryBaseURL?: string
+    /** Credential reference resolved for the scoped vault bearer key. */
+    readonly bearerCredentialRef?: string
+    /** Bounded cache TTL in milliseconds (mirrors `DISPATCH_STATE_TTL_SECONDS`). Defaults to 5000. */
+    readonly ttlMs?: number
+    /** Test-only injected transport; invisible to the JSON schema. */
+    readonly client?: ModelTierRegistryClient
+  }
 }
 
 export const Config: z<Config> = z.object({
@@ -128,6 +158,11 @@ export const Config: z<Config> = z.object({
     deny: z.array(z.string()).default(undefined as unknown as string[]),
   }).default(undefined as unknown as { allow: string[]; deny: string[] }),
   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]),
+  modelTiers: z.object({
+    registryBaseURL: z.string().min(1).required(),
+    bearerCredentialRef: z.string().min(1),
+    ttlMs: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER),
+  }).default(undefined as unknown as { registryBaseURL: string; bearerCredentialRef?: string; ttlMs?: number }),
 })
 
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
@@ -199,13 +234,30 @@ type ForegroundToolResult = {
   readonly kind: 'foreground'
   readonly runId: SubagentRun['id']
   readonly output: JsonValue[]
+  /** The provider that ACTUALLY produced `output`, when the child's final message recorded one. */
+  readonly actualProvider?: string
+  /** The model that ACTUALLY produced `output`, when the child's final message recorded one. */
+  readonly actualModel?: string
+  /**
+   * True when the caller named a `tier` or explicit `provider`/`model` and the
+   * route that actually executed differs from what was requested. Absent when
+   * the caller made no selection, or no actual route could be recorded.
+   */
+  readonly modelMismatch?: boolean
 }
 
 /**
  * Collect and release one foreground run without letting disposal replace an
  * independent result failure.
+ * @param run - the published run to settle and release.
+ * @param requestedRoute - the provider/model this call requested, when the
+ *   caller named a tier or an explicit pin; used only to compute
+ *   {@link ForegroundToolResult.modelMismatch} against the actual route.
  */
-async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResult> {
+async function settleForegroundRun(
+  run: SubagentRun,
+  requestedRoute?: { readonly provider?: string; readonly model?: string },
+): Promise<ForegroundToolResult> {
   const [execution] = await Promise.allSettled([
     run.result.then((result): ForegroundToolResult => {
       const error = stopReasonError(result)
@@ -214,12 +266,18 @@ async function settleForegroundRun(run: SubagentRun): Promise<ForegroundToolResu
         // success, but the preserved partial answer still reaches the parent.
         throw new Error(withDiagnosticAndPartialText(error, result))
       }
+      const actual = result.actualRoute
+      const mismatch = actual === undefined || requestedRoute?.provider === undefined
+        ? undefined
+        : actual.provider !== requestedRoute.provider || actual.model !== requestedRoute.model
       return {
         kind: 'foreground',
         runId: run.id,
         // Content blocks already cross durable JSON boundaries elsewhere;
         // the registry performs the authoritative lossless snapshot here.
         output: result.output as unknown as JsonValue[],
+        ...actual === undefined ? {} : { actualProvider: actual.provider, actualModel: actual.model },
+        ...mismatch === undefined ? {} : { modelMismatch: mismatch },
       }
     }),
   ])
@@ -325,6 +383,38 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
   const modelSelectionCapable = config.modelSelectionSettings === true
   ctx.sessionProjections.register(subagentModelSelectionProjectionDefinition)
 
+  if (config.modelTiers !== undefined && !modelSelectionCapable) {
+    throw new Error('tool-subagent: `modelTiers` requires `modelSelectionSettings: true`')
+  }
+  const tierResolver: ModelTierResolver | undefined = ((): ModelTierResolver | undefined => {
+    const modelTiers = config.modelTiers
+    if (modelTiers === undefined) return undefined
+    if (modelTiers.client !== undefined) {
+      // Direct-apply()-only test seam: schema-driven loads never carry a function.
+      return new ModelTierResolver({
+        client: modelTiers.client,
+        ...modelTiers.ttlMs === undefined ? {} : { ttlMs: modelTiers.ttlMs },
+      })
+    }
+    if (modelTiers.registryBaseURL === undefined) {
+      throw new Error('tool-subagent: `modelTiers.registryBaseURL` is required (or supply `client` directly)')
+    }
+    const baseURL = modelTiers.registryBaseURL
+    return new ModelTierResolver({
+      client: createModelTierHttpClient({
+        baseURL,
+        resolveBearer: async () => {
+          const ref = modelTiers.bearerCredentialRef
+          if (ref === undefined) return undefined
+          const credentials = ctx.get('credentials')
+          if (credentials === undefined) return undefined
+          return (await credentials.resolve(credentialRef(ref)))?.value
+        },
+      }),
+      ...modelTiers.ttlMs === undefined ? {} : { ttlMs: modelTiers.ttlMs },
+    })
+  })()
+
   const assertSubagentProviderConfiguration = (subagentProvider: SubagentProvider): void => {
     if (ctx.subagents.resolveMaxDepth(config.maxDepth) !== undefined && !subagentProvider.capabilities.depthLimit) {
       throw new Error(
@@ -417,6 +507,16 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
                 : 'Adapter-owned reasoning effort for the effective child route. Omit to inherit a compatible configured/parent effort or use a newly selected model\'s default.',
             },
           } : {},
+          ...modelSelectionEnabled && tierResolver !== undefined ? {
+            tier: {
+              type: 'string' as const,
+              enum: MODEL_TIERS as unknown as string[],
+              description: 'Complexity tier for the child, resolved dynamically to a live model route: '
+                + '`basic` for simple no-judgement reads, `mid` for everyday diagnose-and-plan work, '
+                + '`capable` for complex design or judgement calls. Mutually exclusive with `provider`/`model`. '
+                + 'Choose by the TASK\'s complexity, not a blanket preference for the strongest model.',
+            },
+          } : {},
           ...backgroundEnabled ? {
             run_in_background: {
               type: 'boolean' as const,
@@ -452,6 +552,9 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
                   kind: { type: 'string', required: true, const: 'foreground' },
                   runId: { type: 'string', required: true },
                   output: { type: 'array', required: true, items: { type: 'json' } },
+                  actualProvider: { type: 'string' },
+                  actualModel: { type: 'string' },
+                  modelMismatch: { type: 'boolean' },
                 },
               },
             ],
@@ -462,7 +565,8 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
               ? `started background subagent job ${value.jobId}`
               : value.kind === 'continuable'
                 ? `started subagent ${value.subagentId}`
-                : outputValueText(value.output),
+                : outputValueText(value.output)
+                  + (value.actualProvider === undefined ? '' : `\n\n[executed on ${value.actualProvider}/${String(value.actualModel)}${value.modelMismatch === true ? ' — differs from the requested selection' : ''}]`),
           }],
         },
         // Children never mutate the parent session; the one parent-owned write
@@ -475,7 +579,13 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             throw new Error('subagent tool requires a calling agent (exec.agent was undefined)')
           }
 
-          const modelRequest = args as DelegationModelRequest
+          const rawModelRequest = args as DelegationModelRequest
+          // Reject an unknown tier or a tier mixed with an explicit provider/model
+          // before any registry read: ambiguity is a request-shape error, not a
+          // resolution failure.
+          assertValidTierSelection(rawModelRequest)
+          const modelRequest = await resolveTierIntoRoute(rawModelRequest, tierResolver, exec.signal)
+          const requestedTier = rawModelRequest.tier
           const parentOptions = parentAgentOptionsForDelegation(parent)
           const requiresRoutePreflight = hasDelegationModelRequest(modelRequest)
             || hasConfiguredLlmSelection(config.agentOptions)
@@ -564,7 +674,14 @@ export function apply(ctx: Context, config: Config, session?: Session): void {
             ...request,
             signal: exec.signal,
           })
-          return settleForegroundRun(run)
+          return settleForegroundRun(
+            run,
+            (requestedTier !== undefined || requestedChildAgentOptions?.provider !== undefined)
+              && requestedChildAgentOptions?.provider !== undefined
+              && requestedChildAgentOptions.model !== undefined
+              ? { provider: requestedChildAgentOptions.provider, model: requestedChildAgentOptions.model }
+              : undefined,
+          )
         },
       }))
       mounted = { subagentProvider, disposeTool }

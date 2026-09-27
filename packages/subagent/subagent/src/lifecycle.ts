@@ -21,9 +21,9 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
-import { finalAssistantOutput } from './assistant-output.ts'
+import { finalAssistantOutput, finalAssistantSource } from './assistant-output.ts'
 import { SubagentRunId } from './types.ts'
-import type { SubagentResult, SubagentRun, SubagentRunEndInfo, SubagentRunInfo } from './types.ts'
+import type { ActualModelRoute, SubagentResult, SubagentRun, SubagentRunEndInfo, SubagentRunInfo } from './types.ts'
 
 /**
  * How one Activation's residency epoch ended, as both the terminal lifecycle
@@ -34,6 +34,8 @@ export interface ActivationTerminal {
   readonly stopReason: SubagentResult['stopReason']
   /** The epoch's final assistant content, absent when it produced none or failed. */
   readonly output?: readonly ContentBlock[]
+  /** The provider/model that ACTUALLY produced {@link output}; absent under the same conditions. */
+  readonly actualRoute?: ActualModelRoute
 }
 
 /**
@@ -152,6 +154,7 @@ export function observeRun(
         stopReason: result.stopReason,
         // Omit the field when no output exists, matching continuable epochs.
         ...result.output.length === 0 ? {} : { lastAssistantMessage: result.output },
+        ...result.actualRoute === undefined ? {} : { actualRoute: result.actualRoute },
       }, parent)
     },
     () => {
@@ -201,18 +204,21 @@ export function createActivationObserver(
       // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       const own = child.session.snapshotEvents(boundary)
       const output = finalAssistantOutput(own)
+      const source = finalAssistantSource(own)
       captured = {
         stopReason: epochStopReason(own),
         ...output === undefined ? {} : { output },
+        ...source === undefined ? {} : { actualRoute: { provider: source.provider, model: source.model } },
       }
     },
     terminal,
     settle: (failure: unknown): void => {
-      const { stopReason, output } = terminal(failure)
+      const { stopReason, output, actualRoute } = terminal(failure)
       emit('subagent/end', {
         ...identity,
         stopReason,
         ...output === undefined ? {} : { lastAssistantMessage: output },
+        ...actualRoute === undefined ? {} : { actualRoute },
       }, parent)
     },
   }
