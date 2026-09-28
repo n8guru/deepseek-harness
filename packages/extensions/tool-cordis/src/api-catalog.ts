@@ -1428,6 +1428,26 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'sessionSuccessor',
+    summary: 'Log-backed successor service plus the `successor` projection unit.',
+    description: 'Log-backed successor service plus the `successor` projection unit.',
+    methods: [
+      {
+        signature: 'get(session: Session): (SessionSuccessorFact & { readonly seq: number }) | null',
+        description: 'Read the durable successor of one live or replayed session.',
+        parameters: [{ name: 'session', description: 'the session whose log is the source of truth.' }],
+        returns: 'the fact with its seq, or `null` when the session has no successor.',
+      },
+      {
+        signature: 'record(old: Session, request: RecordSuccessorRequest, options: RecordSuccessorOptions = {}): Promise<RecordSuccessorResult>',
+        description: 'Append the old session\'s one durable successor fact after proving readiness, then flush the old log so the fact is durable before any archive. Idempotent by `handoffId`; refusals leave the log unchanged so the old session stays selected and unarchived.',
+        parameters: [{ name: 'old', description: 'the live old session.' }, { name: 'request', description: 'the successor claim plus the caller\'s pointer resolve.' }, { name: 'options', description: 'workspace/pointer hooks and cancellation.' }],
+        returns: 'the recorded or already-existing fact.',
+        throws: ['{SessionSuccessorError} on every refusal.'],
+      },
+    ],
+  },
+  {
     key: 'sessionTelemetry',
     summary: 'Loadable form of the backend contract: one implementation per context — the cordis `Service` registration under the `telemetry` key throws on a duplicate, cordis\' standard behavior.',
     description: 'Loadable form of the backend contract: one implementation per context — the cordis `Service` registration under the `telemetry` key throws on a duplicate, cordis\' standard behavior. A backend composes a SessionTelemetryCoordinator in its constructor to install the capture side.',
@@ -3022,7 +3042,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateSessionOptions',
-    declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
+    declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n        readonly focusedContext?: {\n            readonly slug: string;\n            readonly title?: string;\n            readonly url: string;\n            readonly excerpt?: string;\n        };\n    };\n}',
   },
   {
     name: 'CreateTeamTaskRequest',
@@ -3697,6 +3717,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
   },
   {
+    name: 'RecordSuccessorOptions',
+    declaration: 'export interface RecordSuccessorOptions {\n    readonly sameWorkspace?: (oldId: SessionId, successorId: SessionId) => boolean;\n    readonly resolvePointer?: (signal?: AbortSignal) => Promise<string | null>;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'RecordSuccessorRequest',
+    declaration: 'export interface RecordSuccessorRequest extends SessionSuccessorFact {\n    readonly pointerSessionId: string | null;\n}',
+  },
+  {
+    name: 'RecordSuccessorResult',
+    declaration: 'export interface RecordSuccessorResult {\n    readonly status: \'recorded\' | \'existing\';\n    readonly fact: SessionSuccessorFact;\n    readonly seq: number;\n}',
+  },
+  {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
   },
@@ -3930,7 +3962,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHeader',
-    declaration: 'export interface SessionHeader {\n    readonly version: number;\n    readonly id: SessionId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly seedLength?: number;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n}',
+    declaration: 'export interface SessionHeader {\n    readonly version: number;\n    readonly id: SessionId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly seedLength?: number;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n    readonly focusedContext?: {\n        readonly slug: string;\n        readonly title?: string;\n        readonly url: string;\n        readonly excerpt?: string;\n    };\n}',
   },
   {
     name: 'SessionId',
@@ -4027,6 +4059,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionStartSource',
     declaration: 'export type SessionStartSource = \'startup\' | \'resume\' | \'clear\' | \'compact\';',
+  },
+  {
+    name: 'SessionSuccessorFact',
+    declaration: 'export interface SessionSuccessorFact {\n    readonly successorSessionId: string;\n    readonly successorGeneration: number;\n    readonly handoffId: string;\n}',
   },
   {
     name: 'SessionSurfaceSnapshot',

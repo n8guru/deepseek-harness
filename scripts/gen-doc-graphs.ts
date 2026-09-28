@@ -263,6 +263,13 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns the deterministic fallback, latest-title fold, and sole optional asynchronous provider registration.',
   },
   {
+    key: 'sessionSuccessor',
+    pkg: 'session-successor',
+    title: 'Durable cadence successor lineage',
+    mode: 'core',
+    note: 'Records one readiness-gated session/successor fact on the old session and serves it as the successor projection.',
+  },
+  {
     key: 'systemPrompt',
     pkg: 'system-prompt',
     title: 'System prompt assembly registry',

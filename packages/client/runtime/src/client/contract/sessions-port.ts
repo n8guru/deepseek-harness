@@ -32,6 +32,13 @@ export interface SessionsPort {
   /** Observable list snapshot (read face only; writes stay inside the sessions domain). */
   readonly list: ObservableSnapshot<SessionsPortList>
   /**
+   * Whether a session's projection store holds a durable cadence `successor`
+   * (seeded by the list row, history tail, or a `session/projection` frame).
+   * An archived session with a successor stays openable as a superseded
+   * generation instead of being swept. Optional: absent reads as none.
+   */
+  hasSuccessor?(id: SessionId): boolean
+  /**
    * Create a session on the host.
    * @param opts - target workspace.
    * @returns the new session id.

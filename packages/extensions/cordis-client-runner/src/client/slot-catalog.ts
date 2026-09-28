@@ -647,6 +647,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [
       'client-ui-conversation QueueDock id \'queue\'',
       'client-ui-conversation TodoDock id \'todo\'',
+      'client-ui-conversation SuccessorDock id \'successor\'',
       'client-ui-goal GoalDock id \'goal\'',
     ],
     replaceRisk: 'none',

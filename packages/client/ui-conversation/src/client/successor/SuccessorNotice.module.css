@@ -1,0 +1,47 @@
+/* One dismissible line in the composer dock column: tip surface, same card
+   rhythm as the todo strip and GoalBar. */
+
+.root {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto;
+  width: calc(100% - var(--dsh-composer-side-clearance) - var(--dsh-composer-side-clearance));
+  max-width: var(--dsh-composer-card-max-width);
+  min-height: 32px;
+  padding: 4px 8px 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-specific-tip);
+  font-size: 13px;
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-text-link, inherit);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dismiss {
+  flex: none;
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}

@@ -7,6 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { installHandForward, type HandForwardConfig } from './hand-forward.ts'
+import { installRecordSuccessor } from './record-successor.ts'
 
 /** Optional agent-callable self-compaction; absent keeps the human-only composition. */
 export interface Config {
@@ -93,6 +94,10 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (handForward !== undefined) {
     ctx.inject(['tools', 'agents', 'sessions', 'llm', 'tokenMeter', 'fs'], (scope) => {
       installHandForward(scope, handForward)
+    })
+    // Same opt-in: the old generation records its successor after hand-forward.
+    ctx.inject(['tools'], (scope) => {
+      installRecordSuccessor(scope)
     })
   }
   const active = new Set<Promise<CommandResult>>()

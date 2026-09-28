@@ -339,7 +339,13 @@ export class WorkspaceRuntime implements IWorkspaces {
     // every install path with one rule: the local unary echo, another tab's
     // changed frame, and a reconnect baseline restoring a persisted
     // selection that was archived while this client was away.
-    if (sessions.current !== undefined && workspace.archivedSessionIds.includes(sessions.current)) {
+    // Exception: an archived session that carries a durable cadence successor
+    // is a superseded generation. It stays selected so the successor follower
+    // (ui-conversation) can inspect its projection first — moving the draft
+    // and selecting the successor — and so an explicit back-link can open
+    // its transcript without being swept away.
+    if (sessions.current !== undefined && workspace.archivedSessionIds.includes(sessions.current)
+      && this.sessions.hasSuccessor?.(sessions.current) !== true) {
       this.sessions.clear()
     }
     this.list.set({

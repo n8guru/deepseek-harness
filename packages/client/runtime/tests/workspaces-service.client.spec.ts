@@ -488,6 +488,36 @@ describe('WorkspaceRuntime', () => {
     expect(workspaces.list.getSnapshot().archivedSessionIds).toEqual(['s-open'])
   })
 
+  it('keeps an archived current selected when it carries a durable cadence successor (follower and back-link)', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const sessions = new SessionRuntime(ctx, api, fakeRemote())
+    const workspaces = new WorkspaceRuntime(ctx, api, sessions)
+    const successor = { successorSessionId: 'gen-11', successorGeneration: 11, handoffId: 'h' }
+    api.onList = () => Promise.resolve(ok({
+      items: [
+        { sessionId: sid('gen-10'), updatedAt: 1, running: false, blank: false, projections: { asOfSeq: 9, values: { successor } } },
+        { sessionId: sid('gen-11'), updatedAt: 2, running: false, blank: false, projections: { asOfSeq: 3, values: { successor: null } } },
+      ],
+    }) as never)
+    await sessions.refresh()
+    sessions.open(sid('gen-10'))
+    workspaces.handleHostEnvelope({
+      rpcId: 'frame' as never,
+      payload: { type: 'host/archived-sessions-changed', archivedSessionIds: [sid('gen-10')] },
+    } as never)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(sessions.list.getSnapshot().current).toBe('gen-10')
+    // An archived session without a successor is still swept.
+    sessions.open(sid('gen-11'))
+    workspaces.handleHostEnvelope({
+      rpcId: 'frame2' as never,
+      payload: { type: 'host/archived-sessions-changed', archivedSessionIds: [sid('gen-10'), sid('gen-11')] },
+    } as never)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(sessions.list.getSnapshot().current).toBeUndefined()
+  })
+
   it('clears a current archived by a remote frame and shields the set from a stale in-flight baseline', async () => {
     const ctx = new Context()
     const api = new FakeApiClient()

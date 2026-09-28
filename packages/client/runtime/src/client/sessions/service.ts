@@ -574,6 +574,15 @@ export class SessionRuntime implements ISessions {
   }
 
   /**
+   * Whether the session's projection store holds a durable cadence successor.
+   * @param id - session id.
+   * @returns true once a non-null `successor` projection value is known.
+   */
+  hasSuccessor(id: SessionId): boolean {
+    return this.resolve(id)?.binding.session.projections.faceOf('successor').getSnapshot() != null
+  }
+
+  /**
    * Resolve the stable session binding (scope-addressed assembly feed). Pure
    * resolution — no staging, no window side effects.
    * @param id - session id.

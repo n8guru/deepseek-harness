@@ -259,4 +259,36 @@ restore(checkpoint: ProjectionCheckpoint, events: readonly SessionEvent[], baseS
 Types: [Session](session.md) · [SessionEvent](session.md)
 
 Source: [`packages/session/session-projection/src/index.ts:171`](../../packages/session/session-projection/src/index.ts)
+
+<a id="ctxsessionsuccessor--sessionsuccessorservice"></a>
+
+### `ctx.sessionSuccessor` — `SessionSuccessorService`
+
+Log-backed successor service plus the `successor` projection unit.
+
+```ts cordis-catalog
+/**
+ * Read the durable successor of one live or replayed session.
+ * @param session - the session whose log is the source of truth.
+ * @returns the fact with its seq, or `null` when the session has no successor.
+ */
+get(session: Session): (SessionSuccessorFact & { readonly seq: number }) | null
+
+/**
+ * Append the old session's one durable successor fact after proving
+ * readiness, then flush the old log so the fact is durable before any
+ * archive. Idempotent by `handoffId`; refusals leave the log unchanged so
+ * the old session stays selected and unarchived.
+ * @param old - the live old session.
+ * @param request - the successor claim plus the caller's pointer resolve.
+ * @param options - workspace/pointer hooks and cancellation.
+ * @returns the recorded or already-existing fact.
+ * @throws {SessionSuccessorError} on every refusal.
+ */
+record(old: Session, request: RecordSuccessorRequest, options: RecordSuccessorOptions = {}): Promise<RecordSuccessorResult>
+```
+
+Types: [Session](session.md)
+
+Source: [`packages/session/session-successor/src/index.ts:144`](../../packages/session/session-successor/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -32,6 +32,9 @@ import { StatsLine } from './chat/StatsLine.tsx'
 import { ApprovalPanel } from './skeleton/ApprovalPanel.tsx'
 import { todoDockEntry } from './skeleton/TodoPanel.tsx'
 import { queueDockEntry } from './queue/QueueDock.tsx'
+import { SuccessorFollower, tabLocalSet, type SuccessorFact } from './successor/follow.ts'
+import { successorDockEntry } from './successor/SuccessorNotice.tsx'
+import type { DraftAttachmentId } from './input/contract.ts'
 import { ConversationRoot } from './skeleton/ConversationRoot.tsx'
 import { ConversationSession, ConversationSessionHeader } from './skeleton/ConversationSession.tsx'
 import { DetailsPanel } from './skeleton/DetailsPanel.tsx'
@@ -441,6 +444,73 @@ export function apply(ctx: Context): void {
   // The read-only queue dock entry rides the same
   // registration path into the input dock declared above.
   ctx.plugin(queueDockEntry)
+
+  // Cadence hand-forward: every tab showing a session whose durable
+  // `successor` projection appears moves its unsent draft and selects the
+  // successor (host projection is the authority; see successor/follow.ts).
+  // One per-session projection store carries the list-row baseline, the
+  // history tail and every session/projection frame (higher seq wins).
+  const successorOf = (id: string): SuccessorFact | null | undefined =>
+    sessions.binding(id as SessionId)?.session.projections.faceOf('successor').getSnapshot() as SuccessorFact | null | undefined
+  const follower = new SuccessorFollower({
+    current: () => sessions.list.getSnapshot().current,
+    successorOf,
+    readDraft: (id) => {
+      if (sessions.binding(id as SessionId) === undefined) return undefined
+      const snapshot = inputHub.shell(id as SessionId).snapshot
+      return { draft: snapshot.draft, imageIds: snapshot.imageIds }
+    },
+    installDraft: (id, content) => {
+      const next = inputHub.shell(id as SessionId)
+      if (content.imageIds.length > 0 && !next.addImages(content.imageIds as readonly DraftAttachmentId[])) return false
+      if (content.draft !== '') next.setDraft(content.draft)
+      return true
+    },
+    clearDraft: (id, content) => {
+      const from = inputHub.shell(id as SessionId)
+      if (content.draft !== '') from.setDraft('')
+      for (const image of content.imageIds) from.removeImage(image as DraftAttachmentId)
+    },
+    open: (id) => { sessions.open(id as SessionId) },
+    handled: tabLocalSet('dsh.successor.handled'),
+    dismissed: tabLocalSet('dsh.successor.dismissed'),
+  })
+  ctx.effect(() => {
+    let disposed = false
+    let faceFor: SessionId | undefined
+    let faceOff: (() => void) | undefined
+    let queued = false
+    const run = (): void => {
+      queued = false
+      if (disposed) return
+      const id = sessions.list.getSnapshot().current
+      if (id !== faceFor) {
+        faceOff?.()
+        faceOff = undefined
+        faceFor = undefined
+        const face = id === undefined ? undefined : sessions.binding(id)?.session.projections.faceOf('successor')
+        if (face !== undefined) {
+          faceFor = id
+          faceOff = face.subscribe(schedule)
+        }
+      }
+      follower.evaluate()
+    }
+    // Deferred so navigation never runs inside a store notification.
+    const schedule = (): void => {
+      if (queued) return
+      queued = true
+      queueMicrotask(run)
+    }
+    const offList = sessions.list.subscribe(schedule)
+    schedule()
+    return () => {
+      disposed = true
+      offList()
+      faceOff?.()
+    }
+  }, 'ui-conversation: successor follower')
+  ctx.plugin(successorDockEntry(follower))
 
   slots.register({
     name: 'details',

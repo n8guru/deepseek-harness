@@ -43,6 +43,9 @@
         fallbackMaxBytes: 40
         maxTitleBytes: 80
 
+    - id: session-successor
+      name: '@deepseek-ai/dsh-session-successor'
+
     - id: session-title-llm
       name: '@deepseek-ai/dsh-session-title-first-prompt-llm'
       config:

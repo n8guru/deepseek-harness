@@ -469,6 +469,40 @@ export interface Config {
 
 来源：[`packages/code-runtime/code-runtime-worker-thread/src/index.ts:25`](../packages/code-runtime/code-runtime-worker-thread/src/index.ts)
 
+<a id="deepseek-aidsh-command-compact"></a>
+
+## `@deepseek-ai/dsh-command-compact`
+
+Requires: `commands` · `compaction`
+
+```ts config-catalog
+/** Optional agent-callable self-compaction; absent keeps the human-only composition. */
+export interface Config {
+  /** Explicit opt-in; mount only in the intended conductor scope. */
+  handForward?: HandForwardConfig
+}
+
+/** Deployment-owned paths; tool callers cannot select the audit destination. */
+export interface HandForwardConfig {
+  /** Host-local audit root, independent of session persistence. */
+  auditDirectory?: string
+  /** Default readable baton in the agent's filesystem world. */
+  batonPath?: string
+  /** Maximum baton bytes read and hashed; default one MiB. */
+  maxBatonBytes?: number
+  /** Abandoned-pending recovery age; never expires a live owner's kernel lock. Default 120 seconds, minimum five seconds. */
+  staleMs?: number
+  /** Deadline for read-only preflight and, separately, scheduled idle waiting; default ten minutes each. */
+  idleTimeoutMs?: number
+  /** Per-phase warning deadline, NOT a lock expiry; default five minutes. */
+  watchdogMs?: number
+  /** Maximum plugin teardown wait; unfinished effects retain their reservation. Default ten seconds. */
+  disposeTimeoutMs?: number
+}
+```
+
+Source: [`packages/compaction/command-compact/src/index.ts:13`](../packages/compaction/command-compact/src/index.ts)
+
 <a id="deepseek-aidsh-compaction-basic"></a>
 
 ## `@deepseek-ai/dsh-compaction-basic`
@@ -3229,7 +3263,6 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-user-questions`（[`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-workflow-run`（[`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-workspace`（[`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts)）
-- `@deepseek-ai/dsh-command-compact` — 需要 `commands` · `compact`（[`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts)）
 - `@deepseek-ai/dsh-command-feedback` — 需要 `commands`（[`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts)）
 - `@deepseek-ai/dsh-command-goal` — 需要 `commands` · `goals`（[`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts)）
 - `@deepseek-ai/dsh-commands`（[`packages/interaction/commands/src/index.ts`](../packages/interaction/commands/src/index.ts)）
@@ -3248,6 +3281,7 @@ export interface Config {
 - `@deepseek-ai/dsh-session-log-export` — 需要 `commands`（[`packages/session-query/session-log-export/src/index.ts`](../packages/session-query/session-log-export/src/index.ts)）
 - `@deepseek-ai/dsh-session-projection`（[`packages/session/session-projection/src/index.ts`](../packages/session/session-projection/src/index.ts)）
 - `@deepseek-ai/dsh-session-stats` — 需要 `sessionProjections`（[`packages/session/session-stats/src/index.ts`](../packages/session/session-stats/src/index.ts)）
+- `@deepseek-ai/dsh-session-successor` — 需要 `sessions`（[`packages/session/session-successor/src/index.ts`](../packages/session/session-successor/src/index.ts)）
 - `@deepseek-ai/dsh-skill-badge` — 需要 `skills`（[`packages/skill/skill-badge/src/index.ts`](../packages/skill/skill-badge/src/index.ts)）
 - `@deepseek-ai/dsh-storage`（[`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts)）
 - `@deepseek-ai/dsh-subagent`（[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
