@@ -392,6 +392,32 @@ describe('session creation and Workspace membership', () => {
     expect(missing.result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
   })
 
+  it('workspace.attachSession accounts an existing same-cwd session idempotently and refuses others', async () => {
+    const { api, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'conductor') }))).workspace
+    // A hand-forward successor created outside the GUI: cwd-only, not yet accounted.
+    const successor = SessionId('conductor-forge-agent-os-2')
+    expectOk(await api.sessions.create(request({ cwd: workspace.path, sessionId: successor })))
+    expect(expectOk(await api.workspace.list(request({}))).items[0]?.sessionIds).toEqual([])
+
+    const attached = expectOk(await api.workspace.attachSession(request({ workspaceId: workspace.workspaceId, sessionId: successor })))
+    expect(attached.workspace.sessionIds).toEqual([successor])
+    const again = expectOk(await api.workspace.attachSession(request({ workspaceId: workspace.workspaceId, sessionId: successor })))
+    expect(again.workspace.sessionIds).toEqual([successor])
+
+    const elsewhere = SessionId('session-other-cwd')
+    expectOk(await api.sessions.create(request({ cwd: stageDir(root, 'other'), sessionId: elsewhere })))
+    const wrong = await api.workspace.attachSession(request({ workspaceId: workspace.workspaceId, sessionId: elsewhere }))
+    expect(wrong.result).toMatchObject({
+      ok: false,
+      error: { code: 'workspace-attach-failed', details: { sessionId: elsewhere, workspaceId: workspace.workspaceId } },
+    })
+    expect(expectOk(await api.workspace.list(request({}))).items[0]?.sessionIds).toEqual([successor])
+
+    const missing = await api.workspace.attachSession(request({ workspaceId: 'missing' as WorkspaceId, sessionId: successor }))
+    expect(missing.result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
+  })
+
   it('retains a published session when attachment fails and repairs it on retry', async () => {
     const { api, ctx, root } = await harness()
     const created = expectOk(await api.workspace.create(request({ path: stageDir(root, 'project') }))).workspace

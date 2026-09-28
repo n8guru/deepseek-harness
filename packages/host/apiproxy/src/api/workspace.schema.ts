@@ -77,6 +77,17 @@ export const workspaceInsertBeforeValueSchema = z.object({
   workspaceIds: z.array(workspaceIdSchema),
 }) satisfies z.ZodType<Wire<ResponseValue<'workspace.insertBefore'>>>
 
+/** workspace.attachSession request payload. */
+export const workspaceAttachSessionRequestSchema = z.object({
+  workspaceId: workspaceIdSchema,
+  sessionId: sessionIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'workspace.attachSession'>>>
+
+/** workspace.attachSession response value. */
+export const workspaceAttachSessionValueSchema = z.object({
+  workspace: workspaceViewSchema,
+}) satisfies z.ZodType<Wire<ResponseValue<'workspace.attachSession'>>>
+
 /** workspace.insertSessionBefore request payload (anchor omitted = append to end). */
 export const workspaceInsertSessionBeforeRequestSchema = z.object({
   workspaceId: workspaceIdSchema,

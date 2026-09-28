@@ -83,6 +83,19 @@ export interface WorkspaceApi {
   }>): Promise<RpcResponse<{ workspaceIds: WorkspaceId[] }>>
 
   /**
+   * Accounts an existing live or stored session in a workspace (idempotent).
+   * Used by a hand-forward driver to place a successor it created outside the
+   * Web GUI (e.g. `conductor-<slug>-N+1`) in the conductor workspace, so the
+   * workspace-membership check of `session/successor` can accept it. The
+   * session's stored header cwd must resolve to the workspace path, else the
+   * call fails; an unknown workspace fails with `workspace-not-found`.
+   */
+  attachSession(request: RpcRequest<{
+    workspaceId: WorkspaceId
+    sessionId: SessionId
+  }>): Promise<RpcResponse<{ workspace: WorkspaceView }>>
+
+  /**
    * Moves an accounted session within its workspace's manual order,
    * DOM-insertBefore-like: with `beforeSessionId` the session is inserted
    * before that anchor; omitted appends to the end. An unknown workspace

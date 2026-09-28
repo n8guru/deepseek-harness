@@ -216,6 +216,8 @@ export class FakeApiClient implements IApiClient {
     delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
     insertBefore: (payload: unknown) =>
       this.record('workspace.insertBefore', payload, this.onWorkspaceInsertBefore(payload)),
+    attachSession: (payload: unknown) =>
+      this.record('workspace.attachSession', payload, Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws') }))),
     insertSessionBefore: (payload: unknown) =>
       this.record('workspace.insertSessionBefore', payload, this.onWorkspaceInsertSessionBefore(payload)),
     archiveSession: (payload: unknown) =>

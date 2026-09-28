@@ -2969,6 +2969,25 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
+      async attachSession(request) {
+        const { payload } = request
+        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))
+        if (workspace === undefined) return workspaceNotFound(request, payload.workspaceId)
+        // Idempotent: an accounted id is a no-op. A session whose stored
+        // header cwd is missing or does not resolve to this workspace's path
+        // is refused with the same business code as create/fork attachment.
+        try {
+          await workspace.attachSession(payload.sessionId)
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'workspace-attach-failed',
+            message: `session "${payload.sessionId}" could not attach to workspace "${workspace.id}": ${String(error)}`,
+            details: { sessionId: payload.sessionId, workspaceId: workspace.id },
+          })
+        }
+        return ok(request, { workspace: workspaceView(workspace) })
+      },
+
       async insertSessionBefore(request) {
         const { payload } = request
         const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))
