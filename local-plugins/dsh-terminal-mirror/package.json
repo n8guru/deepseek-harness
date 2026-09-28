@@ -1,0 +1,30 @@
+{
+  "name": "dsh-terminal-mirror",
+  "version": "0.1.0",
+  "description": "Mirrors DSH operator prompts and agent final replies to the Forage terminal mirror",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./backfill": "./lib/backfill.js",
+    "./classify": "./lib/classify.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "files": [
+    "bin/dsh-terminal-mirror-backfill.mjs",
+    "cordis.patch.yml",
+    "lib/backfill.js",
+    "lib/classify.js",
+    "lib/index.js",
+    "lib/post.js"
+  ]
+}
