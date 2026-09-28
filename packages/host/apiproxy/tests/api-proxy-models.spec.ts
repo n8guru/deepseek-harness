@@ -657,4 +657,81 @@ describe('Web session model selection', () => {
       .not.toContain('deleted-gateway/deleted-model')
     await ctx.fiber.dispose()
   })
+
+  it('hides Canon R20 banned ids, refuses selectModel to them, and never defaults Fable 5.1', async () => {
+    const { ctx, sessionId } = await harness()
+    ctx.llm.registerAdapter(['anthropic'], new CatalogAdapter('Anthropic', [
+      { provider: 'anthropic', id: 'claude-opus-5', name: 'Claude Opus 5' },
+      { provider: 'anthropic', id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+      { provider: 'anthropic', id: 'claude-fable-5', name: 'Claude Fable 5' },
+      { provider: 'anthropic', id: 'claude-fable-5-1', name: 'Claude Fable 5.1' },
+      { provider: 'anthropic', id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+      { provider: 'anthropic', id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
+    ]))
+    ctx.llm.registerAdapter(['openai'], new CatalogAdapter('OpenAI', [
+      { provider: 'openai', id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol' },
+      { provider: 'openai', id: 'gpt-5.5', name: 'GPT 5.5' },
+      { provider: 'openai', id: 'gpt-6-sol', name: 'GPT 6 Sol' },
+    ]))
+    ctx.llm.registerAdapter(['xai'], new CatalogAdapter('xAI', [
+      { provider: 'xai', id: 'grokheavy/grok-build', name: 'Grok Build' },
+      { provider: 'xai', id: 'grok-4.6', name: 'Grok 4.6' },
+    ]))
+    const saved: unknown[] = []
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      saveDefaultModelSelection: (selection) => {
+        saved.push(selection)
+        return Promise.resolve()
+      },
+      cwd: '/tmp',
+    })
+
+    const catalog = expectValue(await api.sessions.models(request({ sessionId })))
+    const ids = catalog.groups.flatMap(group => group.models.map(model => model.id))
+    expect(ids).not.toEqual(expect.arrayContaining([
+      'claude-opus-5', 'claude-fable-5', 'claude-haiku-4-5-20251001',
+      'gpt-5.6-sol', 'gpt-5.5', 'grokheavy/grok-build',
+    ]))
+    expect(ids).toEqual(expect.arrayContaining([
+      'claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5', 'gpt-6-sol', 'grok-4.6',
+    ]))
+    expect(catalog.current).toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    expect(catalog.current.model).not.toMatch(/fable-5/i)
+
+    for (const banned of [
+      { provider: 'anthropic', model: 'claude-opus-5' },
+      { provider: 'anthropic', model: 'claude-fable-5' },
+      { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+      { provider: 'openai', model: 'gpt-5.6-sol' },
+      { provider: 'openai', model: 'gpt-5.5' },
+      { provider: 'xai', model: 'grokheavy/grok-build' },
+      { provider: 'anthropic', model: 'claude-opus-5[1m]' },
+    ]) {
+      const refused = await api.sessions.selectModel(request({ sessionId, ...banned }))
+      expect(refused.result).toMatchObject({
+        ok: false,
+        error: {
+          code: 'model-unavailable',
+          message: expect.stringMatching(/banned \(Canon R20/),
+          details: banned,
+        },
+      })
+    }
+    expect(saved).toHaveLength(0)
+
+    const fable = expectValue(await api.sessions.selectModel(request({
+      sessionId, provider: 'anthropic', model: 'claude-fable-5-1',
+    })))
+    expect(fable.selected).toEqual({ provider: 'anthropic', model: 'claude-fable-5-1' })
+    expect(saved).toHaveLength(0)
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
+      .toEqual({ provider: 'anthropic', model: 'claude-fable-5-1' })
+
+    expectValue(await api.sessions.selectModel(request({
+      sessionId, provider: 'anthropic', model: 'claude-sonnet-5',
+    })))
+    expect(saved).toEqual([{ provider: 'anthropic', model: 'claude-sonnet-5' }])
+    await ctx.fiber.dispose()
+  })
 })

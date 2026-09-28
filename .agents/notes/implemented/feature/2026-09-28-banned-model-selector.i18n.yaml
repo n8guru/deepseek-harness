@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-28-banned-model-selector.md
+2026-09-28-banned-model-selector.md: f2cffebdf6739be3cca363b91a78262e229a2083
+2026-09-28-banned-model-selector.zh.md: a3250839b4d5c8689134150dac664471897ab6a1

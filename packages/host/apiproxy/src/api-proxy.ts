@@ -263,11 +263,57 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
 }
 
 /**
+ * Canon R20 / board #4 N3a banned launcher ids. Aligns with forage
+ * `app/provider_lane.py` `BANNED_MODEL_RE` (fullmatch, case-insensitive).
+ * `claude-opus-5-5` is not `claude-opus-5`.
+ */
+const BANNED_MODEL_RE = new RegExp(
+  '^(?:claude-opus-5|opus-5|gpt-5\\.[56](?:-.*)?|claude-fable-5(?:-1)?'
+  + '|fable-5(?:[.-]1)?|grok-build|(?:claude-)?haiku(?:-.*)?)$',
+  'i',
+)
+
+/** Fable 5.1 stays an explicit operator pin (N3a); never a default. */
+const FABLE_51_RE = /^(?:claude-)?fable-5(?:[.-]1)$/i
+
+/** Bare launcher token: lowercased, trailing `[1m]` stripped. */
+function modelPinToken(value: string): string {
+  return value.trim().toLowerCase().replace(/\[.*?\]$/, '').trim()
+}
+
+/** Full id plus last slash segment (`grokheavy/grok-build` → `grok-build`). */
+function modelPinCandidates(value: string): string[] {
+  const token = modelPinToken(value)
+  const slash = token.lastIndexOf('/')
+  return slash === -1 ? [token] : [token, token.slice(slash + 1)]
+}
+
+/** True when the id is Fable 5.1 (dashed or dotted, optional `claude-` prefix). */
+function isOperatorOnlyFable51(model: string): boolean {
+  return modelPinCandidates(model).some(token => FABLE_51_RE.test(token))
+}
+
+/**
+ * True when the selector must hide this id and `selectModel` must refuse it.
+ * Fable 5.1 is excluded so an operator can still pick it by name.
+ */
+function isBannedSelectorModel(model: string): boolean {
+  if (isOperatorOnlyFable51(model)) return false
+  return modelPinCandidates(model).some(token => BANNED_MODEL_RE.test(token))
+}
+
+/** Product-visible refusal for a Canon R20 banned `selectModel`. */
+function bannedModelRefusal(model: string): string {
+  return `Model "${model}" is banned (Canon R20 / board #4 N3a) and cannot be selected.`
+}
+
+/**
  * Build the provider/model catalog over every registered route. Shared by the
  * session-scoped `session.models` and host-scoped `llm.models`. Catalog
  * membership stays advisory: an unlisted session selection remains valid for
  * provider dispatch, but is not injected back into the selector after its
- * owning catalog stops advertising it. Per-provider failures ride `failures`
+ * owning catalog stops advertising it. Canon R20 banned ids are dropped from
+ * the groups (Fable 5.1 stays listed). Per-provider failures ride `failures`
  * without failing the sound groups; groups that advertise nothing are dropped.
  */
 async function buildModelCatalog(ctx: Context): Promise<{
@@ -303,7 +349,7 @@ async function buildModelCatalog(ctx: Context): Promise<{
       const group: ModelProviderGroup = {
         id: provider.id,
         name: provider.name,
-        models: entries,
+        models: entries.filter(entry => !isBannedSelectorModel(entry.id)),
       }
       return { kind: 'group' as const, group }
     } catch (error: unknown) {
@@ -2350,6 +2396,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         if ('error' in found) return err(request, found.error)
         return serializeImageAdmission(found.agent, async () => {
           try {
+            if (isBannedSelectorModel(model)) {
+              return err(request, {
+                code: 'model-unavailable',
+                message: bannedModelRefusal(model),
+                details: { provider, model },
+              })
+            }
             const resolved = await ctx.llm.resolveCallConfig({
               provider,
               model,
@@ -2377,12 +2430,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
                 : { reasoningEffort: resolved.reasoningEffort },
             }
             selectionFor(found.agent).current = selected
-            try {
-              await defaults.saveDefaultModelSelection?.(selected)
-            } catch (error: unknown) {
-              ctx.logger.warn(
-                `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
-              )
+            // Fable 5.1 is session-local only: never the Agent default, never mesh-selected.
+            if (!isOperatorOnlyFable51(selected.model)) {
+              try {
+                await defaults.saveDefaultModelSelection?.(selected)
+              } catch (error: unknown) {
+                ctx.logger.warn(
+                  `api-proxy: the model switch applies to this session but was not saved as the default: ${String(error)}`,
+                )
+              }
             }
             return ok(request, { selected: { ...selected } })
           } catch (error: unknown) {
