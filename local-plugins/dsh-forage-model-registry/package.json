@@ -1,0 +1,22 @@
+{
+  "name": "dsh-forage-model-registry",
+  "version": "0.1.0",
+  "description": "DSH catalog adapter for the Forage mesh model registry (TTL-cached, fail-closed); generates the registry-governed llm-pi-ai model lists",
+  "private": true,
+  "type": "module",
+  "main": "lib/registry.js",
+  "exports": {
+    ".": "./lib/registry.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "dsh-forage-model-registry": "./bin/generate.mjs"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.mjs"
+  },
+  "files": [
+    "lib/registry.js",
+    "bin/generate.mjs"
+  ]
+}
