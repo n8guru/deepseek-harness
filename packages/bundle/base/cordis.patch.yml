@@ -289,8 +289,18 @@
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'
 
+    # THE subagent model table: role -> provider/model, and the only place a
+    # subagent model id lives. `default` applies to a `subagent` child whose caller
+    # names no `role`/`model` (drop it to inherit the parent's model). Override any
+    # row without a rebuild in `$DSH_HOME/settings.yaml` under `subagent-models.roles`.
     - id: subagent
       name: '@deepseek-ai/dsh-subagent'
+      config:
+        roles:
+          default: { provider: anthropic, model: claude-sonnet-5-5 }
+          mid: { provider: anthropic, model: claude-sonnet-5-5 }
+          hard: { provider: anthropic, model: claude-opus-5-5 }
+          reviewer: { provider: openai-codex, model: gpt-6-sol }
 
     - id: subagent-spawn-in-process
       name: '@deepseek-ai/dsh-subagent-spawn-in-process'

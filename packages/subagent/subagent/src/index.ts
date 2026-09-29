@@ -32,6 +32,7 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
@@ -66,9 +67,13 @@ import type { ContinuableSetupContribution } from './activation-setup-registry.t
 import { listChildren as listSubagentChildren, listDescendants as listSubagentDescendants } from './list-children.ts'
 import type { SubagentDescendantListEntry, SubagentListEntry } from './list-children.ts'
 import { snapshotSubagentDescriptor } from './descriptor.ts'
+import { DEFAULT_SUBAGENT_ROLE, SUBAGENT_MODELS_SCHEMA, installSubagentModels, routeForRole } from './models.ts'
+import type { SubagentModelRoute, SubagentModelsSettings } from './models.ts'
 import { subagentIdentityProjectionDefinition, subagentTimingProjectionDefinition } from './projection.ts'
 
 export * from './out-of-process.ts'
+export { DEFAULT_SUBAGENT_ROLE, SUBAGENT_MODELS_SETTINGS_NAMESPACE } from './models.ts'
+export type { SubagentModelRoute, SubagentModelsSettings } from './models.ts'
 export { AssistantOutputFold, finalAssistantOutput } from './assistant-output.ts'
 export { SubagentRunId } from './types.ts'
 export type {
@@ -180,8 +185,14 @@ export class SubagentRuntime extends Service {
    */
   private readonly emitLifecycle: LifecycleEmitter
 
-  constructor(ctx: Context) {
+  /** Composed model-table defaults; the `subagent-models` settings section layers over them. */
+  static Config: z<SubagentModelsSettings> = SUBAGENT_MODELS_SCHEMA
+
+  private readonly readModels: () => SubagentModelsSettings
+
+  constructor(ctx: Context, config?: SubagentModelsSettings) {
     super(ctx, 'subagents')
+    this.readModels = installSubagentModels(ctx, { roles: config?.roles ?? {} })
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
     ctx.inject(['agents'], (childCtx: Context) => {
       const manager = new SubagentContinuationManager(childCtx, {
@@ -198,6 +209,23 @@ export class SubagentRuntime extends Service {
       projectionCtx.sessionProjections.register(subagentTimingProjectionDefinition)
       projectionCtx.sessionProjections.register(subagentIdentityProjectionDefinition)
     })
+  }
+
+  /**
+   * Child model for a role in the editable subagent model table, read live.
+   * @param role - table key; omit for the `default` role.
+   * @returns the route, or `undefined` when no `default` row exists (inherit the parent's model).
+   * @throws {SubagentError} `UNKNOWN_MODEL_ROLE` for an unlisted explicit role.
+   */
+  resolveModel(role?: string): SubagentModelRoute | undefined {
+    const table = this.readModels()
+    if (role === undefined && !Object.hasOwn(table.roles, DEFAULT_SUBAGENT_ROLE)) return undefined
+    return routeForRole(table, role ?? DEFAULT_SUBAGENT_ROLE)
+  }
+
+  /** Role names currently in the model table. */
+  modelRoles(): string[] {
+    return Object.keys(this.readModels().roles)
   }
 
   /**
