@@ -310,6 +310,35 @@ describe('MarkdownText', () => {
     expect(container.querySelector('a')).toBeNull()
   })
 
+  it('keeps currency dollars literal without hiding later inline math', () => {
+    for (const source of [
+      'They pay $400 a month; by 2030 it is $4 million',
+      'a $25 plan vs a $5 plan',
+    ]) {
+      for (const streaming of [true, false]) {
+        const rendered = render(<MarkdownText text={source} streaming={streaming} />)
+        expect(rendered.container.querySelector('.katex')).toBeNull()
+        expect(rendered.container.textContent).toContain(source)
+        rendered.unmount()
+      }
+    }
+
+    const source = 'costs $5 for $x^2$'
+    const live = render(<MarkdownText text={source} streaming />)
+    expect(live.container.querySelector('.katex')).toBeNull()
+    expect(live.container.textContent).toContain(source)
+    live.rerender(<MarkdownText text={source} />)
+    expect(live.container.querySelectorAll('.katex')).toHaveLength(1)
+    expect(live.container.textContent).toContain('$5')
+    expect(live.container.querySelector('annotation')?.textContent).toBe('x^2')
+
+    const escaped = render(<MarkdownText text={String.raw`escaped \$5 then $x$ and $x^2 + 1$`} />)
+    expect(escaped.container.textContent).toContain('escaped $5 then')
+    expect(escaped.container.querySelectorAll('.katex')).toHaveLength(2)
+    expect([...escaped.container.querySelectorAll('annotation')].map(node => node.textContent))
+      .toEqual(['x', 'x^2 + 1'])
+  })
+
   it('renders common TeX delimiters and same-line tagged display blocks after the reply settles', () => {
     const source = [
       'Inline dollar $\\theta$ and backslash \\(\\frac{1}{5}\\).',

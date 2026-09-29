@@ -15,7 +15,7 @@ import { mathFromMarkdown } from 'mdast-util-math'
 import { gfm } from 'micromark-extension-gfm'
 import { math } from 'micromark-extension-math'
 import { cjkFriendlyStrong } from './cjkFriendlyStrong.ts'
-import { mathCompatibility } from './mathCompatibility.ts'
+import { currencyDollarLiteral, mathCompatibility } from './mathCompatibility.ts'
 
 /**
  * Parse GFM markdown (the streaming arm's grammar: no math, so incomplete
@@ -38,7 +38,7 @@ export function parseGfm(text: string): Root {
  */
 export function parseGfmWithMath(text: string): Root {
   return fromMarkdown(text, {
-    extensions: [gfm(), cjkFriendlyStrong(), mathCompatibility(), math()],
+    extensions: [gfm(), cjkFriendlyStrong(), mathCompatibility(), math(), currencyDollarLiteral()],
     mdastExtensions: [gfmFromMarkdown(), mathFromMarkdown()],
   })
 }

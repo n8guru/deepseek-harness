@@ -2,7 +2,7 @@
 
 import { factorySpace } from 'micromark-factory-space'
 import type {} from 'micromark-extension-math'
-import { markdownLineEnding } from 'micromark-util-character'
+import { asciiDigit, markdownLineEnding } from 'micromark-util-character'
 import { codes, constants, types } from 'micromark-util-symbol'
 import type { Construct, Extension, Previous, State, Tokenizer } from 'micromark-util-types'
 
@@ -335,6 +335,35 @@ const backslashMath: Extension = {
     [codes.dollarSign]: sameLineDollarMathFlow,
   },
   text: { [codes.backslash]: backslashMathText },
+}
+
+const currencyDollar: Extension = {
+  text: {
+    [codes.dollarSign]: {
+      previous: code => code !== codes.dollarSign,
+      tokenize(effects, ok, nok) {
+        return function start(code) {
+          if (code !== codes.dollarSign) return nok(code)
+          effects.enter(types.data)
+          effects.consume(code)
+          return function afterDollar(next) {
+            if (!asciiDigit(next)) return nok(next)
+            effects.exit(types.data)
+            return ok(next)
+          }
+        }
+      },
+    },
+  },
+}
+
+/**
+ * Treat a dollar before an ASCII digit as literal text rather than inline math.
+ * Register after math() so this text construct gets first try.
+ * @returns The micromark syntax extension.
+ */
+export function currencyDollarLiteral(): Extension {
+  return currencyDollar
 }
 
 /**
