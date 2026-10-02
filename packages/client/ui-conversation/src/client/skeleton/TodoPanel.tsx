@@ -234,8 +234,8 @@ export function NateTodoOverlay({
       onClose={onClose}
       title={t('todo.overlay.title')}
       closeLabel={t('todo.overlay.close')}
-      className={css.overlayDialog}
-      contentClassName={css.overlayContent}
+      className={css.overlayDialog as string}
+      contentClassName={css.overlayContent as string}
     >
       <iframe
         className={css.overlayFrame}
