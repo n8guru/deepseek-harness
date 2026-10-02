@@ -14,12 +14,39 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 // declare) and the payload type. Type-only by construction — the outlet is
 // free of host value imports, so no host Context merge enters this program.
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo/client'
-import { IconChecklistOutline14, IconChevronDownOutline14, IconChevronUpOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChecklistOutline14, IconChevronDownOutline14, IconChevronUpOutline14, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import { NS } from '../locales.ts'
 import css from './TodoPanel.module.css'
 
 /** Static operator feed polled by {@link useNateTodos}; see apps/web/public/local/nate-todo.json. */
 export const NATE_TODO_URL = '/local/nate-todo.json'
+
+/** Loopback HTML queue hosted by nate-todo-web; the overlay iframe loads this page. */
+export const NATE_TODO_PAGE_URL = 'http://127.0.0.1:3091/'
+
+/** `postMessage` type the hosted page sends after the last open item is answered. */
+export const NATE_TODO_DONE_TYPE = 'nate-todo-all-answered'
+
+/**
+ * Whether a window message is the hosted page telling this session to close the overlay.
+ * Origin must match the loopback page; the payload carries no secrets.
+ * @param event - inbound `message` event (or a test double with origin + data).
+ * @param pageUrl - overlay iframe URL; origin is derived from it.
+ * @returns true only for the all-answered signal from that page.
+ */
+export function isNateTodoDoneMessage(
+  event: Pick<MessageEvent, 'origin' | 'data'>,
+  pageUrl: string = NATE_TODO_PAGE_URL,
+): boolean {
+  try {
+    if (event.origin !== new URL(pageUrl).origin) return false
+  } catch {
+    return false
+  }
+  const data: unknown = event.data
+  return typeof data === 'object' && data !== null
+    && (data as { type?: unknown }).type === NATE_TODO_DONE_TYPE
+}
 
 /** Operator item, including the file reference needed to inspect the premise. */
 export interface NateTodoItem extends TodoItem {
@@ -78,6 +105,8 @@ export interface TodoPanelProps {
   nate?: readonly NateTodoItem[] | undefined
   /** Open the item's explanation through the host workspace path service. */
   onOpenFile?: ((path: string) => void) | undefined
+  /** Open Nate's HTML queue as an in-session overlay (never a new browser tab). */
+  onOpenNate?: (() => void) | undefined
   /** The dock entry's locale seat, passed down as a plain prop. */
   t: TodoDockProps['t']
 }
@@ -174,24 +203,81 @@ function TodoSection({ label, items, onOpenFile }: {
   )
 }
 
-export function TodoPanel({ todos, nate = [], onOpenFile, t }: TodoPanelProps) {
+/**
+ * In-session sheet that hosts Nate's loopback HTML queue above this conversation.
+ * @param props.open - whether the sheet is showing.
+ * @param props.onClose - Escape, mask, close control, or the page's all-answered signal.
+ * @param props.pageUrl - iframe src; defaults to the loopback queue.
+ * @param props.t - conversation locale seat.
+ * @returns the modal tree (null while closed, via Modal).
+ */
+export function NateTodoOverlay({
+  open, onClose, pageUrl = NATE_TODO_PAGE_URL, t,
+}: {
+  open: boolean
+  onClose: () => void
+  pageUrl?: string
+  t: TodoPanelProps['t']
+}) {
+  useEffect(() => {
+    if (!open) return
+    const onMessage = (event: MessageEvent) => {
+      if (isNateTodoDoneMessage(event, pageUrl)) onClose()
+    }
+    window.addEventListener('message', onMessage)
+    return () => { window.removeEventListener('message', onMessage) }
+  }, [open, onClose, pageUrl])
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={t('todo.overlay.title')}
+      closeLabel={t('todo.overlay.close')}
+      className={css.overlayDialog}
+      contentClassName={css.overlayContent}
+    >
+      <iframe
+        className={css.overlayFrame}
+        title={t('todo.overlay.title')}
+        src={pageUrl}
+        data-testid="nate-todo-overlay-frame"
+        referrerPolicy="no-referrer"
+      />
+    </Modal>
+  )
+}
+
+export function TodoPanel({ todos, nate = [], onOpenFile, onOpenNate, t }: TodoPanelProps) {
   const [collapsed, setCollapsed] = useState(false)
   return (
     <section className={css.root} data-testid="todo-panel" aria-label={t('todo.title')}>
       <div className={css.body}>
-        <button
-          type="button"
-          className={css.header}
-          aria-expanded={!collapsed}
-          onClick={() => { setCollapsed(v => !v) }}
-        >
-          <span className={css.lead} aria-hidden><IconChecklistOutline14 /></span>
-          <span className={css.title}>{t('todo.title')}</span>
-          <span className={css.progress}>{progressLabel([...nate, ...todos], t)}</span>
-          <span className={css.chevron} aria-hidden>
-            {collapsed ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}
-          </span>
-        </button>
+        <div className={css.headerBar}>
+          <button
+            type="button"
+            className={css.header}
+            aria-expanded={!collapsed}
+            onClick={() => { setCollapsed(v => !v) }}
+          >
+            <span className={css.lead} aria-hidden><IconChecklistOutline14 /></span>
+            <span className={css.title}>{t('todo.title')}</span>
+            <span className={css.progress}>{progressLabel([...nate, ...todos], t)}</span>
+            <span className={css.chevron} aria-hidden>
+              {collapsed ? <IconChevronUpOutline14 /> : <IconChevronDownOutline14 />}
+            </span>
+          </button>
+          {onOpenNate !== undefined && (
+            <button
+              type="button"
+              className={css.openNate}
+              data-testid="nate-todo-open"
+              onClick={onOpenNate}
+            >
+              {t('todo.overlay.open')}
+            </button>
+          )}
+        </div>
         {!collapsed && (
           <div className={css.sections}>
             <TodoSection label={t('todo.section.nate')} items={nate} onOpenFile={onOpenFile} />
@@ -211,7 +297,19 @@ export type TodoDockProps = PropsRuntime<'conversation.input.dock'> & PropsLocal
 export function TodoDock({ useProjection, openFile, t }: TodoDockProps) {
   const todos = useProjection('todos')
   const nate = useNateTodos()
-  return <TodoPanel todos={todos ?? []} nate={nate} onOpenFile={openFile} t={t} />
+  const [overlayOpen, setOverlayOpen] = useState(false)
+  return (
+    <>
+      <TodoPanel
+        todos={todos ?? []}
+        nate={nate}
+        onOpenFile={openFile}
+        onOpenNate={() => { setOverlayOpen(true) }}
+        t={t}
+      />
+      <NateTodoOverlay open={overlayOpen} onClose={() => { setOverlayOpen(false) }} t={t} />
+    </>
+  )
 }
 
 /**

@@ -131,4 +131,14 @@ describe('TodoDock', () => {
     expect(inject).toHaveBeenCalledWith('conversation.input.dock', expect.any(Function))
     expect(register).toHaveBeenCalledWith(expect.objectContaining({ name: 'conversation.input.dock', id: 'todo', order: 0, locale: NS }), TodoDock)
   })
+
+  it('opens the overlay from the dock Open control without a new window', () => {
+    const store = createSnapshotStore<{ value: readonly TodoItem[] | null | undefined }>({ value: LIST })
+    render(<TodoDock {...dockProps(store)} />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getByTestId('nate-todo-open'))
+    const dialog = screen.getByRole('dialog', { name: 'Nate 的待办' })
+    expect(dialog.parentElement?.parentElement).toBe(document.body)
+    expect(screen.getByTestId('nate-todo-overlay-frame').getAttribute('src')).toBe('http://127.0.0.1:3091/')
+  })
 })

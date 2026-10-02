@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 /** Nate section of the pinned dock: feed coercion, two-section render, polling. */
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { TodoItem } from '@deepseek-ai/dsh-client-runtime/client'
-import { readNateTodos, TodoPanel, useNateTodos, type NateTodoItem } from '../src/client/skeleton/TodoPanel.tsx'
+import {
+  isNateTodoDoneMessage, NateTodoOverlay, NATE_TODO_DONE_TYPE, NATE_TODO_PAGE_URL,
+  readNateTodos, TodoPanel, useNateTodos, type NateTodoItem,
+} from '../src/client/skeleton/TodoPanel.tsx'
 import { zh } from '../src/client/locales.ts'
 
 const t = makeTranslate(zh, commonZh) as never
@@ -66,5 +69,53 @@ describe('useNateTodos', () => {
     await act(async () => { vi.advanceTimersByTime(1000); await Promise.resolve() })
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(screen.getByTestId('count').textContent).toBe('1') // failure keeps the last good list
+  })
+})
+
+describe('Nate todo overlay', () => {
+  it('stays a same-document dialog, never a new window', () => {
+    const onClose = vi.fn()
+    render(<NateTodoOverlay open onClose={onClose} t={t} />)
+    const dialog = screen.getByRole('dialog', { name: 'Nate 的待办' })
+    expect(dialog.parentElement?.parentElement).toBe(document.body)
+    const frame = screen.getByTestId('nate-todo-overlay-frame')
+    expect(frame.getAttribute('src')).toBe(NATE_TODO_PAGE_URL)
+    expect(frame.tagName).toBe('IFRAME')
+  })
+
+  it('Open on the dock mounts the overlay; the row still file-opens', () => {
+    const onOpenFile = vi.fn()
+    const onOpenNate = vi.fn()
+    render(<TodoPanel todos={[]} nate={NATE} onOpenFile={onOpenFile} onOpenNate={onOpenNate} t={t} />)
+    fireEvent.click(screen.getByTestId('nate-todo-open'))
+    expect(onOpenNate).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByText('批准原型'))
+    expect(onOpenFile).toHaveBeenCalledWith('tools/a.md')
+    expect(onOpenNate).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts the all-answered signal only from the loopback page origin', () => {
+    expect(isNateTodoDoneMessage({ origin: 'http://127.0.0.1:3091', data: { type: NATE_TODO_DONE_TYPE } })).toBe(true)
+    expect(isNateTodoDoneMessage({ origin: 'http://evil.example', data: { type: NATE_TODO_DONE_TYPE } })).toBe(false)
+    expect(isNateTodoDoneMessage({ origin: 'http://127.0.0.1:3091', data: { type: 'nope' } })).toBe(false)
+  })
+
+  it('closes itself when the hosted page reports every item answered', () => {
+    const onClose = vi.fn()
+    render(<NateTodoOverlay open onClose={onClose} t={t} />)
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'http://127.0.0.1:3091',
+        data: { type: NATE_TODO_DONE_TYPE },
+      }))
+    })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', {
+        origin: 'https://example.com',
+        data: { type: NATE_TODO_DONE_TYPE },
+      }))
+    })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 })
