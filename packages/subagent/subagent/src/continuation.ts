@@ -670,6 +670,10 @@ export class SubagentContinuationManager {
         senderSessionId: activation.childId,
       },
     })
+    if (parent.inbox.focus.enabled) {
+      parent.send(message, 'next-step', false, { origin: `native:subagent-report:${activation.childId}`, sequence: message.id })
+      return message.id
+    }
     if (delivery === 'next-step') {
       this.sendWaking(parent, message, () => { this.sendReport(parent, message, delivery) })
     } else {
@@ -707,8 +711,10 @@ export class SubagentContinuationManager {
     delivery: SubagentReportDelivery,
   ): void {
     try {
-      if (delivery === 'next-step') parent.steer(message)
-      else parent.inject(message)
+      parent.send(message, 'next-step', delivery === 'next-step', {
+        origin: `native:subagent-report:${'senderSessionId' in message.source ? message.source.senderSessionId : message.id}`,
+        sequence: message.id,
+      })
     } catch (error: unknown) {
       throw new SubagentError(
         'direct parent is not live; report was not delivered',
@@ -1479,6 +1485,10 @@ export class SubagentContinuationManager {
           senderSessionId: activation.childId,
         },
       })
+      if (parent.inbox.focus.enabled) {
+        parent.send(message, 'next-step', false, { origin: `native:subagent-settled:${activation.childId}`, sequence: message.id })
+        return
+      }
       // A parent whose own teardown already began must not be woken. Waking is
       // not a queue operation: `followup()` on a quiescent Agent starts a turn,
       // and `cancel()` does not arm against a later one, so a notice arriving
@@ -1486,10 +1496,10 @@ export class SubagentContinuationManager {
       // about to dispose — once per tree layer, since each layer's own notice
       // then wakes the layer above it. Injecting delivers to a parent still
       // reading its inbox and records the account in the log either way; it
-      // does NOT survive that parent's own disposal, whose `keepInbox: false`
-      // cancel durably clears whatever it never claimed.
+      // survives that parent's own disposal as admitted notification evidence;
+      // ordinary pending input still follows the existing cancellation policy.
       if (this.closingTeardownFor(parent) !== undefined) {
-        parent.inject(message)
+        parent.send(message, 'next-step', false, { origin: `native:subagent-settled:${activation.childId}`, sequence: message.id })
         return
       }
       // An idle parent has nothing else to look at, so it gets one ordinary
@@ -1499,8 +1509,7 @@ export class SubagentContinuationManager {
       // injecting closes the window where a driver retires between this status
       // read and the send, which would strand the notice unclaimed.
       this.sendWaking(parent, message, () => {
-        if (parent.status === 'idle') parent.followup(message)
-        else parent.steer(message)
+        parent.send(message, parent.status === 'idle' ? 'next-turn' : 'next-step', true, { origin: `native:subagent-settled:${activation.childId}`, sequence: message.id })
       })
     } catch (error: unknown) {
       this.ctx.logger.warn(

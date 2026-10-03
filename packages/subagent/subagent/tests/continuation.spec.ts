@@ -1637,6 +1637,25 @@ function settlementNotices(agent: Agent): { sender: string; text: string; summar
 }
 
 describe('continuable report delivery', () => {
+  it('holds owned reports and settlement while allowing the child to execute and finish', async () => {
+    const releaseChild = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('child answer'), gate: releaseChild.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    parent.inbox.setFocus(true)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    const child = ctx.agents.get(started.childId)!
+    const reportId = await ctx.subagents.reportFrom(child, message('retained report; evidence'), { delivery: 'next-step', signal: testSignal })
+    expect(parent.inbox.focus.queued).toBe(1)
+    releaseChild.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+    await vi.waitFor(() => { expect(parent.inbox.focus.queued).toBe(2) })
+    expect(adapter.requests.filter(r => r.sessionId === parent.id)).toHaveLength(0)
+    expect(parent.inbox.receipt(`native:subagent-report:${child.id}`, reportId!)?.id).toBe(reportId)
+    parent.cancel({ kind: 'user' })
+    expect(parent.inbox.focus.queued).toBe(2)
+    await ctx.fiber.dispose()
+  })
   it('wakes an idle parent for a next-step report', async () => {
     const releaseChild = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([
@@ -2111,22 +2130,19 @@ describe('continuable settlement delivery', () => {
     await drained
     expect(settlementNotices(host.agent)).toHaveLength(1)
 
-    // Disposal is a `keepInbox: false` cancel, so it durably cancels the notice
-    // it never claimed. Teardown delivery therefore reaches a parent that is
-    // still resident — a resumed one reads the log, not a pending message — and
-    // no wording anywhere may promise otherwise.
+    // Trusted notification evidence survives disposal until it enters model-visible history.
     await host.dispose()
     const resumed = await ctx.agents.resume({
       resumeSessionId: parentId,
       agentOptions: { provider: 'mock', model: 'mock' },
     })
-    expect(settlementNotices(resumed.agent)).toEqual([])
+    expect(settlementNotices(resumed.agent)).toHaveLength(1)
     await resumed.dispose()
-    // The account is still in the durable log: delivered, then cancelled unread.
+    // The durable pending admission retains the original account, without a cancellation splice.
     const persisted = await ctx.sessionPersistence.load(parentId)
     expect(persisted.events.flatMap(event => event.type === 'agent/inbox/spliced'
       ? [{ inserted: event.data.inserted.length, removed: event.data.removedCount ?? 0 }]
-      : [])).toEqual([{ inserted: 1, removed: 0 }, { inserted: 0, removed: 1 }])
+      : [])).toEqual([{ inserted: 1, removed: 0 }])
   })
 
   it('drops the notice without disturbing teardown when the parent is gone', async () => {
@@ -2154,7 +2170,7 @@ describe('continuable settlement delivery', () => {
     const { ctx, parent } = await setup([textResponse('the answer')])
     const warnings: string[] = []
     ctx.logger.warn = (text: string) => { warnings.push(text) }
-    vi.spyOn(parent, 'followup').mockImplementation(() => {
+    vi.spyOn(parent, 'send').mockImplementation(() => {
       throw new Error('parent closed during delivery')
     })
     const ends: SubagentRunEndInfo[] = []

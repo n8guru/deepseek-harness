@@ -5,6 +5,7 @@ import type {} from '@deepseek-ai/dsh-attachment'
 // Activates the webServer Context merge used below.
 import type { WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
+import { admitNotifications, controlFocus, notificationProducerSchema, type NotificationProducer } from './notification-admission.ts'
 import { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
@@ -59,10 +60,13 @@ export interface ConnectionConfig {
   trustedHosts?: string[]
   /** Maximum buffered JSON body for every `/api` request. */
   maxRequestBodyBytes?: number
+  /** Operator-provisioned producer hash/target grants; empty by default, never auto-minted. */
+  notificationProducers?: NotificationProducer[]
 }
 
 export const Config: z<ConnectionConfig> = z.object({
   trustedHosts: z.array(String).default([]),
+  notificationProducers: z.array(notificationProducerSchema).default([]),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
 
@@ -135,6 +139,16 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   if (ctx.get('apiProxy') !== undefined) assertImageBodyCapacity(ctx, maxRequestBodyBytes)
+  const producerOrigins = new Set<string>()
+  const producerHashes = new Set<string>()
+  const producers: NotificationProducer[] = []
+  for (const raw of config?.notificationProducers ?? []) {
+    const producer = notificationProducerSchema(raw)
+    if (producer.origin.startsWith('native:') || producerOrigins.has(producer.origin) || producerHashes.has(producer.bearerSha256)) throw new Error('notification producer grants must have unique non-native origins and hashes')
+    producerOrigins.add(producer.origin)
+    producerHashes.add(producer.bearerSha256)
+    producers.push(producer)
+  }
   const connection = new HostConnectionService(ctx, trustedHosts)
   const fetchHandler = connection.createSharedFetchHandler(API_PATH, {
     async fetch(request) {
@@ -152,6 +166,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
           status: 426,
           headers: { connection: 'Upgrade', upgrade: 'websocket' },
         })
+      }
+      if (request.method === 'POST' && (pathname === '/api/notifications.admit' || pathname === '/api/session.focus')) {
+        if (request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return new Response('content type must be application/json', { status: 415 })
+        if (pathname === '/api/notifications.admit') return admitNotifications(ctx, request, producers)
+        return controlFocus(ctx, request)
       }
       const apiProxy = ctx.get('apiProxy')
       if (apiProxy === undefined) return new Response('not found', { status: 404 })

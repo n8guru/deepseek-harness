@@ -10,6 +10,8 @@ import { globSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import LlmRuntime from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createScope } from '@deepseek-ai/dsh-scope'
@@ -186,6 +188,20 @@ export interface ToolPackage {
  * guard proves it is exhaustive against the on-disk glob.
  */
 const TOOL_PACKAGES: ToolPackage[] = [
+  {
+    pkg: '@deepseek-ai/dsh-agent-loop',
+    dir: 'agent-loop',
+    source: 'packages/core/agent-loop/src/index.ts',
+    requires: ['ctx.agents', 'ctx.sessions', 'ctx.tools', 'ctx.systemPrompt', 'ctx.llm'],
+    writes: ['agent/focus', 'tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(AgentLoop, { agents: [] })
+    },
+    note: 'Focus uses the existing durable Inbox; Check grants at most one bounded snapshot, not autorun or a test verdict. External producer authentication and provisioning belong to Connection and its operator config.',
+  },
   {
     pkg: '@deepseek-ai/dsh-tool-ask-user',
     dir: 'tool-ask-user',

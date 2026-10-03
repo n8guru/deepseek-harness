@@ -24,7 +24,7 @@ import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-sett
 import { SessionId, SessionPreparation } from '@deepseek-ai/dsh-session'
 import type { Session, SessionHeader } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
-import type {} from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { ReactLoopAgent } from './agent.ts'
 import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
@@ -351,6 +351,38 @@ export class AgentLoop extends Service implements AgentFactory {
     ctx.systemPrompt.variable('provider', context => context.agent?.options.provider)
     ctx.systemPrompt.variable('model', context => context.agent?.options.model)
     ctx.systemPrompt.variable('cwd', context => context.agent?.session.header.cwd)
+    ctx.tools.register(defineTool({
+      name: 'session_focus',
+      description: 'Inspect or set per-session Focus, or explicitly Check one bounded snapshot of held background notifications. Foreground human/test first; one bounded action, durable checkpoint, Check, at most one bounded next action, then return foreground. WAITING_FOR_NATE: set Focus true; routine background arrivals never wake. Check is not autorun authority or a Nate-test pass.',
+      parameters: {
+        action: { type: 'string', enum: ['inspect', 'set', 'check'], required: true },
+        enabled: { type: 'boolean', description: 'Required for set.' },
+        check_id: { type: 'string', description: 'Required for check; retry with the exact same identity.' },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute(args, exec) {
+        const agent = exec.agent
+        if (agent === undefined || ctx.agents.get(agent.id) !== agent) throw new Error('Focus requires the exact live calling session')
+        if (args.action === 'inspect') return JSON.stringify(agent.inbox.focus)
+        exec.signal.throwIfAborted()
+        if (!await ctx.sessions.flush(agent.session)) throw new Error('Focus requires durable checkpoint storage')
+        exec.signal.throwIfAborted()
+        let messageIds: readonly string[] = []
+        if (args.action === 'set') {
+          if (args.enabled === undefined) throw new Error('enabled required for set')
+          agent.inbox.setFocus(args.enabled)
+        } else {
+          if (!args.check_id?.trim()) throw new Error('check_id required for check')
+          messageIds = agent.inbox.check(args.check_id)
+        }
+        if (!await ctx.sessions.flush(agent.session)) throw new Error('Focus checkpoint not durable')
+        exec.signal.throwIfAborted()
+        return JSON.stringify({ ...agent.inbox.focus, messageIds })
+      },
+    }))
 
     for (const { id, sessionId, cwd, resumeSessionId, ...options } of this.config.agents) {
       const meta = cwd === undefined ? {} : { cwd }

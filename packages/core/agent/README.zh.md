@@ -74,6 +74,12 @@ inbox 的实时通知刻意采用逐消息的最小载荷：`agent/inbox/inserte
 
 `running` 描述驱动器范围的 drain 区间，而不是轮次仍打开的证明；它可以覆盖轮次关闭、持久性检查点和连续的排队轮次。只有拥有完整区间的调用方才能将其概括为一次运行的结果（[决策](../../../.agents/notes/implemented/architecture/2026-07-30-followup-enqueue-and-owned-runs.md)）。
 
+### Focus and notification retention
+
+`inbox.setFocus(enabled)` 记录逐会话 Focus；`focus` 返回开关与暂存数量。`admit(target,message,{origin,sequence,urgency?})` 将来源身份与插入一并提交，按 origin 加 sequence 去重。只有可信同进程生产方或经认证的入口可提供准入身份；提示词文本与来源标签不授予身份。人类、协调方及未知输入不受限制，获授权且附原因的 safety/security/deadline 通知也不受限制。`check(id)` 一次记录最多十个当前暂存标识；重试返回原快照，迟到消息仍暂存。`hasPending` 与 `hasNextStep` 排除暂存输入；原始列表保留它们供投影使用。原生 `wakeInbox()` 唤醒可运行的待处理工作而不重复插入。
+
+取消、dispose 及通用队列编辑／删除不能丢弃已准入证据。已领取但尚未形成模型可见 `user/message` 记录的通知会恢复，等待之后的显式唤醒。回执及 Check 标识只在会话 seed 边界之后回放，因此 fork 不继承 Focus。这保证准入和模型入口去重，不保证进程崩溃后外部副作用恰好一次。入口 ACK 或 Check 唤醒之前必须完成持久化 flush。仅关闭 Focus 不授予后台轮次。
+
 ### 扩展点
 
 - Agent 创建：`AgentLoop.create()` 是具体配置路径实现（位于 `dsh-agent-loop`），程序化消费方则通过 `ctx.agents.create()`/`ctx.agents.resume()` 创建或恢复有所有权的 agent。替换循环时，应实现 `Agent` 并通过 `ctx.agents.register()` 注册。

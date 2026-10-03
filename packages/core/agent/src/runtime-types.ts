@@ -11,7 +11,7 @@ import type { LlmCallConfig, LlmFailure, ResolvedRetryPolicy } from '@deepseek-a
 import type { AgentCancelCause, Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
 import type { Inbox } from './inbox.ts'
-import type { InboxTarget } from './types.ts'
+import type { InboxTarget, NotificationAdmission } from './types.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 declare module '@deepseek-ai/dsh-system-prompt' {
   interface AssembleContext {
@@ -113,8 +113,12 @@ export interface Agent {
    * @param message - identified content and the source that supplied it.
    * @param target - the preferred next-turn or next-step inbox boundary.
    * @param wakeup - whether delivery may wake the driver.
+   * @param notification - trusted producer admission; Focus holds routine notifications without a wake.
    */
-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void
+  send(message: UserMessage, target: InboxTarget, wakeup: boolean, notification?: NotificationAdmission): void
+
+  /** Wake eligible durable input without another insertion; optional for non-native drivers. */
+  wakeInbox?(): void
 
   /**
    * Queue an ordinary follow-up turn and wake the driver. The item becomes the

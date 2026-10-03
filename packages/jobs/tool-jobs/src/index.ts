@@ -271,7 +271,7 @@ export function apply(ctx: Context, config: Config): void {
   // the turn cannot close over, so jobs settling together cost one step. An
   // idle owner is woken instead, because an unclaimed notice is a completion
   // the model never learns about. Either way, disposal before the claim
-  // discards it with the owner, and teardown settlements arrive `reported`.
+  // preserves admitted evidence, and teardown settlements arrive `reported`.
   //
   // The registry routes each settlement to the listeners its owner's scope
   // chain reaches, so a mount under one preset never sees another preset's
@@ -290,13 +290,18 @@ export function apply(ctx: Context, config: Config): void {
         summary: completionSummary(snapshot),
       },
     })
+    const admission = { origin: 'native:tool-jobs', sequence: snapshot.id }
+    if (owner.inbox.focus.enabled) {
+      owner.send(message, 'next-step', false, admission)
+      return
+    }
     const spent = spentWakes.get(owner) ?? 0
     if (delivery === 'wakeup' && owner.status === 'idle' && spent < wakeBudget) {
       spentWakes.set(owner, spent + 1)
-      owner.followup(message)
+      owner.send(message, 'next-turn', true, admission)
       return
     }
-    owner.inject(message)
+    owner.send(message, 'next-step', false, admission)
   })
 
   ctx.tools.register(defineTool({

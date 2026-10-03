@@ -1398,10 +1398,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   ctx.on('session/event', (session, event) => {
-    if (event.type !== 'agent/inbox/spliced') return
+    if (event.type !== 'agent/inbox/spliced' && event.type !== 'agent/focus') return
     const agent = ctx.agents.get(session.id)
     if (agent?.session !== session) return
-    broadcast({ type: 'session/queue', sessionId: session.id, items: queueItems(agent, event.data) })
+    broadcast({ type: 'session/queue', sessionId: session.id, items: queueItems(agent, event.type === 'agent/inbox/spliced' ? event.data : undefined) })
   })
 
   /** Remove a wait before settling it: synchronous deletion makes the first claimant win. */

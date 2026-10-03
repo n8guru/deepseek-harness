@@ -3,10 +3,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import AgentRegistry, { emitAgentEvent } from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { emitAgentEvent, Inbox } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { bindScopeParent, createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import { JobId } from '@deepseek-ai/dsh-jobs'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
@@ -44,13 +44,24 @@ interface FakeDelivery {
 function fakeAgent(ctx: Context, sessionId: string, delivery: FakeDelivery = {}): Agent {
   const scopeFiber = ctx.plugin(() => {})
   const id = SessionId(sessionId)
+  const session = Session.create(id)
+  const inbox = new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} })
   const agent = {
     id,
+    inbox,
     ctx: scopeFiber.ctx,
     inject: delivery.inject ?? (() => {}),
     followup: delivery.followup ?? (() => {}),
     status: delivery.status ?? 'running',
-    session: { id, header: { version: 0, id, createdAt: 0 } },
+    session,
+    send(message: Parameters<Agent['send']>[0], target: Parameters<Agent['send']>[1], wakeup: boolean, notification?: Parameters<Agent['send']>[3]) {
+      if (notification !== undefined) inbox.admit(target, message, notification)
+      else inbox.append(target, message)
+      if (!inbox.isHeld(message)) {
+        if (wakeup) agent.followup(message)
+        else agent.inject(message)
+      }
+    },
   } as unknown as Agent
   agentRegistryDisposers.set(agent, ctx.agents.register(agent))
   agentScopeFibers.set(agent, scopeFiber)
@@ -533,6 +544,8 @@ describe('completion notices across scoped mounts', () => {
     const owner = {
       id: SessionId('sess-scoped'),
       ctx: agentScope.ctx,
+      inbox: new Inbox(Session.create(SessionId('sess-scoped')), { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
+      send: (message: unknown) => { inject(message) },
       inject,
       session: { id: SessionId('sess-scoped'), header: { version: 0, id: SessionId('sess-scoped'), createdAt: 0 } },
     } as unknown as Agent
@@ -566,6 +579,23 @@ describe('completion notice delivery', () => {
     await tick()
     expect(followup).toHaveBeenCalledTimes(1)
     expect(inject).not.toHaveBeenCalled()
+  })
+
+  it('holds Focus notices without spending the completion wake budget or discarding evidence', async () => {
+    const { ctx } = await setup({ maxConsecutiveWakes: 1 })
+    const inject = vi.fn()
+    const followup = vi.fn()
+    const owner = fakeAgent(ctx, 'focus-owner', { inject, followup, status: 'idle' })
+    owner.inbox.setFocus(true)
+    await settleTasks(ctx, owner, 2)
+    expect(owner.inbox.focus.queued).toBe(2)
+    expect(followup).not.toHaveBeenCalled()
+    expect(inject).not.toHaveBeenCalled()
+    owner.inbox.clear()
+    expect(owner.inbox.focus.queued).toBe(2)
+    owner.inbox.setFocus(false)
+    await settleTasks(ctx, owner, 1)
+    expect(followup).toHaveBeenCalledTimes(1)
   })
 
   it('never wakes an idle owner under quiet delivery', async () => {

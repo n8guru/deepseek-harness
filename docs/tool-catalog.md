@@ -15,6 +15,7 @@ This table connects model-visible tool names to the plugin package and service s
 
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
+| `@deepseek-ai/dsh-agent-loop` | `session_focus` | `ctx.agents`, `ctx.sessions`, `ctx.tools`, `ctx.systemPrompt`, `ctx.llm` | `agent/focus`, `tool/call`, `tool/result` | - | Focus uses the existing durable Inbox; Check grants at most one bounded snapshot, not autorun or a test verdict. External producer authentication and provisioning belong to Connection and its operator config. |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
@@ -41,6 +42,45 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+
+<a id="deepseek-aidsh-agent-loop"></a>
+
+## `@deepseek-ai/dsh-agent-loop`
+
+### `session_focus`
+
+Inspect or set per-session Focus, or explicitly Check one bounded snapshot of held background notifications. Foreground human/test first; one bounded action, durable checkpoint, Check, at most one bounded next action, then return foreground. WAITING_FOR_NATE: set Focus true; routine background arrivals never wake. Check is not autorun authority or a Nate-test pass.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "inspect",
+        "set",
+        "check"
+      ]
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Required for set."
+    },
+    "check_id": {
+      "type": "string",
+      "description": "Required for check; retry with the exact same identity."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/core/agent-loop/src/index.ts`](../packages/core/agent-loop/src/index.ts)
+
+Focus uses the existing durable Inbox; Check grants at most one bounded snapshot, not autorun or a test verdict. External producer authentication and provisioning belong to Connection and its operator config.
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -1516,6 +1556,14 @@ Delegate a self-contained task to a subagent (a separate agent that works in its
     "prompt": {
       "type": "string",
       "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+    },
+    "role": {
+      "type": "string",
+      "description": "Optional model role from the subagent-models table (e.g. `mid`, `reviewer`; `default` applies when omitted). Unknown roles are rejected with the current list."
+    },
+    "model": {
+      "type": "string",
+      "description": "Optional explicit `provider/model` for this child; overrides `role`. Prefer `role`."
     },
     "run_in_background": {
       "type": "boolean",

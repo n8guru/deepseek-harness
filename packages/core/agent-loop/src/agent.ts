@@ -12,6 +12,7 @@ import type {
   AgentStatus,
   CancelOptions,
   InboxTarget,
+  NotificationAdmission,
   PreStepDecision,
   RequestErrorAction,
 } from '@deepseek-ai/dsh-agent'
@@ -110,13 +111,20 @@ export class ReactLoopAgent implements Agent {
     }
   }
 
-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void {
+  send(message: UserMessage, target: InboxTarget, wakeup: boolean, notification?: NotificationAdmission): void {
     // Waking input cannot join an aborted activity, so it starts the next turn.
     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
-    const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
+    const resolvedTarget = notification !== undefined && this.inbox.focus.enabled && notification.urgency === undefined
+      ? 'next-step' : wakingAfterAbort ? 'next-turn' : target
+    if (notification !== undefined) {
+      if (!this.inbox.admit(resolvedTarget, message, notification) || this.inbox.isHeld(message)) return
+    } else this.inbox.splice(resolvedTarget, Infinity, 0, [message])
     if (wakeup) this.wakeDriver(wakingAfterAbort)
+  }
+
+  wakeInbox(): void {
+    if (this.inbox.hasPending) this.wakeDriver(this.phase.kind !== 'idle' && this.phase.abort.signal.aborted)
   }
 
   followup(input: UserMessage): void {
@@ -215,6 +223,7 @@ export class ReactLoopAgent implements Agent {
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
+        this.inbox.recoverUnentered()
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
         if (wakeRequested && this.inbox.hasPending) this.wakeDriver()
@@ -292,11 +301,11 @@ export class ReactLoopAgent implements Agent {
           this.session.append('step/end', { turn, step })
         }
         signal.throwIfAborted()
-        if (turnEnds && this.inbox.nextStep.length === 0) {
+        if (turnEnds && !this.inbox.hasNextStep) {
           await this.dispatch.serial('agent/turn-stopping', { turn, signal })
           signal.throwIfAborted()
         }
-        if (turnEnds && this.inbox.nextStep.length === 0) break
+        if (turnEnds && !this.inbox.hasNextStep) break
         target = 'next-step'
       }
     } catch (error: unknown) {

@@ -74,6 +74,12 @@ The handle every plugin programs against:
 
 `running` describes a driver-wide drain interval, not proof that a turn is still open; it can cover turn close, the durability checkpoint, and consecutive queued turns. Only a caller that owns a complete interval may summarize it as a run result ([decision](../../../.agents/notes/implemented/architecture/2026-07-30-followup-enqueue-and-owned-runs.md)).
 
+### Focus and notification retention
+
+`inbox.setFocus(enabled)` records per-session Focus; `focus` returns its setting and held count. `admit(target,message,{origin,sequence,urgency?})` commits provenance with insertion and deduplicates by origin plus sequence. Only trusted same-process producers or authenticated ingress may supply admission; prompt text and source labels grant no identity. Human/coordinator/unknown input bypasses, as do authorized safety/security/deadline notices with a reason. `check(id)` records at most ten currently held identities once; retries return that snapshot while late arrivals stay held. `hasPending` and `hasNextStep` exclude held input; raw lists retain it for projection. Native `wakeInbox()` wakes eligible pending work without reinsertion.
+
+Cancellation, disposal and generic queue edit/remove cannot discard admitted evidence. Claimed notifications absent from model-visible `user/message` records recover for a later explicit wake. Receipts and Check identities replay only after the session's seed boundary, so forks do not inherit Focus. This guarantees admission and model-entry deduplication, not exactly-once external side effects after a process crash. Persistence must flush before ingress ACK or Check wake. Focus off alone does not grant a background turn.
+
 ### Extension points
 
 - Agent creation: `AgentLoop.create()` is the concrete config-path implementation (in `dsh-agent-loop`), while programmatic consumers create/resume owned agents through `ctx.agents.create()` / `ctx.agents.resume()`. Replace the loop by implementing `Agent` and registering via `ctx.agents.register()`.

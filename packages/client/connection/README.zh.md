@@ -8,6 +8,14 @@
 
 node 半侧在桥接或 upgrade 前守卫 `/api` 下的每个入口（`src/api-request-trust.ts`）。每个请求——无论是否带浏览器标记——`Host` 都必须是回环地址权威，或与某个 `trustedHosts` 条目匹配：带端口的 `host:port` 条目精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化后比较（DNS rebinding 防御）。刻意不为无浏览器标记的 HTTP 请求开捷径：明文 HTTP 下浏览器的图片与导航读取既不带 `Origin` 也不带 Fetch-Metadata，因此无标记请求仍可能是被重绑页面发起的、响应可被读走的读取，而 Host 是重绑唯一伪造不了的请求头；WebSocket 浏览器握手会带 `Origin` 并通过同一道比较。非浏览器客户端经由回环地址、部署推导的 LAN IP 字面量或已声明的权威通过同一道栅栏。当标记存在时，如附带 `Origin`，则它必须与 Host 权威完全一致；显式的 `sec-fetch-site: cross-site` 标记一律拒绝。不是纯的、规范形 `host[:port]` 权威的 `trustedHosts` 条目——即 WHATWG 解析读回后与原文不完全一致的——会让插件加载明确报错：否则解析会悄悄授权 `harness.internal/path` 这类笔误里的 hostname，或把悬空冒号、补零端口放大成任意端口授权。HTTP 失败在任何 RPC 分发之前以纯 403 应答，upgrade 失败在启动任何事件流前拒绝握手。非回环组合必须显式信任其服务权威：Web 运行时从全接口服务器配置推导 LAN IP 字面量，cordis.yml 中的 `trustedHosts` 与 CLI（命令行界面）的 `--trusted-host` flag 则声明具名权威。`dsh web --host 0.0.0.0` 在远程访问具备认证层之前有意不受支持。这道栅栏是可达性策略，而不是认证；Web 载体不提供认证层。决策记录：[api 浏览器信任边界 Agent Note](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.md)。
 
+## Authenticated notification admission and operator Focus
+
+POST `/api/notifications.admit` 接收 JSON `{sessionId,items:[{sequence,text,evidenceRefs?,urgency?:{kind,reason}}]}`，每批一至十项。`Authorization: Bearer <token>` 通过显式 `notificationProducers` 配置 `{origin,bearerSha256,sessionIds,urgency}` 认证。token 为 32–1024 个非空白字符；配置的 SHA256 是小写十六进制。授权为空时拒绝准入。配置的 origin 和 hash 必须唯一；`native:` origin 保留给原生生产方。Host/Origin/clientLabel 绝不认证生产方。凭据配置、token 创建、分发及轮换专属操作方，不属于此操作；入口不读取凭据存储，也不生成凭据。获批准的目标标识及紧急类别来自配置而非请求体。关键生产方必须在授权范围内提供真实的 safety/security/deadline 原因。普通 `session.prompt` 不变。
+
+准入要求已有原生驱动器及持久化参与方。ACK `{accepted:true,origin,receipts:[{sequence,messageId,duplicate}],focus:{enabled,queued}}` 仅在会话 flush 成功后返回。ACK 丢失或结果不明时保留精确待处理项，并按 origin 加 sequence 重试；同一标识改变内容返回 409。不按任务标识或文本去重。未知字段及无效批次返回 400，缺少或被拒绝的授权返回 403，不支持／未加载／已替换的拥有方返回 409，持久化不可用返回 503。入口不创建或恢复会话。证据引用成为保留的消息内容。[Inbox Focus 语义](../../core/agent/README.md#focus-and-notification-retention)规定持久化、暂存资格及回放。
+
+POST `/api/session.focus` 通过已有操作方浏览器栅栏接收 `{sessionId,action:'inspect'|'set'|'check',enabled?,checkId?}`，不使用生产方凭据。Set 要求 enabled；Check 要求稳定重试标识及空闲维护边界，先形成存储检查点，让排队前台输入优先，然后释放最多十个暂存标识并在唤醒前 flush。成功响应返回 enabled/queued，Check 还返回 messageIds。Stop 中止维护。关闭 Focus 不唤醒工作。这些操作既不授予自动运行权限，也不产生 Nate 测试裁决。QueueDock 根据 inbox/status 事件刷新而不轮询，并按浏览器标签页会话存储结果不明的 Check 标识，以供重载后重试。
+
 ## `/api` WebSocket 下行
 
 `/api/events.mux` 与 `/api/events.host` 各接受一条 WebSocket upgrade，并只向浏览器发送对应的 `ServerRequest` 文本消息；客户端不会在这些 socket 上发送业务数据。任一 socket 结束都会使当前 connection generation 失败并重建两条流，连接就绪仍要求两条 socket 均已打开且 `host.describe` HTTP 调用成功。Host teardown 会终止两条 socket、中止各自的 source，并等待 source 清理完成后再返回。普通网络 GET 这些路径会返回 426，不保留 SSE（Server-Sent Events）回退；`toFetchHandler` 的 SSE 编解码只服务进程内同构载体。

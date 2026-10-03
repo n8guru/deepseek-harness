@@ -110,8 +110,12 @@ interface Agent {
    * @param message - identified content and the source that supplied it.
    * @param target - the preferred next-turn or next-step inbox boundary.
    * @param wakeup - whether delivery may wake the driver.
+   * @param notification - trusted producer admission; Focus holds routine notifications without a wake.
    */
-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void
+  send(message: UserMessage, target: InboxTarget, wakeup: boolean, notification?: NotificationAdmission): void
+
+  /** Wake eligible durable input without another insertion; optional for non-native drivers. */
+  wakeInbox?(): void
 
   /**
    * Queue an ordinary follow-up turn and wake the driver. The item becomes the
@@ -174,6 +178,16 @@ The inbox is the delivery vocabulary — two ordered pending-message lists the a
 /** One of the two ordered pending-message lists owned by an agent. */
 type InboxTarget = 'next-turn' | 'next-step'
 ```
+
+```ts
+interface NotificationAdmission {
+  origin: string
+  sequence: string
+  urgency?: { kind: 'security' | 'safety' | 'deadline'; reason: string }
+}
+```
+
+Trusted admission and Focus retention are defined by the [Inbox owner](../../packages/core/agent/README.md#focus-and-notification-retention). Claims select eligible input; held notifications remain pending and admitted evidence survives cancellation.
 
 Every pending occurrence is its `UserMessage`; `MessageId` is the sole identity. `Inbox.append`, `prepend`, `replace`, `remove`, `clear`, `splice`, and `claim` record normalized durable `agent/inbox/spliced` mutations and reject duplicate pending ids. `replace(messageId, newMessage)` and `remove(messageId)` locate the pending message across both lists; replacement may change identity and emits the old message as discarded followed by the new message as inserted. Ordinary removals and `clear()` are cancellations. `claim(target)` removes the proposed step batch — all `next-step` input plus, at a turn boundary, one `next-turn` message — through pure deletion splices without emitting discarded notifications, and the loop separately emits per-message claimed notifications. Whole-queue consumers such as UI projections reconstruct `nextTurn` and `nextStep` from the durable splices, while consumers following one message use the exact `agent/inbox/inserted`, `claimed`, and `discarded` notifications.
 

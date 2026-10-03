@@ -114,8 +114,12 @@ interface Agent {
    * @param message - identified content and the source that supplied it.
    * @param target - the preferred next-turn or next-step inbox boundary.
    * @param wakeup - whether delivery may wake the driver.
+   * @param notification - trusted producer admission; Focus holds routine notifications without a wake.
    */
-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void
+  send(message: UserMessage, target: InboxTarget, wakeup: boolean, notification?: NotificationAdmission): void
+
+  /** Wake eligible durable input without another insertion; optional for non-native drivers. */
+  wakeInbox?(): void
 
   /**
    * Queue an ordinary follow-up turn and wake the driver. The item becomes the
@@ -178,6 +182,16 @@ inbox 即投递词汇——agent 以持久投影形式拥有的两条有序待�
 /** One of the two ordered pending-message lists owned by an agent. */
 type InboxTarget = 'next-turn' | 'next-step'
 ```
+
+```ts
+interface NotificationAdmission {
+  origin: string
+  sequence: string
+  urgency?: { kind: 'security' | 'safety' | 'deadline'; reason: string }
+}
+```
+
+可信准入与 Focus 保留由 [Inbox 拥有方](../../packages/core/agent/README.md#focus-and-notification-retention)规定。领取仅选择可运行输入；暂存通知保持待处理，已准入证据在取消后仍保留。
 
 每个待处理入队项就是其 `UserMessage`；`MessageId` 是唯一标识。`Inbox.append`、`prepend`、`replace`、`remove`、`clear`、`splice` 与 `claim` 会记录规范化的持久 `agent/inbox/spliced` 变更，并拒绝重复的待处理 id。`replace(messageId, newMessage)` 与 `remove(messageId)` 通过 `MessageId` 跨两份列表定位待处理消息；替换可以改变标识，并先将旧消息作为 discarded 发布，再将新消息作为 inserted 发布。普通删除和 `clear()` 都表示取消。`claim(target)` 通过纯删除 splice 移除拟进入步骤的批次——全部 `next-step` 输入，外加轮次边界上的一条 `next-turn` 消息——且不发出 discarded 通知；循环另行逐条发出 claimed 通知。UI 投影等整体队列消费方通过持久 splice 重建 `nextTurn` 与 `nextStep`，而跟踪单条消息的消费方使用精确的 `agent/inbox/inserted`、`claimed` 与 `discarded` 通知。
 

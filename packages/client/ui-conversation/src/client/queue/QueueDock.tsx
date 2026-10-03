@@ -14,9 +14,11 @@ import {
 import type { QueueAction, QueueItemId } from '../contract/queue.ts'
 import { NS } from '../locales.ts'
 import css from './QueueDock.module.css'
+import { FocusControl, type FocusOperation } from './FocusControl.tsx'
 
 /** Queue operations injected by the session-scoped registration. */
 export interface QueueDockInjected {
+  focusOperation?: FocusOperation
   updateQueue: (itemId: QueueItemId, action: QueueAction) => Promise<void>
   notify: (level: 'info' | 'error', text: string) => void
 }
@@ -28,7 +30,7 @@ export type QueueDockProps = PropsRuntime<'conversation.input.dock'> & QueueDock
  * Queue strip: one item renders directly; multiple items default to a
  * collapsible count header; an empty queue renders nothing.
  */
-export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps) {
+export function QueueDock({ sessionId, useSession, updateQueue, notify, t, focusOperation }: QueueDockProps) {
   const inbox = useSession(s => s.queue)
   const queue = useMemo(() => inbox.filter(row => row.placement === 'queued'), [inbox])
   const running = useSession(s => s.running)
@@ -43,7 +45,7 @@ export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps
     if (editing !== null && (!queueMutable || !queue.some(row => row.id === editing.id))) setEditing(null)
   }, [collapsed, editing, queue, queueMutable])
 
-  if (queue.length === 0) return null
+  if (queue.length === 0 && focusOperation === undefined) return null
 
   const interactionActive = queueMutable && (editing !== null || busy !== null)
   const expanded = !collapsed || interactionActive
@@ -77,7 +79,10 @@ export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps
 
   return (
     <div className={css.dock} data-queue-dock="">
-      <div className={css.panel}>
+      {focusOperation !== undefined && <FocusControl
+        key={sessionId} sessionId={sessionId} operation={focusOperation} revision={inbox} running={running} notify={notify}
+      />}
+      {queue.length > 0 && <div className={css.panel}>
         {queue.length > 1 && (
           <button
             type="button"
@@ -207,7 +212,7 @@ export function QueueDock({ useSession, updateQueue, notify, t }: QueueDockProps
             </li>
           ))}
         </ul>
-      </div>
+      </div>}
     </div>
   )
 }
@@ -235,6 +240,16 @@ export const queueDockEntry = {
         const conversation = actx.get('conversation')
         if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
         return {
+          focusOperation: async (input) => {
+            const response = await fetch('/api/session.focus', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sessionId, ...input }),
+            })
+            if (!response.ok) throw new Error('Focus operation not acknowledged')
+            const result: unknown = await response.json()
+            if (result === null || typeof result !== 'object' || !('enabled' in result) || typeof result.enabled !== 'boolean' || !('queued' in result) || typeof result.queued !== 'number') throw new Error('invalid Focus response')
+            return { enabled: result.enabled, queued: result.queued }
+          },
           updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
           notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
         }

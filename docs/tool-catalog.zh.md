@@ -17,6 +17,7 @@
 
 | 工具包 | 模型可见名称 | 依赖 | 写入／影响 | 随产品发布的别名 | 部署说明 |
 | --- | --- | --- | --- | --- | --- |
+| `@deepseek-ai/dsh-agent-loop` | `session_focus` | `ctx.agents`、`ctx.sessions`、`ctx.tools`、`ctx.systemPrompt`、`ctx.llm` | `agent/focus`、`tool/call`、`tool/result` | - | Focus 使用现有持久 Inbox；Check 最多授予一个有界快照，而非自动运行或测试裁决。外部生产方认证及凭据配置属于 Connection 与操作方配置。 |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
 | `@deepseek-ai/dsh-tools` | `run_code` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: code`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 Code Mode Agent Note）。在 `code` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
@@ -43,6 +44,45 @@
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
+
+<a id="deepseek-aidsh-agent-loop"></a>
+
+## `@deepseek-ai/dsh-agent-loop`
+
+### `session_focus`
+
+检查或设置逐会话 Focus，或显式 Check 一个暂存后台通知的有界快照。人类／测试前台优先；一次有界动作、持久检查点、Check、最多一个有界后续动作，然后返回前台。WAITING_FOR_NATE 时设置 Focus true；常规后台到达从不唤醒。Check 不授予自动运行权限，也不构成 Nate 测试通过。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": [
+        "inspect",
+        "set",
+        "check"
+      ]
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Required for set."
+    },
+    "check_id": {
+      "type": "string",
+      "description": "Required for check; retry with the exact same identity."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+来源：[`packages/core/agent-loop/src/index.ts`](../packages/core/agent-loop/src/index.ts)
+
+Focus 使用现有持久 Inbox；Check 最多授予一个有界快照，而非自动运行或测试裁决。外部生产方认证及凭据配置属于 Connection 与操作方配置。
 
 <a id="deepseek-aidsh-tool-ask-user"></a>
 
@@ -1520,6 +1560,14 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
     "prompt": {
       "type": "string",
       "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+    },
+    "role": {
+      "type": "string",
+      "description": "Optional model role from the subagent-models table (e.g. `mid`, `reviewer`; `default` applies when omitted). Unknown roles are rejected with the current list."
+    },
+    "model": {
+      "type": "string",
+      "description": "Optional explicit `provider/model` for this child; overrides `role`. Prefer `role`."
     },
     "run_in_background": {
       "type": "boolean",
