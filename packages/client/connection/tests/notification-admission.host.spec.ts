@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { WebRoute, WebServer } from '@deepseek-ai/dsh-host-webserver'
+import { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import { apply as applyConnection } from '../src/index.ts'
 import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -59,9 +59,11 @@ describe('authenticated notification ABI assembled with native Agent', () => {
 
   it('mounts the actual Connection HTTP producer route, not a caller-controlled session.prompt field', async () => {
     const { ctx, agent } = await setup()
-    const routes: WebRoute[] = []
-    ctx.provide('webServer', { register(route: WebRoute) { routes.push(route); return () => {} }, registerUpgrade() { return () => {} }, tapIndex() { return () => {} }, port: 0 } as WebServer)
+    // Construct the real service without invoking its socket-listening init.
+    const webServer = new WebServer(ctx, { host: '127.0.0.1', port: 0 })
+    const registered = vi.spyOn(webServer, 'register')
     applyConnection(ctx, { notificationProducers: [producer] })
+    const routes = registered.mock.calls.map(([route]) => route)
     async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
       const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { url: path, method: 'POST', headers: { host: '127.0.0.1:3080', 'content-type': 'application/json', ...headers } }) as IncomingMessage
       let status = 0
@@ -234,7 +236,12 @@ describe('authenticated notification ABI assembled with native Agent', () => {
     await agent.whenIdle()
     expect(adapter.requests).toHaveLength(2)
     expect(agent.inbox.focus.queued).toBe(0)
-    expect(agent.session.events.some(e => e.type === 'tool/result' && e.data.isError)).toBe(false)
+    const results = agent.session.events.filter(e => e.type === 'tool/result')
+    expect(results.every(e => e.data.error === undefined)).toBe(true)
+    const checked = results.flatMap(e => e.data.message.content)
+      .filter(block => block.type === 'tool-result' && block.toolCallId === 'focus-check')
+    expect(checked).toHaveLength(1)
+    expect(checked[0]?.isError).not.toBe(true)
     expect(agent.session.events.filter(e => e.type === 'agent/focus')).toHaveLength(2)
   })
 
