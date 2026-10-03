@@ -1,0 +1,27 @@
+# Focus admission authority checkpoint
+
+Status: BLOCKED on authenticated external producer identity; no Focus ABI or feature implementation is shipped. Source inspected in repository n8guru/deepseek-harness, isolated worktree `/home/n8/forage-worktrees/dsh-session-focus`, base `35af2007587a757527b826ed3f4da32355ffcded`. Canonical serving checkout untouched.
+
+## Concrete finding
+
+The existing Connection HTTP fence is explicitly NOT authentication (`packages/client/connection/src/api-request-trust.ts:1-14`). It accepts loopback/trusted Host and absent Origin (`96-122`), not a caller principal. Ordinary GUI and notifier calls therefore have identical authority. `packages/client/connection/src/index.ts:139-170` forwards through `toFetchHandler(apiProxy)` without producer identity. Generic native RPC registrations receive only endpoint, caller-controlled payload and abort signal (`rpc-host.ts:144-182`); loopback registration is another Host fence, not producer authentication. `packages/host/apiproxy/src/fetch/handler.ts:180-189` forwards payload only. `sessionPromptRequestSchema` (`api/sessions.schema.ts:294-302`) has no authenticated identity. Existing notifier (`/home/n8/forage-worktrees/operator-focus-broker/tools/conductor-notify/notifier.py:138-139`) sends ordinary session.prompt, without a credential or producer assertion. Hostnames, absence of Origin, clientLabel, NEW CARD and worker text cannot distinguish notifier from human input.
+
+Consequently adding notification metadata to session.prompt would be a self-asserted label, NOT trusted provenance. A plugin-only hold misses the actual broker, and treating all source:user prompts as background violates human bypass. Neither is implemented.
+
+## Minimal concrete design, NOT implemented ABI
+
+Reuse Connection's registered RPC extension and the existing durable Inbox, not another mailbox or daemon. Required prerequisite: an operator-approved producer authenticator bound to the existing notifier, with origin and permitted target sessions determined by host configuration/authenticated identity, not request text. Existing shared Host trust cannot serve this purpose. An existing authenticated reverse-proxy principal could supply the identity only if the owning proxy proves it strips/replaces untrusted assertion headers and binds the notifier; otherwise an explicitly authorized credential/capability provisioning path is necessary. No such path was found in the inspected ingress, and credentials/policy changes are outside this grant.
+
+Once that prerequisite is established, a dedicated notification admission operation accepts items `{sequence, content, evidenceRefs, urgency?}`; host supplies origin, validates urgency authority and target scope, and returns durable per-item receipts. Identity is `(sessionId, authenticated origin, sequence)`, never task ID or content. Ordinary session.prompt remains human/unknown bypass. Native job/report producers use same-process ownership identity; coordinator relays bypass. Append admission to existing session log and flush persistence before ACK; ambiguous retry reuses exact items. Focus/Check state and acknowledgement identities replay from own-session log after seedLength, never fork seed. Held Inbox entries are ineligible for claim and wake; Check durably releases one fixed bounded snapshot at a safe boundary, leaving late arrivals held and human input ahead. Cancellation/disposal and generic queue editing preserve held evidence. Explicit inspect/set/check tool and QueueDock controls share this same state. No scheduler, worker courier/fence/wakegeneration or autorun authority changes.
+
+## Grounding and executed evidence
+
+Fresh GET `/studio/project/mesh-dsh-merge` returned owner 1385124, active charter and full step ledger; project control_policy and intent_epoch are absent. Fresh Studio query and canonical Graphify query completed; Graphify returned the Forage graph rather than a DSH-specific graph, so source citations above are direct inspected DSH files, not invented graph edges. No new project/step or curated QC verdict was written.
+
+Source ingress demonstration: `node --experimental-strip-types --input-type=module` imported the actual isolated `api-request-trust.ts`; four assertions passed: loopback without Origin accepted, same-origin browser accepted, spoofed notification-origin header accepted identically, attacker Host refused. This is evidence of missing producer authentication, NOT a Focus test or review. Attempted direct Vitest run for connection/node-half and apiproxy/fetch-carrier failed at config load with missing `vite-tsconfig-paths` in this worktree (exit 1); no tests ran, no dependencies installed/purged, and the earlier 88-test baseline is not reused as new evidence.
+
+Changed file: this checkpoint only. No source feature diff, live state changes or operational rollback needed. Independent source review, authenticated ABI implementation, broker integration, durability/race/UI tests, artifact qualification and activation gate6 all remain outstanding.
+
+## Decision needed
+
+Parent: identify and authorize an actual existing authenticated notifier identity seam, or explicitly authorize source-only new producer authentication/provisioning design. Do not integrate proposed session.prompt.notification. No activation, live edit, credential mutation, source-ready or review-pass claim. Tests and implementation remain outstanding; exact feature source pin NONE.
