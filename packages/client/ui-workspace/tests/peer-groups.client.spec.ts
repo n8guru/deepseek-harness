@@ -161,9 +161,9 @@ describe('derivePeerGroups', () => {
 describe('peerSessionUrl', () => {
   it('returns undefined for a local session without peer metadata', () => {
     const node = remoteSessionNode(remoteSession('s1', 'local', 100), 'http')
-    // Remove peer metadata to simulate a local session.
-    const local = { ...node, peerAuthority: undefined, machine: undefined }
-    expect(peerSessionUrl(local)).toBeUndefined()
+    // remoteSessionNode leaves the authority to derivePeerGroups, so this node has none.
+    expect(node.peerAuthority).toBeUndefined()
+    expect(peerSessionUrl(node)).toBeUndefined()
   })
 
   it('constructs an http deep-link URL for a remote session', () => {
