@@ -131,6 +131,28 @@ export type ConnectionRpcHandler = (
   peer: PeerScope,
 ) => Promise<ConnectionRpcHandlerResult>
 
+/**
+ * Request facts handed to a pre-dispatch guard. `authority` is the verbatim
+ * `Host` header the admitted request arrived on (the origin the browser tab
+ * is served from), so a guard can tell a loopback owner tab from a tab opened
+ * at the Host's tailnet origin.
+ */
+export interface ConnectionRpcGuardRequest {
+  readonly endpoint: string
+  readonly payload: unknown
+  readonly authority: string | undefined
+  readonly headers: Headers
+}
+
+/**
+ * Pre-dispatch veto for one decoded RPC. Returns a failure to refuse the call
+ * (it becomes the `ConnectionServerResponse` result, the handler never runs),
+ * or `undefined` to let it proceed. Guards add policy only; they never grant.
+ */
+export type ConnectionRpcGuard = (
+  request: ConnectionRpcGuardRequest,
+) => ConnectionRpcFailure | undefined | Promise<ConnectionRpcFailure | undefined>
+
 /** Synchronous ownership test for one endpoint on a shared RPC channel. */
 export type ConnectionRpcEndpointMatcher = (endpoint: string) => boolean
 
@@ -187,6 +209,16 @@ export interface HostConnectionRpc {
     matches: ConnectionRpcEndpointMatcher,
     handler: ConnectionRpcHandler,
   ): () => Promise<void>
+
+  /**
+   * Register a pre-dispatch guard on the shared `/api` channel. Every guard runs
+   * (in registration order) after the envelope is decoded and before the
+   * interceptor handler; the first failure refuses the call.
+   * @param channel - reserved shared channel; currently `/api`.
+   * @param guard - policy veto, see {@link ConnectionRpcGuard}.
+   * @returns asynchronous disposer removing the guard.
+   */
+  guard(channel: '/api', guard: ConnectionRpcGuard): () => Promise<void>
 }
 
 /** Host `ctx.connection` members consumed by transport-independent adapters. */

@@ -22,6 +22,7 @@ import type {
   ConnectionFetchHandler,
   HostConnectionFetch,
   ConnectionRpcEndpointMatcher,
+  ConnectionRpcGuard,
   ConnectionRpcFailure,
   ConnectionRpcHandler,
   ConnectionRpcResult,
@@ -65,6 +66,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
   readonly operator: PeerScope
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
+  private readonly guards = new Set<ConnectionRpcGuard>()
 
   /**
    * Provide the Host half over the active HTTP server.
@@ -89,6 +91,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
       handle: (channel, handler) => this.register(owner, channel, handler),
       intercept: (channel, matches, handler) =>
         this.registerInterceptor(owner, channel, matches, handler),
+      guard: (channel, guard) => this.registerGuard(owner, channel, guard),
     }
   }
 
@@ -174,7 +177,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     handler: ConnectionRpcHandler,
   ): () => Promise<void> {
     assertChannel(channel)
-    const fetchHandler = rpcFetchHandler(channel, handler, this.operator)
+    const fetchHandler = rpcFetchHandler(channel, handler, this.operator, () => [])
     const route: WebRoute = {
       kind: 'prefix',
       path: channel,
@@ -194,6 +197,20 @@ export class HostConnectionService extends Service implements HostConnectionHand
     )
   }
 
+  private registerGuard(
+    owner: Context,
+    channel: string,
+    guard: ConnectionRpcGuard,
+  ): () => Promise<void> {
+    if (channel !== API_PATH) {
+      throw new Error(`connection: invalid shared RPC channel ${JSON.stringify(channel)}`)
+    }
+    return owner.effect(() => {
+      this.guards.add(guard)
+      return () => { this.guards.delete(guard) }
+    }, `client-connection: ${channel} rpc guard`)
+  }
+
   private registerInterceptor(
     owner: Context,
     channel: string,
@@ -205,7 +222,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
     }
     const interceptor: ConnectionRpcInterceptor = {
       matches,
-      fetchHandler: rpcFetchHandler(channel, handler, this.operator),
+      fetchHandler: rpcFetchHandler(channel, handler, this.operator, () => [...this.guards]),
     }
     return owner.effect(() => {
       if (this.interceptors.has(channel)) {
@@ -223,6 +240,7 @@ function rpcFetchHandler(
   channel: string,
   handler: ConnectionRpcHandler,
   peer: PeerScope,
+  guards: () => readonly ConnectionRpcGuard[],
 ): ConnectionFetchHandler {
   return {
     requestBodyMode: () => 'buffered',
@@ -258,6 +276,15 @@ function rpcFetchHandler(
       }
 
       try {
+        for (const guard of guards()) {
+          const refusal = await guard({
+            endpoint,
+            payload: message.payload,
+            authority: request.headers.get('host') ?? undefined,
+            headers: request.headers,
+          })
+          if (refusal !== undefined) return errorResponse(message.rpcId, refusal)
+        }
         const result = await handler(endpoint, message.payload, request.signal, peer)
         return fullResponse(message.rpcId, result)
       } catch (error) {

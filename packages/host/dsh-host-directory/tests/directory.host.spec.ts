@@ -31,10 +31,14 @@ async function harness(config: { machine?: string; peers?: DshHostPeer[]; pollIn
 }
 
 describe('DshHostDirectoryService', () => {
-  it('publishes one direct list method under the dshHostDirectory namespace', async () => {
+  it('publishes list plus the allow-remote-steer read/set methods under the dshHostDirectory namespace', async () => {
     const { directory } = await harness()
     expect(directory.typertRemote).toMatchObject({ serviceKey: 'dshHostDirectory', namespace: 'dshHostDirectory' })
-    expect(remoteMethods(directory)).toEqual([{ method: 'list', invocation: { kind: 'direct' } }])
+    expect(remoteMethods(directory)).toEqual([
+      { method: 'list', invocation: { kind: 'direct' } },
+      { method: 'allowRemoteSteer', invocation: { kind: 'direct' } },
+      { method: 'setAllowRemoteSteer', invocation: { kind: 'direct' } },
+    ])
   })
 
   it('starts empty with no configured peers, falling back to os.hostname() as the label', async () => {

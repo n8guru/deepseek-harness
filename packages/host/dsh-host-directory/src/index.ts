@@ -38,8 +38,13 @@ import { randomUUID } from 'node:crypto'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 // Typert-generated ./typert and ./remote artifacts import Zod at runtime.
 import type {} from 'zod'
+import type {} from '@deepseek-ai/dsh-session'
 import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/types'
+import { RemoteSteerGate } from './steer-gate.ts'
 import type {
+  DshHostSetAllowRemoteSteerRequest,
+  DshHostSteerState,
+  DshHostSteerStateRequest,
   DshHostDirectorySnapshot,
   DshHostPeer,
   DshHostPeerStatus,
@@ -49,6 +54,7 @@ import type {
 } from './types.ts'
 
 export type * from './types.ts'
+export * from './steer-gate.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -186,6 +192,8 @@ export class DshHostDirectoryService extends TypertRemoteService {
   })
 
   private readonly peers = new Map<string, PeerState>()
+  /** allow-remote-steer: per-session opt-in enforced on this (owning) Host. */
+  readonly steerGate: RemoteSteerGate = new RemoteSteerGate()
   private timer: ReturnType<typeof setInterval> | undefined
   private timerIntervalMs: number | undefined
 
@@ -193,6 +201,20 @@ export class DshHostDirectoryService extends TypertRemoteService {
     super(ctx, 'dshHostDirectory')
     this.syncPeers()
     ctx.on('loader/volatile-update', () => { this.syncPeers() })
+
+    // allow-remote-steer (step 5): veto steer verbs arriving from a non-loopback
+    // origin unless the session opted in. Pure policy: it never grants, and it
+    // never touches any session, ClaudeSession, mesh-pump or pull-dispatch state.
+    ctx.inject(['connection'], (connectionCtx) => {
+      connectionCtx.connection.rpc.guard('/api', request => this.steerGate.guard(request))
+    })
+    // Stamp mesh-pump prompts as they land so a pump session is excluded from
+    // the opt-in even when its id does not carry the pump prefix.
+    ctx.on('session/event', (session, event) => {
+      if (event.type !== 'user/message') return
+      const source = (event.data as { source?: { rpcId?: unknown } } | undefined)?.source
+      this.steerGate.observeRequestId(session.id, typeof source?.rpcId === 'string' ? source.rpcId : undefined)
+    }, { global: true })
 
     ctx.effect(() => {
       this.rearmTimer()
@@ -384,6 +406,29 @@ export class DshHostDirectoryService extends TypertRemoteService {
       })
     }
     return { self: this.machineLabel(), sessions, peers }
+  }
+
+  /**
+   * Read one session's allow-remote-steer state. Safe from any origin: it
+   * reveals only whether remote steering is on, never any session content.
+   * @param request - the session to read.
+   * @returns its effective state (default off; ineligible for mesh-pump sessions).
+   */
+  @Remote('allowRemoteSteer')
+  allowRemoteSteer(request: DshHostSteerStateRequest): DshHostSteerState {
+    return this.steerGate.state(request.sessionId)
+  }
+
+  /**
+   * Grant or revoke allow-remote-steer for one session. Refused for any
+   * non-loopback origin by the gate itself (a remote tab cannot opt itself
+   * in) and for mesh-pump-owned sessions (never eligible).
+   * @param request - the session and whether to allow remote steering.
+   * @returns the resulting state.
+   */
+  @Remote('setAllowRemoteSteer')
+  setAllowRemoteSteer(request: DshHostSetAllowRemoteSteerRequest): DshHostSteerState {
+    return this.steerGate.setAllow(request.sessionId, request.allow)
   }
 }
 
