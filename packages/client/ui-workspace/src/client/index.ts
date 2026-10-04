@@ -13,6 +13,8 @@
  * packages/client/AGENTS.md.
  */
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: pulls the dshPeerSessions Context service merge.
+import type {} from '@deepseek-ai/dsh-client-ui-peer-sessions/client'
 import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {
@@ -88,7 +90,7 @@ const NS = 'workspace'
  * declaration through `slots.inject()` instead of assuming order.
  */
 export const inject = [
-  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout',
+  'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout', 'dshPeerSessions',
 ]
 
 /**
@@ -236,7 +238,10 @@ export function apply(ctx: Context): void {
     },
     unarchiveSession: async (sessionId) => { await uiWorkspace.unarchiveSession(sessionId) },
     createWorkspace: input => workspaces.create(input),
-    hooks: { directoryFlow: browserFlowSource, hostInfo },
+    // A peer session lives on its owning Host: leave for that Host's own
+    // origin instead of mounting it on this Host's single connection.
+    openPeerSession: (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
+    hooks: { directoryFlow: browserFlowSource, hostInfo, peerSessions: ctx.dshPeerSessions },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
     createWorkspace: input => workspaces.create(input),

@@ -126,6 +126,8 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     createWorkspace: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useHostInfo: selector => selector({ home: undefined, isLoopback: true }),
+    usePeerSessions: selector => selector({ snapshot: undefined, lastPollFailed: false }),
+    openPeerSession: vi.fn(),
     renderSlot: renderDirectoryFlowOnly,
     t,
     ...overrides,
@@ -2452,5 +2454,57 @@ describe('Workspace tree grouping', () => {
     fireEvent.dragEnd(alpha)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledOnce()
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
+  })
+})
+
+describe('peer Host machine groups (dsh-mesh-session-view step 4)', () => {
+  const snapshot = {
+    self: 'n8razer',
+    sessions: [
+      {
+        sessionId: sid('peer-live'), machine: 'forge', updatedAt: Date.now(), running: true, blank: false,
+        cwd: '/home/n8/forge-agent-os', title: 'Fix the pump',
+      },
+      { sessionId: sid('peer-old'), machine: 'forge', updatedAt: 1000, running: false, blank: false, title: 'Older chat' },
+    ],
+    peers: [
+      { machine: 'forge', authority: 'forge.tail.ts.net', scheme: 'https' as const, status: { state: 'ok' as const, lastPolledAt: 1, sessionCount: 2 } },
+      { machine: 'mac', authority: 'mac.tail.ts.net', scheme: 'https' as const, status: { state: 'unreachable' as const, lastAttemptAt: 1, message: 'x' } },
+    ],
+  }
+  const peerProps = () => ({
+    usePeerSessions: ((selector: (state: { snapshot: typeof snapshot; lastPollFailed: boolean }) => unknown) =>
+      selector({ snapshot, lastPollFailed: false })) as WorkspaceBrowserProps['usePeerSessions'],
+  })
+
+  it('lists each peer machine as a group beside the local Workspaces, unreachable ones labelled', () => {
+    mount({ ...peerProps(), useWorkspaces: hook(workspaceState([workspace('alpha', [])])) })
+    expect(screen.getByText('alpha')).toBeTruthy()
+    expect(screen.getByText('forge')).toBeTruthy()
+    expect(screen.getByText('mac（无法连接）')).toBeTruthy()
+    // Folded by default: no remote row until the machine is opened.
+    expect(screen.queryByText('Fix the pump')).toBeNull()
+  })
+
+  it('renders the peer session through the shared SessionNodeItem row, with title and live status dot', () => {
+    mount({ ...peerProps() })
+    fireEvent.click(screen.getByText('forge'))
+    const live = screen.getByText('Fix the pump').closest('[role="treeitem"]') as HTMLElement
+    // The same row component local sessions use: its `sessionRow` class and status slot.
+    expect(live.className).toContain('sessionRow')
+    expect(live.querySelector('[class*="slot"]')).toBeTruthy()
+    expect(screen.getByText('Older chat').closest('[role="treeitem"]')?.className).toContain('sessionRow')
+    // Remote rows offer no local mutation verbs and are not draggable.
+    expect(live.getAttribute('draggable')).not.toBe('true')
+    expect(live.querySelector('button')).toBeNull()
+  })
+
+  it('opens the owning Host origin on the ?session= deep link and never opens locally', () => {
+    const b = mount({ ...peerProps() })
+    fireEvent.click(screen.getByText('forge'))
+    fireEvent.click(screen.getByText('Fix the pump'))
+    expect(b.props.openPeerSession).toHaveBeenCalledOnce()
+    expect(b.props.openPeerSession).toHaveBeenCalledWith('https://forge.tail.ts.net/?session=peer-live')
+    expect(b.props.open).not.toHaveBeenCalled()
   })
 })

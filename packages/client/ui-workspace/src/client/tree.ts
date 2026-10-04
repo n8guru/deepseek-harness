@@ -82,6 +82,8 @@ export interface SessionNode {
    * absent (matching `DshHostPeer.scheme`).
    */
   peerScheme?: 'http' | 'https'
+  /** Workspace directory of a remote session as the owning peer reported it (hover detail only). */
+  peerCwd?: string
 }
 
 /** Session order selected by the Workspace browser. */
@@ -714,7 +716,7 @@ export function remoteSessionNode(
 ): SessionNode {
   return {
     id: session.sessionId as SessionId,
-    title: session.sessionId,
+    title: session.title ?? session.sessionId,
     blank: session.blank,
     running: session.running,
     runningSubagentCount: 0,
@@ -724,8 +726,8 @@ export function remoteSessionNode(
     archived: false,
     updatedAt: session.updatedAt,
     machine: session.machine,
-    peerAuthority: session.machine, // ponytail: overwritten below with the real authority
     peerScheme,
+    ...(session.cwd === undefined ? {} : { peerCwd: session.cwd }),
     ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
   }
 }
@@ -764,7 +766,7 @@ export function derivePeerGroups(
   }
   return peers.map((peer): PeerGroupNode => {
     const peerSessions = byAuthority.get(peer.authority) ?? []
-    const scheme = peerSchemes?.get(peer.authority) ?? 'http'
+    const scheme = peerSchemes?.get(peer.authority) ?? peer.scheme
     // Sort newest first.
     const sorted = [...peerSessions].sort((a, b) => b.updatedAt - a.updatedAt)
     const expanded = expandedPeers.has(peer.authority)
@@ -780,10 +782,7 @@ export function derivePeerGroups(
           const pendingInteraction = session.pendingInput === undefined
             ? undefined
             : visiblePendingKind(session.pendingInput.kind)
-          const node = remoteSessionNode(session, scheme, pendingInteraction)
-          // Fix peerAuthority to the real authority, not the machine label.
-          ;(node as { peerAuthority: string }).peerAuthority = peer.authority
-          return node
+          return { ...remoteSessionNode(session, scheme, pendingInteraction), peerAuthority: peer.authority }
         })
         : [],
     }

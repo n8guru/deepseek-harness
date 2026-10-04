@@ -34,6 +34,7 @@ const peer = (
 ): DshHostPeerView => ({
   machine,
   authority,
+  scheme: 'http',
   status: state === 'ok'
     ? { state: 'ok', lastPolledAt: Date.now(), sessionCount: 0 }
     : state === 'unreachable'

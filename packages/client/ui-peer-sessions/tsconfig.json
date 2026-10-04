@@ -19,9 +19,6 @@
     },
     {
       "path": "../store"
-    },
-    {
-      "path": "../../test-support/client-runtime"
     }
   ]
 }

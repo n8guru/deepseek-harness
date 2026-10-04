@@ -54,6 +54,9 @@
       "path": "../ui-sidebar"
     },
     {
+      "path": "../ui-peer-sessions"
+    },
+    {
       "path": "../ui-conversation/tsconfig.client.json"
     },
     {

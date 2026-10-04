@@ -28,12 +28,13 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { DshHostDirectorySnapshot } from '@deepseek-ai/dsh-host-directory/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
-  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
-  pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
+  deriveFlat, deriveGroups, derivePeerGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+  peerSessionUrl, pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { AnimatedRows } from './AnimatedRows.tsx'
@@ -216,9 +217,11 @@ function workspaceGroupHalf(e: { clientY: number; currentTarget: HTMLElement }):
 
 type SessionTreeProps = Pick<
   WorkspaceBrowserProps,
-  'useSessionStatus' | 'startSession' | 'open'
+  'useSessionStatus' | 'startSession' | 'open' | 'openPeerSession'
   | 'insertWorkspaceBefore' | 't' | 'usePanelInfo'
 > & PropsRenderSlots<'sidebar.workspaces.session.menu.item' | 'sidebar.workspaces.session.row.action'> & {
+  /** Latest peer-Host directory snapshot; peer machine groups render after the Workspace groups. */
+  peerDirectory: DshHostDirectorySnapshot | undefined
   /** Always-mounted Session list snapshot. */
   list: SessionListState
   /** Host account home for POSIX hover-path abbreviation. */
@@ -255,7 +258,7 @@ type SessionTreeProps = Pick<
 
 /** The scrolling session tree; unmounting drops the sessions subscription and local row limits. */
 function SessionTree({
-  list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
+  list, useSessionStatus, startSession, open, openPeerSession, peerDirectory, workspaces, ungroupedSessionIds,
   rowState,
   workspaceReady, animationResetKey, usePanelInfo,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
@@ -379,11 +382,18 @@ function SessionTree({
     return children
   }, [groups, parents])
   const rootGroups = childrenByParent.get(undefined) ?? []
+  // Peer machine groups (dsh-mesh-session-view step 4): derived from the
+  // directory snapshot, folded until the user opens a machine.
+  const [expandedPeers, setExpandedPeers] = useState<ReadonlySet<string>>(() => new Set())
+  const peerGroups = useMemo(
+    () => derivePeerGroups(peerDirectory?.sessions ?? [], peerDirectory?.peers ?? [], expandedPeers),
+    [peerDirectory, expandedPeers],
+  )
   const workspaceDropAtListStart = rootGroups[0]?.workspaceId !== undefined
     && workspaceDrag?.over?.id === rootGroups[0].workspaceId
     && workspaceDrag.over.half === 'before'
 
-  const rowKeys: string[] = groups.length === 0 ? ['empty'] : []
+  const rowKeys: string[] = groups.length === 0 && peerGroups.length === 0 ? ['empty'] : []
   const renderGroup = (group: GroupNode, depth: number): ReactNode => {
     const workspaceId = group.workspaceId
     const children = childrenByParent.get(group.key) ?? []
@@ -576,6 +586,51 @@ function SessionTree({
   }
 
   const groupRows = rootGroups.map(group => renderGroup(group, 0))
+  const peerRows = peerGroups.map((peerGroup) => {
+    rowKeys.push(`workspace:peer:${peerGroup.key}`)
+    for (const node of peerGroup.sessions) rowKeys.push(`session:${node.id}`)
+    const label = peerGroup.peerStatus.state === 'unreachable'
+      ? t('peer.unreachable', { machine: peerGroup.machine })
+      : peerGroup.machine
+    return (
+      <div key={`peer:${peerGroup.key}`} className={css.groupSection} data-peer-machine={peerGroup.machine}>
+        <ProjectRowItem
+          group={{
+            key: `peer:${peerGroup.key}`, workspaceId: undefined, cwd: undefined, createdAt: undefined,
+            label, sessionCount: peerGroup.sessionCount, expanded: peerGroup.expanded,
+            containsCurrent: false, sessions: [],
+          }}
+          remoteLabel={label}
+          home={home}
+          t={t}
+          onToggle={() => {
+            setExpandedPeers((prev) => {
+              const next = new Set(prev)
+              if (!next.delete(peerGroup.key)) next.add(peerGroup.key)
+              return next
+            })
+          }}
+          onCreate={() => {}}
+        />
+        {peerGroup.sessions.map(node => (
+          <SessionNodeItem
+            key={`${peerGroup.key}:${node.id}`}
+            node={node}
+            currentId={undefined}
+            now={now}
+            remote
+            onOpen={() => {
+              const url = peerSessionUrl(node)
+              if (url !== undefined) openPeerSession(url)
+            }}
+            onRenameRequest={onSessionRenameRequest}
+            renderSlot={renderSlot}
+            t={t}
+          />
+        ))}
+      </div>
+    )
+  })
   return (
     <div className={clsx(css.treeBody, css.wide)}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
@@ -586,10 +641,11 @@ function SessionTree({
         ready={list.phase === 'ready' && workspaceReady && !nativeDragActive}
         resetKey={JSON.stringify([animationResetKey, sessionLimits])}
       >
-        {groups.length === 0 && (
+        {groups.length === 0 && peerGroups.length === 0 && (
           <div className={css.empty} data-row-key="empty">{t('empty.none')}</div>
         )}
         {groupRows}
+        {peerRows}
       </AnimatedRows>
       <span className={css.fade} />
     </div>
@@ -827,10 +883,13 @@ export function WorkspaceBrowser({
   searchResultLimit,
   useDirectoryFlow,
   useHostInfo,
+  usePeerSessions,
+  openPeerSession,
   renderSlot,
   t,
 }: WorkspaceBrowserProps) {
   const home = useHostInfo(info => info.home)
+  const peerDirectory = usePeerSessions(state => state.snapshot)
   // Ordering remains live while the rail or search replaces the list body.
   const list = useSessions(state => state)
   const workspaces = useWorkspaces(state => state.items)
@@ -1329,6 +1388,8 @@ export function WorkspaceBrowser({
                 rowState={rowState}
                 startSession={startSession}
                 open={guardedOpen}
+                openPeerSession={openPeerSession}
+                peerDirectory={peerDirectory}
                 insertWorkspaceBefore={insertWorkspaceBefore}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}

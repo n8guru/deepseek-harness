@@ -32,6 +32,7 @@
  * client plugin's action lands beside them by `order` and needs nothing from
  * the browser beyond the row identity.
  */
+import type { DshPeerSessionsState } from '@deepseek-ai/dsh-client-ui-peer-sessions/client'
 import type {
   HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
 } from '@deepseek-ai/dsh-client-ui-slots'
@@ -185,7 +186,18 @@ export type WorkspaceBrowserInjected = {
      * saw. Select the field the surface needs (`info => info.home`).
      */
     hostInfo: HostObservable<RemoteHostFacts>
+    /**
+     * Live snapshot of this Host's `dshHostDirectory/list` poll (peer Hosts and
+     * the sessions they own). Read-only; steps 2 and 4 of dsh-mesh-session-view.
+     */
+    peerSessions: HostObservable<DshPeerSessionsState>
   }
+  /**
+   * Open a peer Host's session at that Host's own origin (a new browser tab on
+   * the `?session=<id>` deep link). Never mounts the remote session here: the
+   * connection layer is single-owner per app instance.
+   */
+  openPeerSession: (url: string) => void
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and
    * open it; without an explicit workspace, inherit the current Session

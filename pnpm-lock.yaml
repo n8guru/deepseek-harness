@@ -3999,9 +3999,6 @@ importers:
       '@deepseek-ai/dsh-client-store':
         specifier: workspace:*
         version: link:../store
-      '@deepseek-ai/dsh-client-test-runtime':
-        specifier: workspace:*
-        version: link:../../test-support/client-runtime
       '@deepseek-ai/dsh-host-directory':
         specifier: workspace:*
         version: link:../../host/dsh-host-directory
@@ -5854,6 +5851,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-layout':
         specifier: workspace:*
         version: link:../ui-layout
+      '@deepseek-ai/dsh-client-ui-peer-sessions':
+        specifier: workspace:*
+        version: link:../ui-peer-sessions
       '@deepseek-ai/dsh-client-ui-primitives':
         specifier: workspace:*
         version: link:../ui-primitives

@@ -76,6 +76,11 @@ export interface DshHostRemoteSession {
   readonly blank: boolean
   readonly cwd?: string
   /**
+   * The peer's own title projection for this session (`projections.values.title`
+   * on its `session/list` row) when the peer reported one; omitted otherwise.
+   */
+  readonly title?: string
+  /**
    * Present only when `pollPendingInput` is enabled for this peer AND the
    * most recent per-session history poll actually classified an open
    * question/approval. Omitted (not merely `undefined`) otherwise, so R2's
@@ -95,6 +100,8 @@ export type DshHostPeerStatus =
 export interface DshHostPeerView {
   readonly machine: string
   readonly authority: string
+  /** Scheme the peer is dialed with; the Client builds the peer-origin deep link from it. */
+  readonly scheme: 'http' | 'https'
   readonly status: DshHostPeerStatus
 }
 

@@ -149,6 +149,18 @@ interface Config {
   pollIntervalMs: Volatile<number>
 }
 
+/**
+ * The title projection a peer's `session/list` row carries, when any. The
+ * `title` key is merged into SessionProjectionValues by the session-title
+ * domain; this package reads it structurally rather than importing that domain.
+ * @param item - one peer list row.
+ * @returns the non-empty title, or undefined.
+ */
+function peerTitleOf(item: SessionSummary): string | undefined {
+  const title = (item.projections?.values as Readonly<Record<string, unknown>> | undefined)?.['title']
+  return typeof title === 'string' && title !== '' ? title : undefined
+}
+
 /** One peer's live poll state, private bookkeeping behind the published DshHostPeerView. */
 interface PeerState {
   peer: DshHostPeer
@@ -281,6 +293,7 @@ export class DshHostDirectoryService extends TypertRemoteService {
         running: item.running,
         blank: item.blank,
         ...item.cwd === undefined ? {} : { cwd: item.cwd },
+        ...peerTitleOf(item) === undefined ? {} : { title: peerTitleOf(item) as string },
       }))
       current.sessions = sessions
       current.status = { state: 'ok', lastPolledAt: attemptAt, sessionCount: items.length }
@@ -363,7 +376,12 @@ export class DshHostDirectoryService extends TypertRemoteService {
     const peers: DshHostPeerView[] = []
     for (const state of this.peers.values()) {
       sessions.push(...state.sessions)
-      peers.push({ machine: state.peer.machine, authority: state.peer.authority, status: state.status })
+      peers.push({
+        machine: state.peer.machine,
+        authority: state.peer.authority,
+        scheme: state.peer.scheme ?? 'http',
+        status: state.status,
+      })
     }
     return { self: this.machineLabel(), sessions, peers }
   }
