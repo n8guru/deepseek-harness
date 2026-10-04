@@ -35,8 +35,8 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/** Services required by the Remote mount this plugin polls. */
-export const inject = ['remote']
+/** Services required: the Remote mount and its `dshHostDirectory` namespace, which `ctx.remote.dshHostDirectory` reads. */
+export const inject = ['remote', 'remote.dshHostDirectory']
 
 /**
  * Start the poll loop against this Host's own directory Remote.

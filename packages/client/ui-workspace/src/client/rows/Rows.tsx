@@ -29,9 +29,14 @@ import css from './Rows.module.css'
 /** The standard locale seat, prop-passed from the browser root. */
 type RowTranslate = WorkspaceBrowserProps['t']
 
-/** Row display title: blank rows show the localized New Session label. */
+/**
+ * Row display title: blank rows show the localized New Session label. A blank
+ * peer session the owner has explicitly titled keeps that title (a placeholder
+ * label would hide what the owning Host calls it).
+ */
 function displayTitle(node: SessionNode, t: RowTranslate): string {
-  return node.blank ? t('session.new') : node.title
+  const titledRemote = node.machine !== undefined && node.title !== node.id
+  return node.blank && !titledRemote ? t('session.new') : node.title
 }
 
 /* Overflow this small hides no meaningful tail; scrolling for it reads as an

@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { DshHostDirectorySnapshot } from '@deepseek-ai/dsh-host-directory/types'
-import { startDshPeerSessionsPoll } from '../src/client/index.ts'
+import { inject, startDshPeerSessionsPoll } from '../src/client/index.ts'
 
 const EMPTY_SNAPSHOT: DshHostDirectorySnapshot = { self: 'this-host', sessions: [], peers: [] }
 const FAST_POLL_MS = 20
@@ -15,6 +15,12 @@ type ListResult =
 function fakeCtx(list: () => Promise<ListResult>): ClientContext {
   return { remote: { dshHostDirectory: { list } } } as unknown as ClientContext
 }
+
+describe('ui-peer-sessions inject', () => {
+  it('declares the dshHostDirectory Remote namespace it reads (ctx.remote.<ns> throws without the inject; found live on a built Host)', () => {
+    expect(inject).toEqual(['remote', 'remote.dshHostDirectory'])
+  })
+})
 
 describe('startDshPeerSessionsPoll', () => {
   it('polls immediately and stores the first successful snapshot', async () => {
