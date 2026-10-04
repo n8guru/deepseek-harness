@@ -316,6 +316,32 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   private async restoreSelection(workspaces: WorkspaceSnapshot, sessions: SessionListState): Promise<void> {
+    // Step 4 (dsh-mesh-session-view): `?session=<id>` deep-link — when the
+    // URL carries a session query parameter, open that exact session and
+    // consume (remove) the parameter so a reload does not re-navigate. The
+    // deep-link is the peer-origin entry point: clicking a remote session row
+    // opens the peer's own URL with this parameter.
+    const deepLinkId = resolveDeepLinkSession()
+    if (deepLinkId !== undefined) {
+      const knownSummary = sessions.byId[deepLinkId]
+      if (knownSummary !== undefined) {
+        this.replaceMain(knownSummary.id, this.lifetime.signal, 'reveal')
+        return
+      }
+      // The session id is not in the loaded catalog; it may still exist on the
+      // Host. Retain it — the Session Controller opens it on the Host via its
+      // existing `Session.open()` path, which loads its history. If the
+      // session does not exist, retain throws and we fall through to the
+      // normal restoration.
+      try {
+        this.replaceMain(deepLinkId, this.lifetime.signal, 'reveal')
+        return
+      } catch (_error: unknown) {
+        // Fall through: the deep-linked session could not be opened (stale
+        // link, deleted session). Continue with normal boot restoration.
+      }
+    }
+
     const saved = this.selection.getSnapshot()
     if (saved.subagentAddress !== undefined) {
       this.replaceMain(saved.subagentAddress, this.lifetime.signal, 'preserve')
@@ -452,4 +478,41 @@ function recentWorkspace(
   return selected
 }
 
-export { UiWorkspaceService }
+/**
+ * Parse the `?session=<id>` query parameter from an href string.
+ * Pure function — no side effects, no consumed flag.
+ *
+ * Step 4 (dsh-mesh-session-view): clicking a remote peer session row opens
+ * `<peer-scheme>://<peer-authority>/?session=<id>` in a new tab. This is
+ * the receiver side: the peer's own `dsh web` resolves the deep-linked
+ * session through its normal `ISessions.retain → Session.open` path.
+ */
+export function parseDeepLinkSession(href: string): SessionId | undefined {
+  let url: URL
+  try { url = new URL(href) } catch { return undefined }
+  const sessionId = url.searchParams.get('session')
+  if (sessionId === null || sessionId === '') return undefined
+  return sessionId as SessionId
+}
+
+/**
+ * Read and consume the `?session=<id>` query parameter from the current URL.
+ * Returns the session id exactly once per page load: the parameter is removed
+ * from the URL (via `replaceState`) so a reload does not re-navigate, and
+ * subsequent calls return `undefined`.
+ */
+let deepLinkConsumed = false
+function resolveDeepLinkSession(): SessionId | undefined {
+  if (deepLinkConsumed) return undefined
+  deepLinkConsumed = true
+  if (typeof globalThis.location === 'undefined') return undefined
+  const parsed = parseDeepLinkSession(globalThis.location.href)
+  if (parsed === undefined) return undefined
+  // Consume: remove the parameter so a manual reload does not re-navigate.
+  const url = new URL(globalThis.location.href)
+  url.searchParams.delete('session')
+  try { globalThis.history.replaceState(globalThis.history.state, '', url.toString()) } catch { /* noop in jsdom */ }
+  return parsed
+}
+
+export { UiWorkspaceService, resolveDeepLinkSession }
