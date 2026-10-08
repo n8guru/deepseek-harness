@@ -15,6 +15,7 @@ import type {
   AgentHandle,
   AgentOptions,
   CreateAgentOptions,
+  HostInitialAdmission,
 } from '@deepseek-ai/dsh-agent'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { MessageId } from '@deepseek-ai/dsh-llm'
@@ -107,6 +108,7 @@ export interface Activation {
 
 /** Inputs shared by fresh and resumed Activation materialization. */
 export interface MaterializeInputs {
+  initialAdmission?: HostInitialAdmission
   childId: SessionId
   provider: string
   parent: Agent
@@ -192,6 +194,7 @@ export class ContinuableActivationRegistry {
    */
   private readonly closingScopes = new Map<Agent, Set<Agent>>()
   private draining = false
+  private readonly disposedParents = new WeakSet<Agent>()
 
   /**
    * Build one registry inside the service's Agent-injected context.
@@ -215,6 +218,9 @@ export class ContinuableActivationRegistry {
     // child-first ordering.
     const scope = ctx.plugin(function activationOwner() {})
     this.ownerCtx = scope.ctx
+    ctx.on('agent/cancelled', ({ agent, cause }) => {
+      if (cause.kind === 'disposed') this.disposedParents.add(agent)
+    })
     ctx.on('agent/disposed', ({ agent }) => {
       this.closingScopes.delete(agent)
     })
@@ -332,6 +338,29 @@ export class ContinuableActivationRegistry {
    * @param delivery - receiving inbox destination.
    */
   sendWaking(parent: Agent, message: UserMessage, delivery: SubagentDelivery): void {
+    if (this.ctx.agents.get(parent.id) !== parent || this.disposedParents.has(parent)) {
+      throw new SubagentError('receiving parent is not the exact live owner; message was not accepted', 'ACTIVATION_CLOSING')
+    }
+    if (this.closingTeardownFor(parent) !== undefined) {
+      throw new SubagentError('receiving parent teardown has begun; message was not accepted', 'ACTIVATION_CLOSING')
+    }
+    const residentParent = this.resident.get(parent.id)
+    if (residentParent !== undefined) {
+      if (residentParent.handle.agent !== parent) throw new SubagentError('receiving parent Activation owner changed', 'ACTIVATION_CLOSING')
+      residentParent.inbox.assertAccepting()
+    }
+    const notifications = parent.inbox.notifications
+    if (notifications !== undefined) {
+      const parentActivation = this.resident.get(parent.id)
+      try {
+        notifications.admit(delivery === 'steer' ? 'next-step' : 'next-turn', message, { origin: 'native:subagent', sequence: message.id })
+        parent.wakeInbox?.()
+      } finally {
+        // Keep residency ownership awake independently of the foreground model gate.
+        if (parentActivation?.handle.agent === parent) this.wake(parentActivation)
+      }
+      return
+    }
     const parentActivation = this.resident.get(parent.id)
     if (parentActivation !== undefined && parentActivation.handle.agent === parent) {
       try {
@@ -517,6 +546,7 @@ export class ContinuableActivationRegistry {
     delivery: SubagentDelivery,
     parent: Agent,
     signal: AbortSignal,
+    initialAdmission?: HostInitialAdmission,
   ): MessageId {
     signal.throwIfAborted()
     this.assertAdmitting(parent)
@@ -527,7 +557,7 @@ export class ContinuableActivationRegistry {
     )
     this.acquireOwnership(parent, activation.childId)
     try {
-      activation.inbox.deliver(message, delivery)
+      activation.inbox.deliver(message, delivery, initialAdmission)
     } finally {
       this.wake(activation)
     }
@@ -630,7 +660,10 @@ export class ContinuableActivationRegistry {
       applyChildComposition(childCtx, parent, inputs.composition)
     }
     const observer = this.observeActivation(provider, childId, parent)
-    const handle: AgentHandle = create === undefined
+    // Cold resumes also enter here without startContinuable preparation. Count
+    // the residency until actual handle disposal, not inbox acceptance or idle.
+    const reservation = inputs.initialAdmission === undefined ? this.ctx.get('hostAdmission')?.reserve?.('delegate', childId) : undefined
+    const published: AgentHandle = create === undefined
       ? await this.ownerCtx.agents.resume({
         resumeSessionId: childId,
         parentAgent: parent,
@@ -640,6 +673,7 @@ export class ContinuableActivationRegistry {
       })
       : await this.ownerCtx.agents.create({
         sessionId: childId,
+        ...(inputs.initialAdmission === undefined ? {} : { initialAdmission: inputs.initialAdmission }),
         parentAgent: parent,
         meta: create.meta,
         ...(create.seed === undefined ? {} : { seed: create.seed }),
@@ -649,6 +683,13 @@ export class ContinuableActivationRegistry {
         setup,
       })
 
+    const handle: AgentHandle = reservation === undefined ? published : {
+      agent: published.agent,
+      dispose: async () => {
+        await published.dispose()
+        reservation.release()
+      },
+    }
     const activation: Activation = {
       pool,
       releaseSlot,
@@ -671,6 +712,12 @@ export class ContinuableActivationRegistry {
       const wakeOnInboxRemoval = (): void => { this.wake(activation) }
       handle.agent.ctx.on('agent/inbox/claimed', wakeOnInboxRemoval)
       handle.agent.ctx.on('agent/inbox/discarded', wakeOnInboxRemoval)
+      if (inputs.initialAdmission !== undefined) {
+        const initialId = inputs.initialAdmission.messageId
+        handle.agent.ctx.on('host-admission/changed', () => {
+          if (handle.agent.inbox.nextTurn.some(message => message.id === initialId)) handle.agent.wakeInbox?.()
+        })
+      }
       observer.start(handle.agent)
     } catch (error: unknown) {
       /* v8 ignore next -- rollback failure must not mask the admission failure
@@ -872,10 +919,11 @@ export class ContinuableActivationRegistry {
     if (!activation.announced) return
     try {
       const parent = this.ctx.agents.get(activation.parentSession)
-      if (parent === undefined) return
+      if (parent === undefined || this.disposedParents.has(parent)) return
       const message = createSettlementMessage(activation.childId, terminal)
       if (this.closingTeardownFor(parent) !== undefined) {
-        parent.inject(message)
+        if (parent.inbox.notifications === undefined) parent.inject(message)
+        else parent.inbox.notifications.admit('next-step', message, { origin: 'native:subagent', sequence: message.id })
         return
       }
       this.sendWaking(parent, message, parent.status === 'idle' ? 'queue' : 'steer')

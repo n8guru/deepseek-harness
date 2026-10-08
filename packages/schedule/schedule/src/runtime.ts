@@ -119,8 +119,12 @@ export class ScheduleRuntime {
         const message = createUserMessage({
           content: [{ type: 'text', text }], source: { kind: 'schedule' },
         })
-        // followup synchronously appends the inbox splice before flush observes the Session.
-        resolved.agent.followup(message)
+        // Actual scheduler ingress is background authority, never inferred from prompt text.
+        const notifications = resolved.agent.inbox.notifications
+        if (notifications !== undefined) {
+          notifications.admit('next-turn', message, { origin: 'native:schedule', sequence: message.id })
+          resolved.agent.wakeInbox?.()
+        } else resolved.agent.followup(message)
         const flushed = await this.ctx.sessions.flush(resolved.agent.session)
         if (!flushed) throw new Error('Session persistence did not acknowledge the reminder')
         const deliveredAt = new Date(Date.now()).toISOString()

@@ -84,6 +84,13 @@ export interface StorageHandleState {
  */
 export class JsonlSessionHandle implements SessionHandle {
   private chain: Promise<unknown> = Promise.resolve()
+  private pendingWrites = 0
+  private closeSettled = false
+  uncertainWrite = false
+
+  writeJoined(): boolean {
+    return (this.closing === undefined || this.closeSettled) && this.pendingWrites === 0 && this.buffered.length === 0 && this.draining === undefined && !this.uncertainWrite
+  }
   private closing: Promise<void> | undefined
   private observedLength = 0
   /** Routed live events awaiting their batching deadline (persistence-owned copies). */
@@ -253,6 +260,8 @@ export class JsonlSessionHandle implements SessionHandle {
         /* v8 ignore next -- lock releases reject with Error */
         failures.push(releaseFailure instanceof Error ? releaseFailure : new Error(errorChain(releaseFailure)))
       }
+      if (failures.length > 0) this.uncertainWrite = true
+      this.closeSettled = true
       this.storage.releaseHandle(this, this.state.materialized)
       if (failures.length > 1) throw new AggregateError(failures, `session "${this.id}": close failed to drain and to release its write lock`)
       if (failures[0] !== undefined) throw failures[0]
@@ -355,8 +364,12 @@ export class JsonlSessionHandle implements SessionHandle {
 
   /** Serialize one operation onto the chain without the closed-handle refusal (drain-from-close). */
   private enqueueChain(op: () => Promise<void>): Promise<void> {
+    this.pendingWrites += 1
     const next = this.chain.then(op)
-    this.chain = next.catch(() => {})
+    this.chain = next.then(() => { this.pendingWrites -= 1 }, () => {
+      this.pendingWrites -= 1
+      this.uncertainWrite = true
+    })
     return next
   }
 
@@ -395,6 +408,13 @@ export class JsonlBackendTracker {
   private readonly writers = new Map<SessionId, JsonlSessionHandle | null>()
   private readonly pending = new Map<SessionId, PendingSession>()
   private counter = 0
+  pendingPublications = 0
+  uncertainWrite = false
+
+  writeJoined(): boolean {
+    return !this.uncertainWrite && this.pendingPublications === 0 && this.pending.size === 0
+      && [...this.writers.values()].every(writer => writer?.writeJoined() === true)
+  }
 
   /** @param name - backend label used in in-memory revision tokens and teardown errors. */
   constructor(private readonly name: string) {}
@@ -495,6 +515,7 @@ export class JsonlBackendTracker {
   release(handle: JsonlSessionHandle, materialized: boolean): void {
     this.openHandles.delete(handle)
     if (handle.access !== 'write') return
+    this.uncertainWrite ||= handle.uncertainWrite
     this.writers.delete(handle.id)
     if (!materialized) this.pending.delete(handle.id)
   }

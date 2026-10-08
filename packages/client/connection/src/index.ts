@@ -8,6 +8,8 @@ import type {} from '@deepseek-ai/dsh-credentials'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { API_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
+import { admitNotifications, controlFocus, receiveMaintenance, notificationProducerSchema, type NotificationProducer } from './notification-admission.ts'
+import { isTrustedApiRequest } from './api-request-trust.ts'
 import { assertTrustedAuthority } from './api-request-trust.ts'
 import { BrowserAuth } from './browser-auth.ts'
 import { HostConnectionService } from './rpc-host.ts'
@@ -90,6 +92,10 @@ export const inject = ['credentials']
 
 /** Browser authentication, request limits, and connection recovery configuration. */
 export interface ConnectionConfig {
+  /** Operator-provisioned producers; no grants by default. */
+  notificationProducers?: NotificationProducer[]
+  /** Explicit producer-origin grants for the native maintenance receiver; none by default. */
+  maintenanceOwners?: string[]
   /** Browser recovery timing, injected into each served page. */
   recovery?: ConnectionRecoveryConfig
   /**
@@ -108,6 +114,8 @@ export interface ConnectionConfig {
 }
 
 export const Config: z<ConnectionConfig> = z.object({
+  notificationProducers: z.array(notificationProducerSchema).default([]),
+  maintenanceOwners: z.array(z.string().min(1).max(128)).default([]),
   recovery: ConnectionRecoveryConfigSchema.default({}),
   trustedHosts: z.array(String).default([]),
   cookieMaxAgeDays: z.natural().min(1).default(30),
@@ -131,11 +139,34 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
+  const origins = new Set<string>()
+  const hashes = new Set<string>()
+  const producers = (config?.notificationProducers ?? []).map(raw => {
+    const producer = notificationProducerSchema(raw)
+    if (producer.origin.startsWith('native:') || origins.has(producer.origin) || hashes.has(producer.bearerSha256)) throw new Error('notification grants require unique non-native origins and bearers')
+    origins.add(producer.origin)
+    hashes.add(producer.bearerSha256)
+    return producer
+  })
   const connection = new HostConnectionService(
     ctx,
     trustedHosts,
     await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
   )
+  connection.fetch.register({
+    path: '/api/session.focus', methods: ['POST'], requestBody: 'buffered',
+    fetch: request => controlFocus(ctx, request),
+  })
+  const maintenanceOwners = config?.maintenanceOwners ?? []
+  if (maintenanceOwners.some(owner => !origins.has(owner))) throw new Error('maintenance owner must name an explicitly provisioned producer origin')
+  const maintenanceHandler = {
+    requestBodyMode: () => 'buffered' as const,
+    fetch: (request: Request) => receiveMaintenance(ctx, request, producers, maintenanceOwners),
+  }
+  const notificationHandler = {
+    requestBodyMode: () => 'buffered' as const,
+    fetch: (request: Request) => admitNotifications(ctx, request, producers),
+  }
   ctx.inject(['webServer'], (webCtx) => {
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
     webCtx.on('webserver/index-inject', (table) => {
@@ -146,6 +177,14 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
       kind: 'prefix',
       path: API_PATH,
       handler: async (req, res) => {
+        // Producer bearer is distinct from the browser/process operator credential.
+        const producerPath = req.url?.split('?', 1)[0]
+        if ((producerPath === '/api/notifications.admit' || producerPath === '/api/maintenance.receive') && req.method === 'POST') {
+          if (!isTrustedApiRequest(req, trustedHosts)) { res.writeHead(403); res.end('forbidden'); return }
+          const handler = producerPath === '/api/maintenance.receive' ? maintenanceHandler : notificationHandler
+          await webCtx.waterfall('connection/request', req, res, () => bridge(req, res, handler, maxRequestBodyBytes))
+          return
+        }
         const admission = connection.admit(req)
         if ('rejection' in admission) {
           res.writeHead(admission.rejection)

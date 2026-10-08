@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, HostInitialAdmission } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { ReasoningEffortId, contentHasImage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
@@ -103,11 +103,14 @@ export class SubagentContinuationManager {
    */
   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
     const request = spec.request
+    const provider = spec.provider
+    const signal = spec.signal
+    const reservedChildId = spec.childId
     const parent = request.parent
     this.activations.assertAdmitting(parent)
     const persistence = this.requirePersistence()
     assertSubagentMaxDepth(request.maxDepth)
-    const childId = spec.childId ?? brandString<SessionId>(randomUUID())
+    const childId = reservedChildId ?? brandString<SessionId>(randomUUID())
     this.activations.assertChildIdAvailable(childId)
     const childDepth = resolveChildDepth(parent, request.maxDepth)
     // Snapshot before any await: invalid descriptor JSON rejects the call
@@ -118,7 +121,7 @@ export class SubagentContinuationManager {
     const agentReasoningEffort = agentOptions.reasoningEffort
     const descriptor = snapshotSubagentDescriptor({
       mode: 'continuable',
-      provider: spec.provider,
+      provider: provider,
       label: spec.label,
       ...agentProvider !== undefined ? { agentProvider } : {},
       ...agentModel !== undefined ? { agentModel } : {},
@@ -133,25 +136,32 @@ export class SubagentContinuationManager {
     // An idle continuation-managed parent must not settle while a caller is
     // still creating its child. A turn-scoped delegation does not need this,
     // but the service is also callable outside a turn.
+    // Preparation can await before the canonical factory is entered. Count it
+    // synchronously, without granting any new factory or prompt authority.
+    const admission = this.ctx.get('hostAdmission')
+    const reservation = admission?.reserve?.('delegate', parent.id)
+    const initialAdmission = reservation?.child?.(childId, createUserMessage({ content: request.prompt, source: { kind: 'user' } }), parent, signal,
+      (child, original) => ({ ...original, content: isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', child))
+        ? withContinuableReturnGuidance(parent.id, [...original.content]) : original.content }))
     const releaseHold = this.activations.holdOwnership(parent, childId)
     try {
-      const prepared = await this.host.prepareContinuable(spec.provider, {
+      const prepared = await this.host.prepareContinuable(provider, {
         sessionId: childId,
         parent,
-        signal: spec.signal,
+        signal: signal,
       })
-      spec.signal.throwIfAborted()
+      signal.throwIfAborted()
       this.activations.assertAdmitting(parent)
 
       const inheritedEventCount = SessionLogOffset(prepared.seed?.length ?? 0)
       const seed = prepared.seed
       const messageId = await this.activations.locks.run(childId, async () => {
-        spec.signal.throwIfAborted()
+        signal.throwIfAborted()
         this.activations.assertAdmitting(parent)
         this.activations.assertChildIdAvailable(childId)
-        if (spec.childId !== undefined) {
-          const persisted = await persistence.stat(childId, { signal: spec.signal })
-          spec.signal.throwIfAborted()
+        if (reservedChildId !== undefined) {
+          const persisted = await persistence.stat(childId, { signal: signal })
+          signal.throwIfAborted()
           this.activations.assertAdmitting(parent)
           this.activations.assertChildIdAvailable(childId)
           if (persisted !== undefined) {
@@ -160,7 +170,8 @@ export class SubagentContinuationManager {
         }
         const activation = await this.activations.materialize({
           childId,
-          provider: spec.provider,
+          ...(initialAdmission === undefined ? {} : { initialAdmission }),
+          provider: provider,
           parent,
           create: {
             seed,
@@ -170,22 +181,35 @@ export class SubagentContinuationManager {
             descriptor,
           },
           agentOptions,
-          composition: { persona: request.persona, toolFilter: request.toolFilter },
-          signal: spec.signal,
+          composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
+          signal: signal,
         })
         const childHeader = activation.handle.agent.session.header
-        return await this.submitMaterialized(
+        const compiled = initialAdmission === undefined ? undefined : admission?.compileInitial?.(initialAdmission, activation.handle.agent)
+        if (initialAdmission !== undefined && compiled === undefined) throw new Error('native initial compiler unsupported')
+        const accepted = await this.submitMaterialized(
           activation,
-          isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', activation.handle.agent))
+          (compiled === undefined ? undefined : [...compiled.message.content]) ?? (isAdjacentAgentSendMessageTool(this.ctx.get('tools')?.get('send_message', activation.handle.agent))
             ? withContinuableReturnGuidance(parent.id, request.prompt)
-            : request.prompt,
-          { source: { kind: 'user' }, signal: spec.signal, delivery: 'queue' },
+            : request.prompt),
+          { source: { kind: 'user' }, signal: signal, delivery: 'queue' },
           parent,
           () => { establishCatalogChild(parent.session, childHeader, descriptor) },
+          initialAdmission === undefined || compiled === undefined ? undefined : { capability: initialAdmission, message: compiled.message },
         )
+        if (compiled !== undefined) {
+          const sessions = this.ctx.get('sessions')
+          if (sessions === undefined) throw new Error('native initial session persistence unsupported')
+          await sessions.flush(activation.handle.agent.session)
+          compiled.release()
+        }
+        return accepted
       })
+      if (initialAdmission === undefined) reservation?.release()
       return { childId, messageId }
     } catch (error: unknown) {
+      // A provider preparation or rollback failure is not backend join evidence.
+      // Keep the reservation UNKNOWN rather than certify a false global zero.
       releaseHold()
       throw error
     }
@@ -462,6 +486,7 @@ export class SubagentContinuationManager {
     options: ChildDeliveryOptions,
     parent: Agent,
     commit?: () => void,
+    initial?: { capability: HostInitialAdmission; message: ReturnType<typeof createUserMessage> },
   ): Promise<MessageId> {
     try {
       if (contentHasImage(content)) {
@@ -470,7 +495,7 @@ export class SubagentContinuationManager {
           throw new SubagentError(`subagent "${activation.childId}" is closing`, 'ACTIVATION_CLOSING')
         }
       }
-      const messageId = this.submitAdmitted(activation, content, options, parent)
+      const messageId = this.submitAdmitted(activation, content, options, parent, initial)
       commit?.()
       activation.announced = true
       return messageId
@@ -492,16 +517,18 @@ export class SubagentContinuationManager {
     content: ContentBlock[],
     options: ChildDeliveryOptions,
     parent: Agent,
+    initial?: { capability: HostInitialAdmission; message: ReturnType<typeof createUserMessage> },
   ): MessageId {
-    const message = options.source === undefined
+    const message = initial?.message ?? (options.source === undefined
       ? createAgentMessage(parent, content)
-      : createUserMessage({ content, source: options.source })
+      : createUserMessage({ content, source: options.source }))
     return this.activations.submitAdmitted(
       activation,
       message,
       options.delivery,
       parent,
       options.signal,
+      initial?.capability,
     )
   }
 

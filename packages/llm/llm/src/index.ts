@@ -41,6 +41,9 @@ import {
 } from './content.ts'
 import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 
+import { backendStatusJoined } from './backend-settlement.ts'
+import type { LlmBackendStatus, LlmBackendCoverage } from './backend-settlement.ts'
+export * from './backend-settlement.ts'
 export * from './attribution.ts'
 export * from './brand.ts'
 export * from './error.ts'
@@ -206,6 +209,9 @@ export interface PreparedAdapterCall {
  * DeepSeek and library-backed pi-ai adapters meet this contract through different internals.
  */
 export abstract class LlmAdapter {
+  /** Optional actual backend evidence; unsupported/absent MUST remain UNKNOWN. */
+  backendStatus(): LlmBackendStatus | undefined { return undefined }
+
   /**
    * Describe one provider route owned by this adapter.
    * @param provider - a route passed to `registerAdapter()` for this instance.
@@ -341,6 +347,11 @@ export interface DirectoryRegistrationHandle {
  */
 export class LlmRuntime extends TypertRemoteService {
   private adapters = new Map<string, AdapterRegistration>()
+  private nextBackendGeneration = 0
+  // Retain actual captured registrations after route replacement/disposal: backend work may outlive them.
+  private readonly backendRegistrations = new Set<AdapterRegistration>()
+  private readonly backendCallers = new Set<{ registration: AdapterRegistration; phase: 'prepare' | 'stream'; sessionId?: string }>()
+  private readonly backendIdentities = new WeakMap<LlmAdapter, Set<string>>()
   private directory = new Map<string, LlmConfigurableProvider>()
   private discoveries = new Map<
     string,
@@ -349,6 +360,49 @@ export class LlmRuntime extends TypertRemoteService {
 
   constructor(ctx: Context) {
     super(ctx, 'llm')
+  }
+
+  private trackBackendCaller(registration: AdapterRegistration, phase: 'prepare' | 'stream', sessionId?: string): () => void {
+    this.backendRegistrations.add(registration)
+    const caller = { registration, phase, ...sessionId === undefined ? {} : { sessionId } }
+    this.backendCallers.add(caller)
+    return () => { this.backendCallers.delete(caller) }
+  }
+
+  /** Inspect actual registered/captured instances without awaiting or excluding the initiating caller. */
+  backendCoverage(): LlmBackendCoverage {
+    const instances = new Map<LlmAdapter, Set<string>>()
+    for (const registration of this.backendRegistrations) {
+      const providers = instances.get(registration.adapter) ?? new Set<string>()
+      providers.add(registration.provider.id)
+      instances.set(registration.adapter, providers)
+    }
+    const participants: LlmBackendCoverage['participants'][number][] = []
+    for (const [adapter, providers] of instances) {
+      const registrations = [...this.backendRegistrations].filter(registration => registration.adapter === adapter)
+        .map(registration => ({ provider: registration.provider.id, generation: registration.generation }))
+      const callers = [...this.backendCallers].filter(caller => caller.registration.adapter === adapter)
+        .map(({ phase, sessionId }) => ({ phase, ...sessionId === undefined ? {} : { sessionId } }))
+      let status: LlmBackendStatus | undefined
+      let reason: string | undefined
+      try {
+        status = adapter.backendStatus?.()
+        if (status === undefined) reason = 'backend settlement unsupported'
+        else {
+          status = structuredClone(status)
+          const identities = new Set(status.turns.map(turn => JSON.stringify([turn.threadId, turn.turnId])))
+          const seen = this.backendIdentities.get(adapter) ?? new Set<string>()
+          if ([...seen].some(id => !identities.has(id))) reason = 'backend identity evidence disappeared'
+          for (const id of identities) seen.add(id)
+          this.backendIdentities.set(adapter, seen)
+          if (!backendStatusJoined(status)) reason ??= 'backend has unjoined or ambiguous work'
+        }
+      } catch { status = undefined; reason = 'backend settlement unavailable or malformed' }
+      if (callers.length > 0) reason ??= 'initiating native caller has not settled'
+      participants.push({ providers: [...providers], registrations, callers, ...status === undefined ? {} : { status },
+        ...reason === undefined ? {} : { reason } })
+    }
+    return { state: participants.every(participant => participant.reason === undefined) ? 'JOINED' : 'UNKNOWN', participants }
   }
 
   /** Notify topology observers without letting one broken listener veto the commit. */
@@ -446,6 +500,7 @@ export class LlmRuntime extends TypertRemoteService {
         ?? resolveRetryPolicy(undefined, `llm: provider "${provider}" retryPolicy`)
       registrations.push({
         adapter,
+        generation: ++this.nextBackendGeneration,
         provider: { id: info.id, name: info.name },
         retryPolicy,
       })
@@ -465,6 +520,8 @@ export class LlmRuntime extends TypertRemoteService {
     owned.clear()
     for (const registration of registrations) {
       this.adapters.set(registration.provider.id, registration)
+      // Registration itself can own backend work before a native stream (e.g. provider initialization).
+      this.backendRegistrations.add(registration)
       owned.add(registration.provider.id)
     }
     this.emitAdaptersUpdated()
@@ -935,6 +992,8 @@ export class LlmRuntime extends TypertRemoteService {
    */
   async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall> {
     const registration = this.registration(config.provider)
+    const settled = this.trackBackendCaller(registration, 'prepare')
+    try {
     const adapterCall = await registration.adapter.prepareCall(config.provider, config.model, signal)
     const modelInfo = this.normalizeModelInfo(registration, config.model, adapterCall.model)
     const resolved = this.resolveCallWithInfo(config, modelInfo)
@@ -980,6 +1039,7 @@ export class LlmRuntime extends TypertRemoteService {
         })
       },
     })
+    } finally { settled() }
   }
 
   private registration(provider: string): AdapterRegistration {
@@ -1034,9 +1094,13 @@ export class LlmRuntime extends TypertRemoteService {
     options: GenerateOptions,
     prepared?: PreparedDispatch,
   ): AsyncGenerator<StreamChunk> {
+    let settled: (() => void) | undefined
+    let cleanupFailed = false
+    try {
     let iterator: AsyncIterator<StreamChunk>
     try {
       const registration = prepared?.registration ?? this.registration(options.provider)
+      settled = this.trackBackendCaller(registration, 'stream', options.sessionId === undefined ? undefined : String(options.sessionId))
       const adapter = registration.adapter
       let modelInfo: LlmResolvedModelInfo
       let resolvedConfig: LlmCallConfig
@@ -1116,9 +1180,12 @@ export class LlmRuntime extends TypertRemoteService {
     } finally {
       if (!completed) {
         const close = iterator.return?.bind(iterator)
-        if (close) await close()
+        if (close) {
+          try { await close() } catch (error) { cleanupFailed = true; throw error }
+        }
       }
     }
+    } finally { if (!cleanupFailed) settled?.() }
   }
 
   /**
@@ -1161,6 +1228,7 @@ function adapterFailureChunk(error: unknown, signal?: AbortSignal): StreamChunk 
 }
 
 interface AdapterRegistration {
+  readonly generation: number
   readonly adapter: LlmAdapter
   readonly provider: LlmProviderInfo
   readonly retryPolicy: ResolvedRetryPolicy

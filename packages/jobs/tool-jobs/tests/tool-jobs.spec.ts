@@ -52,6 +52,7 @@ async function fakeAgent(ctx: Context, sessionId: string, delivery: FakeDelivery
   const agent = {
     id,
     ctx: scopeFiber.ctx,
+    inbox: {}, // Alternate-driver fixture intentionally exposes no native notification capability.
     inject: delivery.inject ?? (() => {}),
     followup: delivery.followup ?? (() => {}),
     status: delivery.status ?? 'running',
@@ -696,6 +697,7 @@ describe('completion notices across scoped mounts', () => {
     const owner = {
       id: SessionId('sess-scoped'),
       ctx: agentScope.ctx,
+      inbox: {}, // Alternate driver, not a native capability fake.
       inject,
       session: { id: SessionId('sess-scoped'), header: { version: 0, id: SessionId('sess-scoped'), createdAt: 0 } },
     } as unknown as Agent

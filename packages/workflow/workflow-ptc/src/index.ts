@@ -110,10 +110,12 @@ class PtcWorkflowEngine extends WorkflowEngine {
     syncTimeoutMs: z.natural().min(1).default(5000),
   })
 
+  readonly maintenanceCoverage: object | undefined
   private readonly config: ResolvedConfig
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
+    this.maintenanceCoverage = ctx.get('hostAdmission')?.coverage?.('workflow', this)
     if (ctx.ptcRuntime.language !== 'typescript') throw new Error('workflow-ptc requires the Node TypeScript PTC runtime')
     // schemastery (static Config) has already filled the defaulted fields;
     // the assertion records that resolution, not a hidden fallback.
@@ -131,6 +133,8 @@ class PtcWorkflowEngine extends WorkflowEngine {
    * @returns the live run (its `result` resolves when the script settles).
    */
   start(request: WorkflowStartRequest): WorkflowRun {
+    const admission = this.ctx.get('hostAdmission')
+    admission?.assert()
     const meta = validateMeta(request.meta)
     assertBodyParses(request.script, meta.name)
     const subagentProvider = resolveSubagentProvider(this.ctx, this.config.provider, request.subagentProvider)
@@ -154,7 +158,10 @@ class PtcWorkflowEngine extends WorkflowEngine {
     // Captured service handles keep a holder-owned run usable after engine unload.
     const runCtx = this.ctx
     const subagents = runCtx.subagents
-    const run = new PtcWorkflowRun(
+    const reservation = admission?.reserve?.('workflow', request.parent.id)
+    let run: PtcWorkflowRun
+    try {
+    run = new PtcWorkflowRun(
       runCtx,
       subagents,
       runCtx.ptcRuntime,
@@ -172,6 +179,7 @@ class PtcWorkflowEngine extends WorkflowEngine {
       },
       request.signal,
     )
+    } catch (error) { reservation?.release(); throw error }
 
     this.emitWorkflowEvent('workflow/start', info)
     // `workflow/end` fires as the (never-rejecting) result settles, with the
@@ -184,7 +192,10 @@ class PtcWorkflowEngine extends WorkflowEngine {
       })
     })
 
-    return run
+    if (reservation === undefined) return run
+    // Result/end is not necessarily child/backend cleanup. Holder disposal is
+    // the documented join; never dispose/cancel preclose work from the receiver.
+    return { id: run.id, meta: run.meta, result: run.result, cancel: reason => { run.cancel(reason) }, dispose: async () => { await run.dispose(); reservation?.release() } }
   }
 }
 

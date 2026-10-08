@@ -13,6 +13,7 @@ import type { QueueAction } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import { NS } from '../locales.ts'
 import css from './QueueDock.module.css'
+import { FocusControl, type FocusOperation } from './FocusControl.tsx'
 
 const EMPTY_QUEUE = [] as const
 const QUEUE_PREVIEW_CHARS = 200
@@ -33,6 +34,7 @@ function textOf(content: InboxState['next-turn'][number]['content']): string | n
 
 /** Queue operations injected by the session-scoped registration. */
 export interface QueueDockInjected {
+  focusOperation?: FocusOperation
   updateQueue: (itemId: MessageId, action: QueueAction) => Promise<void>
   notify: (level: 'info' | 'error', text: string) => void
   /** Resolve one durable queued image into a session-scoped browser URL. */
@@ -153,7 +155,7 @@ export type QueueDockProps = PropsRuntime<'conversation.input.dock'> & QueueDock
  * collapsible count header; an empty queue renders nothing. Local queued submissions
  * show sending status and disabled actions until their Host queue rows arrive.
  */
-export function QueueDock({ useSession, useProjection, updateQueue, notify, loadImage, t }: QueueDockProps) {
+export function QueueDock({ sessionId, focusOperation, useSession, useProjection, updateQueue, notify, loadImage, t }: QueueDockProps) {
   const inbox = useProjection('inbox') as unknown as InboxState | undefined
   const pendingSubmissions = useSession(s => s.pendingSubmissions)
   const queue = useMemo(() => {
@@ -184,7 +186,7 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
     if (editing !== null && (!queueMutable || !queue.some(row => row.id === editing.id))) setEditing(null)
   }, [collapsed, editing, queue, queueMutable, rowCount])
 
-  if (rowCount === 0) return null
+  if (rowCount === 0 && focusOperation === undefined) return null
 
   const interactionActive = queueMutable && (editing !== null || busy !== null)
   const expanded = !collapsed || interactionActive
@@ -218,6 +220,7 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
 
   return (
     <div className={css.dock} data-queue-dock="">
+      {focusOperation !== undefined && <FocusControl key={sessionId} sessionId={sessionId} operation={focusOperation} revision={inbox} running={running} notify={notify} />}
       <div className={css.panel}>
         {rowCount > 1 && (
           <button
@@ -448,6 +451,16 @@ export const queueDockEntry = {
         const conversation = actx.get('conversation')
         if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
         return {
+          focusOperation: async (input) => {
+            const response = await fetch('/api/session.focus', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sessionId, ...input }),
+            })
+            if (!response.ok) throw new Error('Focus operation not acknowledged')
+            const result: unknown = await response.json()
+            if (result === null || typeof result !== 'object' || !('enabled' in result) || typeof result.enabled !== 'boolean' || !('queued' in result) || typeof result.queued !== 'number') throw new Error('invalid Focus response')
+            return { enabled: result.enabled, queued: result.queued }
+          },
           updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
           notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
           loadImage: attachment => ctx.uiConversation.imageUrl(sessionId, attachment),

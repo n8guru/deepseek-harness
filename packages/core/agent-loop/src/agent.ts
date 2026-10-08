@@ -12,6 +12,8 @@ import type {
   AgentStatus,
   CancelOptions,
   InboxTarget,
+  HostAdmission,
+  HostInitialAdmission,
   PreStepDecision,
   RequestErrorAction,
 } from '@deepseek-ai/dsh-agent'
@@ -124,17 +126,19 @@ export class ReactLoopAgent implements Agent {
     public readonly id: SessionId,
     public readonly options: AgentOptions,
     public readonly session: Session,
+    private readonly maintenanceAdmission?: HostAdmission,
   ) {
     this.requestSurfaceGeneration = session.surface.contentGeneration
     this.dispatch = agentEvents(loopCtx, this)
     this.scope = createScope(loopCtx, this)
     this.ctx = this.scope.ctx
-    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch)
+    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch, () => (this.maintenanceAdmission ?? this.loopCtx.get('hostAdmission')))
     /* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
     const lastTurn = this.loopCtx.sessionProjections.stateOf(session, 'turnBoundary')?.lastTurn ?? 0
     this.phase = { kind: 'idle', lastTurn }
     this.runtimeContext = new RuntimeContextProjection(this.ctx, session)
     this.systemPrompt = new SystemPromptProjection(session)
+    this.inbox.recoverUnentered()
   }
 
   get status(): AgentStatus {
@@ -151,17 +155,31 @@ export class ReactLoopAgent implements Agent {
     }
   }
 
-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void {
+  send(message: UserMessage, target: InboxTarget, wakeup: boolean, initialAdmission?: HostInitialAdmission): void {
+    const admission = this.maintenanceAdmission ?? this.loopCtx.get('hostAdmission')
+    const initial = initialAdmission === undefined ? undefined : this.loopCtx.get('hostAdmission')?.compileInitial?.(initialAdmission, this, message)
+    if (initialAdmission !== undefined && initial === undefined) throw new Error('native compiled initial input unsupported')
+    if (initial === undefined) admission?.assert()
     // Waking input cannot join an aborted activity, so it starts the next turn.
     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
-    if (wakeup) this.wakeDriver(wakingAfterAbort)
+    if (initial === undefined) this.inbox.splice(resolvedTarget, Infinity, 0, [message])
+    else {
+      if (resolvedTarget !== 'next-turn') throw new Error('native initial input target refused')
+      this.inbox.admitMaintenance(initial.ticket, resolvedTarget, message, { origin: 'native:admitted-child', sequence: message.id })
+    }
+    if (wakeup && this.phase.kind === 'maintenance') this.phase.abort.abort({ kind: 'user' })
+    if (wakeup && !this.inbox.isHeld(message) && admission?.open !== false) this.wakeDriver(wakingAfterAbort)
   }
 
-  followup(input: UserMessage): void {
-    this.send(input, 'next-turn', true)
+  wakeInbox(): void {
+    if ((this.maintenanceAdmission ?? this.loopCtx.get('hostAdmission'))?.open === false) return
+    if (this.inbox.hasPending) this.wakeDriver()
+  }
+
+  followup(input: UserMessage, initialAdmission?: HostInitialAdmission): void {
+    this.send(input, 'next-turn', true, initialAdmission)
   }
 
   steer(input: UserMessage): void {
@@ -173,11 +191,13 @@ export class ReactLoopAgent implements Agent {
   }
 
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
+    if (cause.kind === 'disposed') this.inbox.stopAccepting()
     if (!options.keepInbox) {
-      this.inbox.clear()
+      this.inbox.clear(cause.kind === 'disposed')
       if (this.phase.kind !== 'idle') this.phase.wakeRequested = false
     }
     if (this.phase.kind !== 'idle') this.phase.abort.abort(cause)
+    this.dispatch.emit('agent/cancelled', { cause })
   }
 
   runMaintenance<T>(job: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -257,6 +277,7 @@ export class ReactLoopAgent implements Agent {
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
+        this.inbox.recoverUnentered()
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
         if (wakeRequested && this.inbox.hasPending) this.wakeDriver()
@@ -281,7 +302,11 @@ export class ReactLoopAgent implements Agent {
       }),
     )
     signal.throwIfAborted()
-    if (decision.kind === 'reject') return decision
+    if (decision.kind === 'reject') {
+      this.inbox.settle(claimed, 'rejected')
+      return decision
+    }
+    this.inbox.settle(claimed.filter(message => !decision.messages.some(next => next.id === message.id)), 'rejected')
     return { ...decision, assembly }
   }
 
@@ -356,11 +381,11 @@ export class ReactLoopAgent implements Agent {
           this.session.append('step/end', { turn, step })
         }
         signal.throwIfAborted()
-        if (turnEnds && this.inbox.nextStep.length === 0) {
+        if (turnEnds && !this.inbox.hasNextStep) {
           await this.dispatch.serial('agent/turn-stopping', { turn, signal })
           signal.throwIfAborted()
         }
-        if (turnEnds && this.inbox.nextStep.length === 0) break
+        if (turnEnds && !this.inbox.hasNextStep) break
         target = 'next-step'
       }
     } catch (error: unknown) {

@@ -75,6 +75,7 @@ function renderThrown(value: unknown): string {
 /** Install automatic same-session continuation and its race fences. */
 export function apply(ctx: Context): void {
   const states = new Map<Agent, DriverState>()
+  ctx.on('host-admission/changed', () => { for (const state of states.values()) requestDrive(state) })
 
   /** Create state for an exact currently live agent. */
   function stateFor(agent: Agent): DriverState {
@@ -105,6 +106,8 @@ export function apply(ctx: Context): void {
       && !state.stopping
       && ctx.agents.get(state.agent.id) === state.agent
       && state.agent.status === 'idle'
+      && state.agent.inbox.notifications?.focus.enabled !== true
+      && ctx.get('hostAdmission')?.open !== false
       && !state.competingQueued
   }
 
@@ -243,6 +246,16 @@ export function apply(ctx: Context): void {
   // One composite effect keeps the step fence installed until this
   // plugin's own scheduling tasks settle.
   ctx.effect(function* () {
+    ctx.on('agent/cancelled', ({ agent, cause }) => {
+      if (cause.kind !== 'user') return
+      const goal = ctx.goals.get(agent)
+      if (goal?.phase !== 'active') return
+      try { ctx.goals.pause(agent, goalRef(goal)) }
+      catch (error: unknown) {
+        ctx.logger.warn(`goal-round-driver: could not pause stopped goal for agent "${agent.id}": ${renderThrown(error)}`)
+        disarm(stateFor(agent))
+      }
+    })
     ctx.on('agent/error', ({ agent }) => {
       const state = stateFor(agent)
       disarm(state)
@@ -320,6 +333,9 @@ export function apply(ctx: Context): void {
       if (agent === undefined || agent.session !== session) return
       const state = stateFor(agent)
       switch (event.type) {
+        case 'agent/focus':
+          requestDrive(state)
+          return
         case 'user/message':
           if (state.attempt !== undefined && event.data.id === state.attempt.messageId) {
             state.attempt.phase = 'admitted'
@@ -350,6 +366,8 @@ export function apply(ctx: Context): void {
       const attempt = state.attempt
       const goal = currentGoal(state)
       return ctx.fiber.state === FiberState.ACTIVE
+        && state.agent.inbox.notifications?.focus.enabled !== true
+      && ctx.get('hostAdmission')?.open !== false
         && !state.stopping && attempt !== undefined && attempt.phase === 'claimed'
       && !attempt.stale && sameQueued(content, source, attempt)
       && goal !== undefined && goal.id === source.goalId && goal.revision === source.revision

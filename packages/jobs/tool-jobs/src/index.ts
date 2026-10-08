@@ -292,6 +292,18 @@ export function apply(ctx: Context, config: Config): void {
         summary: completionSummary(event.job),
       },
     })
+    const notifications = owner.inbox.notifications
+    if (notifications !== undefined) {
+      notifications.admit('next-step', message, { origin: 'native:jobs', sequence: event.job.id })
+      if (delivery === 'wakeup' && owner.status === 'idle' && notifications.focus.enabled !== true) {
+        const spent = spentWakes.get(owner) ?? 0
+        if (wakeBudget === undefined || spent < wakeBudget) {
+          spentWakes.set(owner, spent + 1)
+          owner.wakeInbox?.()
+        }
+      }
+      return
+    }
     if (delivery === 'wakeup' && owner.status === 'idle') {
       if (wakeBudget === undefined) {
         owner.followup(message)

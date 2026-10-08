@@ -171,6 +171,21 @@ async function run(ctx: Context, parent: Agent, source: { script: string; meta: 
 // The per-test cap leaves room for one generous startup wait plus the tight
 // post-event assertions; explicit narrower timeouts inside stay authoritative.
 describe('dsh-workflow-ptc', { timeout: 120_000 }, () => {
+  it('retains workflow reservation after result until holder disposal joins cleanup', async () => {
+    const { ctx, parent } = await setup()
+    let count = 0
+    ctx.provide('hostAdmission', {
+      open: true, assert() {}, begin: () => ({}),
+      reserve() { count += 1; let released = false; return { ticket: {}, release() { if (!released) { released = true; count -= 1 } } } },
+    })
+    const handle = ctx.workflowEngine.start({ ...scripted('return 42'), parent })
+    try {
+      expect((await handle.result).value).toBe(42)
+      expect(count).toBe(1)
+      await handle.dispose()
+      expect(count).toBe(0)
+    } finally { await handle.dispose(); await ctx.fiber.dispose() }
+  })
   describe('script execution through the Node PTC runtime', () => {
     it('captures args at start and isolates subsequent caller and script mutations', async () => {
       const { ctx, parent } = await setup()

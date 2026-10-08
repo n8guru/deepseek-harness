@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { liveConfig } from '../../../settings/settings/tests/live-config.ts'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, HostAdmissionTicket } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -519,6 +519,66 @@ describe('continuable activation capacity', () => {
 })
 
 describe('SubagentRuntime.startContinuable', () => {
+  it('counts continuable preparation before close and retains UNKNOWN on unjoined failure', async () => {
+    const { ctx, parent, adapter } = await setup([])
+    let open = true
+    const reservations = new Set<object>()
+    ctx.provide('hostAdmission', {
+      get open() { return open },
+      assert: () => { if (!open) throw new Error('closed') },
+      begin: () => { if (!open) throw new Error('closed'); return {} },
+      reserve: () => {
+        if (!open) throw new Error('closed')
+        const ticket = {}
+        reservations.add(ticket)
+        return { ticket, release: () => { reservations.delete(ticket) } }
+      },
+    })
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    ctx.subagents.registerProvider({
+      name: 'delayed-preparation',
+      capabilities: { agentOptions: false, outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      inheritsParentContext: false,
+      start: async () => { throw new Error('one-shot not used') },
+      prepareContinuable: async () => { entered.resolve(); await release.promise; throw new Error('preparation failed without join evidence') },
+    })
+    const starting = ctx.subagents.startContinuable(startSpec(parent, 'delayed-preparation'))
+    const rejected = expect(starting).rejects.toThrow('preparation failed without join evidence')
+    await entered.promise
+    expect(reservations.size).toBe(1)
+    open = false
+    await expect(ctx.subagents.startContinuable(startSpec(parent))).rejects.toThrow('closed')
+    expect(reservations.size).toBe(1)
+    release.resolve()
+    await rejected
+    expect(reservations.size).toBe(1)
+    expect(adapter.requests).toEqual([])
+  })
+
+  it('counts materialization residency until actual handle disposal rather than initial acceptance', async () => {
+    const gate = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('joined'), gate: gate.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    const reservations = new Map<object, string>()
+    ctx.provide('hostAdmission', {
+      open: true, assert: () => {}, begin: () => ({}),
+      forSession: (ticket: HostAdmissionTicket) => ({ open: true, assert: () => { expect(reservations.has(ticket)).toBe(true) }, begin: () => ticket }),
+      reserve: (kind: 'publication' | 'job' | 'delegate' | 'workflow') => {
+        const ticket = {}
+        reservations.set(ticket, kind)
+        return { ticket, release: () => { reservations.delete(ticket) } }
+      },
+    })
+    try {
+      const started = await ctx.subagents.startContinuable(startSpec(parent))
+      expect([...reservations.values()]).toEqual(['delegate'])
+      gate.resolve(undefined)
+      await waitNoActivation(ctx, started.childId)
+      expect(reservations.size).toBe(0)
+    } finally { gate.resolve(undefined) }
+  })
+
   it('returns both identities at inbox acceptance, without waiting for the turn or the log', async () => {
     const { ctx, parent, adapter } = await setup([textResponse('first answer')])
     const enqueued: { id: MessageId; loggedYet: boolean }[] = []
@@ -2718,7 +2778,7 @@ describe('continuable adjacent-Agent delivery', () => {
     await waitNoActivation(ctx, started.childId)
   })
 
-  it('translates direct-parent Steer rejection into an availability error', async () => {
+  it('translates direct-parent native notification admission rejection into an availability error', async () => {
     const releaseChild = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([
       { chunks: textResponse('child answer'), gate: releaseChild.promise },
@@ -2731,7 +2791,9 @@ describe('continuable adjacent-Agent delivery', () => {
       return found!
     })
     const rejection = new Error('parent closed admission')
-    vi.spyOn(parent, 'steer').mockImplementation(() => { throw rejection })
+    const notifications = parent.inbox.notifications
+    if (notifications === undefined) throw new Error('native notification capability required')
+    vi.spyOn(notifications, 'admit').mockImplementation(() => { throw rejection })
 
     await expect(ctx.subagents.sendMessage(child, parent.id, message('cannot arrive'), {
       signal: testSignal,
@@ -3115,6 +3177,70 @@ describe('continuable settlement delivery', () => {
     await waitNoActivation(ctx, outer.childId)
   })
 
+  it('refuses native sends to a resident parent as soon as its Activation closes', async () => {
+    const hold = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('closing'), gate: hold.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(ctx.agents.get(started.childId)).toBeDefined() })
+    const registry = continuationActivations(ctx)
+    const activation = registry.get(started.childId)!
+    const child = activation.handle.agent
+    const before = child.session.snapshotEvents().length
+    const disposal = registry.dispose(activation)
+    const notice = createUserMessage({ source: { kind: 'user' }, content: message('too late') })
+    expect(() => registry.sendWaking(child, notice, 'steer')).toThrow('message was not accepted')
+    expect(child.session.snapshotEvents().slice(before).some(event => event.type === 'agent/inbox/spliced' && event.data.inserted.some(item => item.id === notice.id))).toBe(false)
+    hold.resolve(undefined)
+    await disposal
+  })
+
+  it('preserves an admitted native notice on human Stop but refuses new sends after disposed cancel', async () => {
+    const { ctx, parent } = await setup([])
+    const registry = continuationActivations(ctx)
+    parent.inbox.notifications!.setFocus(true)
+    const admitted = createUserMessage({ source: { kind: 'user' }, content: message('already accepted') })
+    registry.sendWaking(parent, admitted, 'queue')
+    parent.cancel({ kind: 'user' })
+    expect(parent.inbox.nextTurn.some(item => item.id === admitted.id)).toBe(true)
+    const afterStop = createUserMessage({ source: { kind: 'user' }, content: message('after Stop') })
+    registry.sendWaking(parent, afterStop, 'queue')
+    parent.cancel({ kind: 'disposed' })
+    const before = parent.session.snapshotEvents().length
+    expect(() => registry.sendWaking(parent, createUserMessage({ source: { kind: 'user' }, content: message('after dispose') }), 'queue')).toThrow('exact live owner')
+    expect(parent.session.snapshotEvents()).toHaveLength(before)
+    expect(parent.inbox.nextTurn).toEqual([])
+  })
+
+  it('refuses a stale parent handle after dispose and same-id resume without appending to either owner', async () => {
+    const { ctx } = await setup([])
+    const host = await ctx.agents.create({ sessionId: SessionId('replaced-parent'), agentOptions: { provider: 'mock', model: 'mock' } })
+    const stale = host.agent
+    // Empty sessions are not materialized by the native JSONL backend.
+    stale.inbox.notifications!.setFocus(true)
+    await host.dispose()
+    const current = await ctx.agents.resume({ resumeSessionId: stale.id, agentOptions: { provider: 'mock', model: 'mock' } })
+    try {
+      const before = current.agent.session.snapshotEvents().length
+      expect(() => continuationActivations(ctx).sendWaking(stale, createUserMessage({ source: { kind: 'user' }, content: message('stale owner') }), 'queue')).toThrow('exact live owner')
+      expect(current.agent.session.snapshotEvents()).toHaveLength(before)
+      expect(current.agent.inbox.nextTurn).toEqual([])
+    } finally { await current.dispose() }
+  })
+
+  it('never appends a child settlement after the exact parent received disposed cancel', async () => {
+    const hold = Promise.withResolvers<undefined>()
+    const adapter = new GatedAdapter([{ chunks: textResponse('finished'), gate: hold.promise }])
+    const { ctx, parent } = await setupWith(adapter)
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await vi.waitFor(() => { expect(ctx.agents.get(started.childId)).toBeDefined() })
+    parent.cancel({ kind: 'disposed' })
+    hold.resolve(undefined)
+    await waitNoActivation(ctx, started.childId)
+    expect(settlementNotices(parent)).toEqual([])
+    expect(parent.session.snapshotEvents().some(event => event.type === 'agent/inbox/spliced' && event.data.inserted.some(item => item.source.kind === 'subagent-settled'))).toBe(false)
+  })
+
   it('does not wake a parent whose own teardown already began', async () => {
     const hold = Promise.withResolvers<undefined>()
     const adapter = new GatedAdapter([{ chunks: textResponse('interrupted'), gate: hold.promise }])
@@ -3214,7 +3340,9 @@ describe('continuable settlement delivery', () => {
     const { ctx, parent } = await setup([textResponse('the answer')])
     const warnings: string[] = []
     ctx.logger.warn = (text: string) => { warnings.push(text) }
-    vi.spyOn(parent, 'followup').mockImplementation(() => {
+    const notifications = parent.inbox.notifications
+    if (notifications === undefined) throw new Error('native notification capability required')
+    vi.spyOn(notifications, 'admit').mockImplementation(() => {
       throw new Error('parent closed during delivery')
     })
     const ends: SubagentRunEndInfo[] = []

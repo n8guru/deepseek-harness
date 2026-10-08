@@ -301,6 +301,7 @@ export class GoalService extends TypertRemoteService {
    * @returns the created live view.
    */
   create(agent: Agent, request: CreateGoalRequest): GoalView {
+    this.ctx.get('hostAdmission')?.assert()
     const spec = resolveCreateGoal(request, this.resolved.defaultMaxGoalRounds)
     const [state, runtime] = this.prepareMutation(agent)
     const current = state?.goal
@@ -362,6 +363,7 @@ export class GoalService extends TypertRemoteService {
    */
   @Remote('resume')
   resume(agent: Agent, ref: GoalRef): GoalView {
+    this.ctx.get('hostAdmission')?.assert()
     const [state, runtime] = this.prepareMutation(agent)
     const currentState = this.expectCurrent(state, ref)
     const current = currentState.goal

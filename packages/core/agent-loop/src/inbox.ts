@@ -10,10 +10,14 @@ import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
 import type {
   AgentEventDispatch,
+  HostAdmission,
+  HostAdmissionTicket,
   Inbox as InboxContract,
   InboxState,
   InboxTarget,
   InboxWireState,
+  NotificationAdmission,
+  NotificationState,
 } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
 
@@ -76,7 +80,88 @@ export class ReactLoopInbox implements InboxContract {
     private readonly projections: SessionProjectionRegistry,
     private readonly session: Session,
     private readonly dispatch: AgentEventDispatch,
+    private readonly admission: () => HostAdmission | undefined = () => undefined,
   ) {}
+
+  private acceptingAdmissions = true
+  get accepting(): boolean { return this.acceptingAdmissions }
+  /** Disposal closes admission synchronously; human Stop does not dispose. */
+  stopAccepting(): void { this.acceptingAdmissions = false }
+
+  /** Native driver capability; alternate drivers need not pretend to implement it. */
+  readonly notifications = this
+
+  private notificationState(): NotificationState {
+    const state = this.projections.stateOf(this.session, 'notifications')
+    if (state === undefined) throw new Error('notification projection unavailable')
+    return state
+  }
+
+  get focus(): { enabled: boolean; queued: number } {
+    return { enabled: this.notificationState().enabled, queued: [...this.nextStep, ...this.nextTurn].filter(m => this.isHeld(m)).length }
+  }
+
+  get hasForeground(): boolean {
+    return [...this.nextStep, ...this.nextTurn].some(m => this.admissionFor(m.id) === undefined)
+  }
+
+  get hasNextStep(): boolean { return this.nextStep.some(m => !this.isHeld(m)) }
+
+  private admissionFor(id: string) {
+    return this.notificationState().receipts.find(r => r.message.id === id)
+  }
+
+  isHeld(message: UserMessage): boolean {
+    const state = this.notificationState()
+    return state.enabled && this.admissionFor(message.id) !== undefined
+      && !state.released.includes(message.id)
+  }
+
+  receipt(origin: string, sequence: string): UserMessage | undefined {
+    return this.notificationState().receipts.find(r => r.admission.origin === origin && r.admission.sequence === sequence)?.message
+  }
+
+  isPendingReceipt(origin: string, sequence: string): boolean {
+    const message = this.receipt(origin, sequence)
+    return message !== undefined && this.locate(message.id) !== undefined && !this.isHeld(message)
+  }
+
+  admit(target: InboxTarget, message: UserMessage, admission: NotificationAdmission): boolean {
+    if (!this.accepting) throw new Error('native inbox admission disposed')
+    if (this.receipt(admission.origin, admission.sequence) !== undefined) return false
+    this.admission()?.assert()
+    this.mutate(target, Infinity, 0, [message], true, admission)
+    return true
+  }
+
+  admitMaintenance(permit: HostAdmissionTicket, target: InboxTarget, message: UserMessage, admission: NotificationAdmission): boolean {
+    if (!this.accepting) throw new Error('native inbox admission disposed')
+    const owner = this.admission()
+    if (owner?.forSession === undefined) throw new Error('native maintenance receipt capability unsupported')
+    owner.forSession(permit, this.session.id).assert()
+    owner.assertReceipt?.(permit, message)
+    if (this.receipt(admission.origin, admission.sequence) !== undefined) return false
+    this.mutate(target, Infinity, 0, [message], true, admission)
+    return true
+  }
+
+  /** Restore admissions canceled before model-visible entry; committed messages never replay. */
+  recoverUnentered(): void {
+    const state = this.notificationState()
+    for (const { target, message } of state.receipts) {
+      if (!state.entered.includes(message.id) && !state.terminal.some(item => item.messageId === message.id) && this.locate(message.id) === undefined) this.mutate(target, Infinity, 0, [message], false)
+    }
+  }
+
+  setFocus(enabled: boolean): void { this.session.append('agent/focus', { enabled }) }
+
+  check(id: string): readonly string[] {
+    const previous = this.notificationState().checks.find(c => c.id === id)
+    if (previous !== undefined && !previous.messageIds.some(id => [...this.nextStep, ...this.nextTurn].some(m => m.id === id && this.isHeld(m)))) return previous.messageIds
+    const messageIds = previous === undefined ? [...this.nextStep, ...this.nextTurn].filter(m => this.isHeld(m) && this.admissionFor(m.id) !== undefined).slice(0, 10).map(m => m.id) : [...previous.messageIds]
+    this.session.append('agent/focus', { enabled: this.focus.enabled, check: { id, messageIds } })
+    return messageIds
+  }
 
   /** Prompts awaiting individual turns. */
   get nextTurn(): readonly UserMessage[] {
@@ -91,13 +176,25 @@ export class ReactLoopInbox implements InboxContract {
   /** Whether either pending-message list contains work. */
   get hasPending(): boolean {
     const state = this.current()
-    return state['next-turn'].length > 0 || state['next-step'].length > 0
+    return [...state['next-turn'], ...state['next-step']].some(m => !this.isHeld(m))
   }
 
-  /** Durably cancel all pending input, clearing next-step before next-turn. */
-  clear(): void {
-    this.splice('next-step', 0, this.nextStep.length, [])
-    this.splice('next-turn', 0, this.nextTurn.length, [])
+  /** Terminal execution disposition keeps original receipts as evidence. */
+  settle(messages: readonly UserMessage[], reason: 'rejected' | 'discarded' | 'disposed'): void {
+    const messageIds = messages.filter(m => this.admissionFor(m.id) !== undefined).map(m => m.id)
+    if (messageIds.length > 0) this.session.append('agent/notification/terminal', { messageIds, reason })
+  }
+
+  /** Human Stop preserves admitted background input; teardown explicitly disposes it. */
+  clear(disposeNotifications = false): void {
+    for (const target of ['next-step', 'next-turn'] as const) {
+      for (const [index, message] of [...this.current()[target].entries()].reverse()) {
+        if (this.admissionFor(message.id) === undefined || disposeNotifications) {
+          if (disposeNotifications) this.settle([message], 'disposed')
+          this.splice(target, index, 1, [])
+        }
+      }
+    }
   }
 
   /**
@@ -107,8 +204,17 @@ export class ReactLoopInbox implements InboxContract {
    * @returns next-step input followed by the queued turn, when requested.
    */
   claim(target: InboxTarget, turn: number): UserMessage[] {
-    const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
-    if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
+    const claimed: UserMessage[] = []
+    const foreground = this.hasForeground
+    const eligible = (m: UserMessage) => !this.isHeld(m) && !(this.focus.enabled && foreground && this.admissionFor(m.id) !== undefined)
+    for (const [index, message] of [...this.nextStep.entries()].reverse()) {
+      if (eligible(message)) claimed.unshift(...this.mutate('next-step', index, 1, [], false))
+    }
+    if (target === 'next-turn') {
+      let index = this.nextTurn.findIndex(m => eligible(m) && this.admissionFor(m.id) === undefined)
+      if (index < 0) index = this.nextTurn.findIndex(eligible)
+      if (index >= 0) claimed.push(...this.mutate('next-turn', index, 1, [], false))
+    }
     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
     return claimed
   }
@@ -139,7 +245,7 @@ export class ReactLoopInbox implements InboxContract {
    */
   replace(messageId: MessageId, newMessage: UserMessage): boolean {
     const location = this.locate(messageId)
-    if (location === undefined) return false
+    if (location === undefined || this.admissionFor(messageId) !== undefined) return false
     this.splice(location.target, location.index, 1, [newMessage])
     return true
   }
@@ -170,6 +276,7 @@ export class ReactLoopInbox implements InboxContract {
     deleteCount: number,
     inserted: UserMessage[],
   ): UserMessage[] {
+    if (inserted.length > 0) this.admission()?.assert()
     return this.mutate(target, start, deleteCount, inserted, true)
   }
 
@@ -201,6 +308,7 @@ export class ReactLoopInbox implements InboxContract {
     deleteCount: number,
     inserted: UserMessage[],
     discardRemoved: boolean,
+    notification?: NotificationAdmission,
   ): UserMessage[] {
     const state = this.current()
     const inbox = state[target]
@@ -229,9 +337,11 @@ export class ReactLoopInbox implements InboxContract {
       start: actualStart,
       ...(actualDeleteCount === 0 ? {} : { removedCount: actualDeleteCount }),
       inserted,
+      ...(notification === undefined ? {} : { notification }),
       ...(outcome === undefined ? {} : { outcome }),
     }
     const removed = inbox.slice(actualStart, actualStart + actualDeleteCount)
+    if (discardRemoved) this.settle(removed, 'discarded')
     const event = this.session.append('agent/inbox/spliced', splice)
     if (discardRemoved) {
       for (const message of removed) this.dispatch.emit('agent/inbox/discarded', { message })

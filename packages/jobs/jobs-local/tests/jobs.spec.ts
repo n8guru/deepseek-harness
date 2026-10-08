@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, HostAdmissionTicket } from '@deepseek-ai/dsh-agent'
 import { bindScopeParent, createScope, scopeOf } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import { JobId } from '@deepseek-ai/dsh-jobs'
@@ -111,6 +111,35 @@ async function harness(config: JobsConfig = {}) {
   ctx.jobs.attachController('test-controller')
   return ctx
 }
+
+it('counts a preclose job until actual producer done, not forced cancellation status', async () => {
+  const ctx = await harness()
+  let closed = false
+  let count = 0
+  ctx.provide('hostAdmission', {
+    get open() { return !closed },
+    assert(ticket?: HostAdmissionTicket) { if (closed && ticket === undefined) throw new Error('closed') },
+    begin() { if (closed) throw new Error('closed'); return {} },
+    reserve() {
+      if (closed) throw new Error('closed')
+      count += 1
+      let released = false
+      return { ticket: {}, release() { if (!released) { released = true; count -= 1 } } }
+    },
+  })
+  const work = producer()
+  try {
+    const id = ctx.jobs.start({ ...work.spec, run(handle) { closed = true; return work.spec.run(handle) } })
+    expect(count).toBe(1) // Reentrant close never cancels admitted producer.
+    ctx.jobs.kill(id)
+    await tick()
+    expect(count).toBe(1) // cancelled status is not backend done.
+    work.settle({ status: 'completed' })
+    await tick()
+    expect(count).toBe(0)
+    expect(() => ctx.jobs.start(producer().spec)).toThrow('closed')
+  } finally { await ctx.fiber.dispose() }
+})
 
 /** Collect events matching `filter`; `types` narrows what is recorded. */
 function collect(ctx: Context, filter: JobEventFilter = { owners: 'all' }, types?: JobEvent['type'][]): JobEvent[] {

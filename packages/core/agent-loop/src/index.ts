@@ -18,6 +18,7 @@ import type {
   AgentOptions,
   AgentSetup,
   CreateAgentOptions,
+  HostAdmissionTicket,
   ResumeAgentOptions,
   SessionStartSource,
   TurnBoundaryProjection,
@@ -33,6 +34,7 @@ import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persis
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { ReactLoopAgent } from './agent.ts'
 import { inboxProjectionDefinition } from './inbox.ts'
+import { notificationProjectionDefinition } from './notifications.ts'
 import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
 import type {} from './runtime-context.ts'
 
@@ -109,6 +111,8 @@ class FactoryOwnership {
     return this.teardown.signal
   }
 
+  get pendingStartup(): boolean { return this.startupTasks.size > 0 }
+
   isActive(): boolean {
     return this.accepting && !INACTIVE_STATES.has(this.fiber.state)
   }
@@ -168,7 +172,8 @@ async function raceAbortCall<T>(
   operation: () => PromiseLike<T> | T,
   signal: AbortSignal,
   id: SessionId,
-  releaseAbandoned?: (value: T) => void,
+  releaseAbandoned?: (value: T) => PromiseLike<void> | void,
+  observeJoin?: (joined: Promise<void>) => void,
 ): Promise<T> {
   if (signal.aborted) {
     throw signal.reason instanceof Error
@@ -176,15 +181,17 @@ async function raceAbortCall<T>(
       : new Error(`agent "${id}" creation aborted`, { cause: signal.reason })
   }
   const pending = Promise.resolve().then(operation)
-  try {
-    return await raceAbort(pending, signal, id)
-  } catch (error: unknown) {
-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- the signal can abort while the operation is awaited.
-    if (signal.aborted && releaseAbandoned !== undefined) {
-      void pending.then(releaseAbandoned, () => undefined)
-    }
-    throw error
-  }
+  const publicResult = raceAbort(pending, signal, id)
+  // One observed join covers BOTH delayed backend completion and abandoned-handle cleanup,
+  // without an empty accounting cut between them. Cancellation only ends the public waiter.
+  const joined = publicResult.then(() => undefined, async () => {
+    await pending.then(async value => {
+      if (signal.aborted) await releaseAbandoned?.(value)
+    }, () => undefined)
+  })
+  if (observeJoin === undefined) void joined.catch(() => {})
+  else observeJoin(joined)
+  return await publicResult
 }
 
 /** Reject an output-token cap that cannot be represented exactly on the request wire. */
@@ -347,12 +354,15 @@ export class AgentLoop extends Service implements AgentFactory {
 
   /** Validated configuration owned by the agent-loop service. */
   readonly config: Config
+  readonly maintenanceCoverage: object | undefined
+  private publicationUnknown = false
   private readonly ownership: FactoryOwnership
   /** Plain holder prevents Cordis from re-tracing the factory's dependency context through a caller shadow. */
   private readonly runtime: { ctx: Context }
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'agentLoop')
+    this.maintenanceCoverage = ctx.get('hostAdmission')?.coverage?.('publication', this, () => !this.publicationUnknown && !this.ownership.pendingStartup)
 
     this.config = {
       agents: applyLauncherIdentities(config.agents, ctx.get(CONFIGURED_AGENT_IDENTITIES_KEY)),
@@ -363,6 +373,7 @@ export class AgentLoop extends Service implements AgentFactory {
     // rejected constructor leaves no projection unit behind.
     ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
     ctx.sessionProjections.register(inboxProjectionDefinition)
+    ctx.sessionProjections.register(notificationProjectionDefinition)
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
     ctx.effect(() => () => this.ownership.dispose(), 'agentLoop.transactions()')
@@ -484,6 +495,8 @@ export class AgentLoop extends Service implements AgentFactory {
     callerSignal?: AbortSignal,
     handle?: SessionHandle,
     parentAgent?: Agent,
+    maintenancePermit?: HostAdmissionTicket,
+    publicationTicket?: HostAdmissionTicket,
   ): PreparedAgent {
     assertAgentOptions(options)
     ownerCtx.fiber.assertActive()
@@ -498,6 +511,11 @@ export class AgentLoop extends Service implements AgentFactory {
         : new Error(`agent "${id}" creation aborted`, { cause: callerSignal.reason })
     }
     const loopCtx = this.runtime.ctx
+    const rootAdmission = loopCtx.get('hostAdmission')
+    if (maintenancePermit !== undefined) rootAdmission?.assertMaintenancePermit?.(maintenancePermit)
+    const admission = maintenancePermit === undefined ? rootAdmission : rootAdmission?.forSession?.(maintenancePermit, id)
+    if (maintenancePermit !== undefined && admission === undefined) throw new Error('native maintenance permit unsupported')
+    const admissionTicket = publicationTicket ?? admission?.begin()
 
     // Deactivation fuses three owners, each with its own reason: the caller's
     // cancellation signal, the owner fiber's unload, and factory teardown.
@@ -573,7 +591,7 @@ export class AgentLoop extends Service implements AgentFactory {
     let unfollowOwner: () => Promise<void> | void
     try {
       unfollowOwner = ownerCtx.effect(function* () {
-        machine = new ReactLoopAgent(loopCtx, id, options, session)
+        machine = new ReactLoopAgent(loopCtx, id, options, session, maintenancePermit === undefined ? undefined : admission)
         machineReady.resolve()
         yield machine.scope.rawDispose
         yield () => {
@@ -615,10 +633,11 @@ export class AgentLoop extends Service implements AgentFactory {
           publication = Promise.withResolvers<void>()
           try {
             assertLive()
+            admission?.assert(admissionTicket)
             detachSession = agent.ctx.sessions.enter(session)
             // The mounted backend routes announced live events into the active
             // write handle by session id; the loop only owns the handle itself.
-            detachAgent = loopCtx.agents.enter(agent, parentAgent)
+            detachAgent = loopCtx.agents.enter(agent, parentAgent, maintenancePermit ?? publicationTicket)
             agent.ctx.sessions.announce(session)
             assertLive()
             await loopCtx.agents.announce(agent, source, abort.signal)
@@ -650,19 +669,25 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published running agent.
    */
   async create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Promise<Agent> {
+    const admission = this.runtime.ctx.get('hostAdmission')
     using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
-    const stored = await this.createStoredSession(preparation.session)
-    let prepared: PreparedAgent
+    const reservation = admission?.reserve?.('publication', id)
+    const ticket = reservation?.ticket ?? admission?.begin()
     try {
-      prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle)
-    } catch (error: unknown) {
-      await stored?.handle.close().catch(() => {})
-      throw error
-    }
-    return (await this.initializeAgent(prepared, async () => {
-      await this.appendUnstoredSuffix(stored, preparation.session)
-      return await prepared.publish('startup')
-    })).agent
+      const stored = await this.createStoredSession(preparation.session)
+      let prepared: PreparedAgent
+      try {
+        admission?.assert(ticket)
+        prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle, undefined, undefined, reservation?.ticket)
+      } catch (error: unknown) {
+        await stored?.handle.close().catch(() => { this.publicationUnknown = true })
+        throw error
+      }
+      return (await this.initializeAgent(prepared, async () => {
+        await this.appendUnstoredSuffix(stored, preparation.session)
+        return await prepared.publish('startup')
+      })).agent
+    } finally { reservation?.release() }
   }
 
   /**
@@ -712,11 +737,23 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published handle.
    */
   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
+    const rootAdmission = this.runtime.ctx.get('hostAdmission')
+    if (options.initialAdmission !== undefined && (rootAdmission?.initial === undefined || options.maintenancePermit !== undefined)) throw new Error('native initial admission unsupported')
+    const initial = options.initialAdmission === undefined ? undefined : rootAdmission!.initial!(options.initialAdmission, options.sessionId, options.parentAgent, true)
+    if (initial !== undefined) {
+      if (options.meta?.parentSession !== undefined && options.meta.parentSession !== options.parentAgent?.id) throw new Error('native initial parent metadata refused')
+      options = { ...options, signal: initial.signal, meta: { ...options.meta, parentSession: options.parentAgent!.id } }
+    }
+    const admission = options.maintenancePermit === undefined ? rootAdmission : rootAdmission?.forSession?.(options.maintenancePermit, options.sessionId)
+    if (options.maintenancePermit !== undefined && admission === undefined) throw new Error('native maintenance permit unsupported')
     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
       ...options.seed === undefined ? {} : { seed: options.seed },
       ...options.meta === undefined ? {} : { meta: options.meta },
       ...options.inheritedEventCount === undefined ? {} : { inheritedEventCount: options.inheritedEventCount },
     }))
+    const reservation = initial ?? (options.maintenancePermit === undefined ? admission?.reserve?.('publication', options.sessionId) : undefined)
+    const ticket = reservation?.ticket ?? admission?.begin()
+    let deferredPublished = false
     const published = (async () => {
       let stored: StoredSession | undefined
       try {
@@ -728,13 +765,16 @@ export class AgentLoop extends Service implements AgentFactory {
             () => this.createStoredSession(preparation.session, options.signal),
             options.signal,
             options.sessionId,
-            (abandoned) => { void abandoned?.handle.close().catch(() => {}) },
+            (abandoned) => abandoned?.handle.close(),
+            joined => { this.trackPublication(joined).catch(() => { this.publicationUnknown = true }) },
           )
+        admission?.assert(ticket)
       } catch (error: unknown) {
         preparation[Symbol.dispose]()
+        await stored?.handle.close().catch(() => { this.publicationUnknown = true })
         throw error
       }
-      return this.setupAndPublish(
+      const handle = await this.setupAndPublish(
         ownerCtx,
         options.sessionId,
         preparation,
@@ -744,10 +784,32 @@ export class AgentLoop extends Service implements AgentFactory {
         'startup',
         stored,
         options.parentAgent,
+        options.maintenancePermit,
+        reservation?.ticket,
       )
-    })()
+      if (initial?.deferred) {
+        deferredPublished = true
+        return { agent: handle.agent, dispose: async () => { await handle.dispose(); initial.join() } }
+      }
+      if (initial !== undefined) {
+        try {
+          const inbox = handle.agent.inbox.notifications
+          if (inbox?.admitMaintenance === undefined) throw new Error('native initial inbox unsupported')
+          inbox.admitMaintenance(initial.ticket, 'next-turn', initial.message, { origin: 'native:admitted-child', sequence: initial.message.id })
+          await this.runtime.ctx.sessions.flush(handle.agent.session)
+          handle.agent.wakeInbox?.()
+        } catch (error) { await handle.dispose(); throw error }
+      }
+      return handle
+    })().finally(() => { if (!deferredPublished) reservation?.release() })
     this.ownership.trackWrapper(published)
     return published
+  }
+
+  /** Track the actual publication backend/setup promise even if its public waiter is cancelled. */
+  private trackPublication<T>(pending: Promise<T>): Promise<T> {
+    this.ownership.trackStartup(pending.then(() => undefined, () => undefined))
+    return pending
   }
 
   /** Prepare one Agent around an acquired Session, run setup, and publish it. */
@@ -761,18 +823,22 @@ export class AgentLoop extends Service implements AgentFactory {
     source: SessionStartSource,
     stored?: StoredSession,
     parentAgent?: Agent,
+    maintenancePermit?: HostAdmissionTicket,
+    publicationTicket?: HostAdmissionTicket,
   ): Promise<AgentHandle> {
     using ownedPreparation = preparation
     const session = ownedPreparation.session
     let prepared: PreparedAgent
     try {
-      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent)
+      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, maintenancePermit, publicationTicket)
     } catch (error: unknown) {
-      await stored?.handle.close().catch(() => {})
+      await stored?.handle.close().catch(() => { this.publicationUnknown = true })
       throw error
     }
     return await this.initializeAgent(prepared, async () => {
-      const setupCommit = await raceAbort(setup?.(prepared.agent.ctx, prepared.agent), prepared.signal, id)
+      const setupPending = Promise.resolve(setup?.(prepared.agent.ctx, prepared.agent))
+      this.ownership.trackStartup(setupPending.then(() => undefined, () => undefined))
+      const setupCommit = await raceAbort(setupPending, prepared.signal, id)
       setupCommit?.commit()
       await this.appendUnstoredSuffix(stored, session)
       return await prepared.publish(source)
@@ -793,7 +859,7 @@ export class AgentLoop extends Service implements AgentFactory {
     } catch (error: unknown) {
       // Rollback swallows a disposal rejection (a failing final handle close):
       // the setup failure is the primary error the caller must see.
-      await prepared.dispose().catch(() => {})
+      await prepared.dispose().catch(() => { this.publicationUnknown = true })
       throw error
     }
   }
@@ -805,6 +871,11 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published handle.
    */
   async resume(ownerCtx: Context, options: ResumeAgentOptions): Promise<AgentHandle> {
+    const admission = this.runtime.ctx.get('hostAdmission')
+    if (options.maintenancePermit !== undefined) {
+      if (admission?.forSession === undefined) throw new Error('native maintenance permit unsupported')
+      admission.forSession(options.maintenancePermit, options.resumeSessionId).assert()
+    } else admission?.assert()
     const persistence = this.runtime.ctx.get('sessionPersistence')
     if (persistence === undefined) {
       throw new Error('cannot resume: session persistence is not configured (load a dsh-session-persistence backend)')
@@ -818,6 +889,11 @@ export class AgentLoop extends Service implements AgentFactory {
     persistence: SessionPersistence,
     options: ResumeAgentOptions,
   ): Promise<AgentHandle> {
+    const rootAdmission = this.runtime.ctx.get('hostAdmission')
+    const admission = options.maintenancePermit === undefined ? rootAdmission : rootAdmission?.forSession?.(options.maintenancePermit, options.resumeSessionId)
+    if (options.maintenancePermit !== undefined && admission === undefined) throw new Error('native maintenance permit unsupported')
+    const reservation = options.maintenancePermit === undefined ? admission?.reserve?.('publication', options.resumeSessionId) : undefined
+    const ticket = reservation?.ticket ?? admission?.begin()
     const id = options.resumeSessionId
     const published = (async () => {
       // The open and read may outlive their owner: race them against caller
@@ -843,7 +919,8 @@ export class AgentLoop extends Service implements AgentFactory {
             () => persistence.open(id, 'write', { signal: fused }),
             fused,
             id,
-            (abandoned) => { void abandoned.close() },
+            (abandoned) => abandoned.close(),
+            joined => { this.trackPublication(joined).catch(() => { this.publicationUnknown = true }) },
           )
           // Semantic crash repair is the agent layer's job: persistence hands
           // back the physically valid log; an interrupted final turn receives
@@ -866,6 +943,7 @@ export class AgentLoop extends Service implements AgentFactory {
           await unfollowOwner()
         }
         ownerCtx.fiber.assertActive()
+        admission?.assert(ticket)
         if (!this.ownership.isActive()) throw new Error('agent loop is not active')
         const owned = stored
         handle = undefined // ownership passes to setupAndPublish/prepare
@@ -879,10 +957,13 @@ export class AgentLoop extends Service implements AgentFactory {
           'resume',
           owned,
           options.parentAgent,
+          options.maintenancePermit,
+          reservation?.ticket,
         )
       } finally {
         preparation?.[Symbol.dispose]()
-        await handle?.close().catch(() => {})
+        await handle?.close().catch(() => { this.publicationUnknown = true })
+        reservation?.release()
       }
     })()
     this.ownership.trackWrapper(published)

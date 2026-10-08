@@ -5,6 +5,7 @@ import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it, onTestFinished } from 'vitest'
+import { notificationProjectionDefinition } from '../src/notifications.ts'
 import { inboxProjectionDefinition, ReactLoopInbox } from '../src/inbox.ts'
 
 function unsupportedInbox(): Agent['inbox'] {
@@ -49,6 +50,7 @@ async function inboxAgent(rawId: string): Promise<{
   onTestFinished(() => ctx.fiber.dispose())
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
+    ctx.sessionProjections.register(notificationProjectionDefinition)
   ctx.sessionProjections.register(inboxProjectionDefinition)
   const session = ctx.sessions.create(SessionId(rawId))
   const agent = stubAgent(rawId, { ctx, session })
@@ -67,6 +69,7 @@ async function reconstructPersistedInbox(
   const session = ctx.sessions.create(SessionId(rawId))
   populate(session)
   await ctx.plugin(SessionProjectionRegistry)
+    ctx.sessionProjections.register(notificationProjectionDefinition)
   ctx.sessionProjections.register(inboxProjectionDefinition)
   const agent = stubAgent(rawId, { ctx, session })
   const inbox = new ReactLoopInbox(ctx.sessionProjections, session, agentEvents(ctx, agent))
@@ -85,6 +88,7 @@ describe('ReactLoopInbox', () => {
     onTestFinished(() => ctx.fiber.dispose())
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
+    ctx.sessionProjections.register(notificationProjectionDefinition)
     const unregister = ctx.sessionProjections.register(inboxProjectionDefinition)
     const session = ctx.sessions.create(SessionId('inbox-projection'))
     const pending = createUserMessage({
@@ -141,6 +145,7 @@ describe('ReactLoopInbox', () => {
     onTestFinished(() => ctx.fiber.dispose())
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
+    ctx.sessionProjections.register(notificationProjectionDefinition)
     ctx.sessionProjections.register(inboxProjectionDefinition)
     const parent = ctx.sessions.create(SessionId('inbox-fork-parent'))
     const parentAgent = stubAgent('inbox-fork-parent', { ctx, session: parent })

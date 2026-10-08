@@ -4,7 +4,7 @@
  * @module @deepseek-ai/dsh-subagent/inbox
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, HostInitialAdmission } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type { SubagentPromptRequest } from './control-types.ts'
 import { SubagentError } from './error.ts'
@@ -43,15 +43,20 @@ export class SubagentInbox {
    * @param message - the accepted input to submit.
    * @param delivery - whether to queue a distinct turn or steer the nearest step.
    */
-  deliver(message: UserMessage, delivery: SubagentDelivery): void {
+  deliver(message: UserMessage, delivery: SubagentDelivery, initialAdmission?: HostInitialAdmission): void {
+    this.assertAccepting()
+    if (delivery === 'steer') this.agent.steer(message)
+    else this.agent.followup(message, initialAdmission)
+  }
+
+  /** Apply the same lifecycle boundary to native notification delivery. */
+  assertAccepting(): void {
     if (this.closingPromise !== undefined) {
       throw new SubagentError(
         `subagent "${this.agent.id}" activation is being disposed; the message was not accepted`,
         'ACTIVATION_CLOSING',
       )
     }
-    if (delivery === 'steer') this.agent.steer(message)
-    else this.agent.followup(message)
   }
 
   /**

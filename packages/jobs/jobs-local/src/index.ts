@@ -177,10 +177,12 @@ export class LocalJobRegistry extends JobRegistry {
   /** Owner agents with attached scope cleanup, mapped to the exact disposer. */
   private ownerCleanups = new Map<Agent, () => Promise<void> | void>()
   /** Service context used by detached settlement continuations and teardown. */
+  readonly maintenanceCoverage: object | undefined
   private readonly selfCtx: Context
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
+    this.maintenanceCoverage = ctx.get('hostAdmission')?.coverage?.('job', this)
     // Schemastery validates and fills the defaults before constructing the service.
     const resolved = config as Required<Config>
     this.maxConcurrentJobsPerOwner = resolved.maxConcurrentJobsPerOwner
@@ -204,6 +206,11 @@ export class LocalJobRegistry extends JobRegistry {
   }
 
   start(spec: JobSpec): JobId {
+    const admission = this.selfCtx.get('hostAdmission')
+    const reservation = admission?.reserve?.('job', spec.owner)
+    const ticket = reservation?.ticket ?? admission?.begin()
+    let producerStarted = false
+    try {
     const owner = this.resolveOwner(spec.owner)
     if (!this.servesOwner(owner)) {
       throw new Error('background jobs unavailable: no job controller serves this agent (load @deepseek-ai/dsh-tool-jobs in its composition)')
@@ -236,7 +243,14 @@ export class LocalJobRegistry extends JobRegistry {
       append: (text, options) => { this.appendRing(state, ring, text, options, 'producer') },
       updateProgress: (line) => { this.updateProgress(state, line) },
     }
+    producerStarted = true
     const hooks = spec.run(handle)
+    try { admission?.assert(ticket) }
+    catch (error) {
+      void hooks.done.then(() => { reservation?.release() }, () => { /* rejected producer contract is not join */ })
+      void Promise.resolve(hooks.cancel('native maintenance admission changed before publication')).catch(cleanup => { this.selfCtx.logger.warn(String(cleanup)) })
+      throw error
+    }
 
     let markSettled!: () => void
     const settled = new Promise<void>((resolve) => { markSettled = resolve })
@@ -277,8 +291,9 @@ export class LocalJobRegistry extends JobRegistry {
 
     // The producer's settlement or a registry-forced one ends the pump; the
     // pump's final drain then lands before this registry trims the ring.
+    let producerJoined = false
     const producerDone = hooks.done.then(
-      outcome => outcome,
+      outcome => { producerJoined = true; return outcome },
       (error: unknown): JobOutcome => {
         // Contain a producer contract violation (`done` rejected) so cleanup and waiters cannot hang.
         this.selfCtx.logger.warn(`jobs: job ${job.id} producer done promise rejected (producer contract violation): ${String(error)}`)
@@ -299,8 +314,12 @@ export class LocalJobRegistry extends JobRegistry {
     void producerDone.then(async (outcome) => {
       if (job.pump !== undefined) await job.pump.done
       this.settle(job, outcome, job.settleCause ?? 'producer')
+      // Forced cancellation/status settlement alone is not a producer join.
+      // A rejected done promise violates the contract and remains counted UNKNOWN.
+      if (producerJoined) reservation?.release()
     })
     return id
+    } catch (error) { if (!producerStarted) reservation?.release(); throw error }
   }
 
   list(caller?: SessionId): JobView[] {

@@ -12,7 +12,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
-import type { Agent, InboxTarget } from './types.ts'
+import type { Agent, InboxTarget, NotificationInbox } from './types.ts'
 export type { Agent } from './types.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 declare module '@deepseek-ai/dsh-system-prompt' {
@@ -46,6 +46,8 @@ export interface CancelOptions {
 
 /** Agent-owned access to pending work; concrete storage belongs to the driver. */
 export interface Inbox {
+  /** Optional driver capability; absence refuses notification/Focus ingress. */
+  readonly notifications?: NotificationInbox
   /** Prompts awaiting individual turns. */
   readonly nextTurn: readonly UserMessage[]
   /** Input awaiting the next step boundary. */
@@ -168,6 +170,8 @@ declare module './types.ts' {
     readonly session: Session
     /** Agent-owned access to durable pending work. */
     readonly inbox: Inbox
+    /** Wake only runnable inbox work already admitted by an owner. */
+    wakeInbox?(): void
     /** The current lifecycle state, mirrored on every `agent/status` transition. */
     readonly status: AgentStatus
     /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
@@ -219,7 +223,7 @@ declare module './types.ts' {
    * sole ordinary message of its own turn.
    * @param message - identified prompt content and the source that supplied it.
    */
-    followup(message: UserMessage): void
+    followup(message: UserMessage, initialAdmission?: HostInitialAdmission): void
 
     /**
    * Submit steering for the nearest step. An idle driver starts a turn;
@@ -278,6 +282,12 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'agent/status'(this: Scoped<Agent>, payload: { agent: Agent; status: AgentStatus }): void
+    /**
+     * Synchronous cancellation intent after abort; includes idle human Stop.
+     * @param payload - exact Agent and caller cause.
+     * @mode emit
+     */
+    'agent/cancelled'(this: Scoped<Agent>, payload: { agent: Agent; cause: AgentCancelCause }): void
     /**
      * One message entered the live inbox.
      * @param payload.agent - the agent whose inbox changed.
