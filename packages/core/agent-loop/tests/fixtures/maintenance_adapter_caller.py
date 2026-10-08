@@ -54,7 +54,12 @@ if phase == "close":
     pin = {"commit": "a" * 40, "checkout": "/candidate", "home": "/home", "entrypoint": "/bin.js"}
     manifest = {"run_id": "step70-assembled", "candidate": pin, "prior": {**pin, "commit": "b" * 40},
                 "prior_pauses": {"registry": True, "notifier": False, "mesh-pump": True},
-                "baton": {"project": "mesh-dsh-merge", "step": "70", "cursor": "71"}}
+                "baton": {"project": "mesh-dsh-merge", "project_id": 1385124, "step": "70", "cursor": "71",
+                          "release": {"target": "0.2.0-rc.2", "candidate_commit": "a" * 40},
+                          "evidence_refs": ["docs/evidence/mesh-dsh-step70-142247.md"],
+                          "obligations": ["verify step 100 cross-provider", "release recovery hold only after review"],
+                          "lineage": {"run_id": "step70-assembled", "predecessor_session": "caller-agent",
+                                      "handoff": "native-maintenance-successor"}}}
     prepare(RUN, manifest, 20)
     try:
         native.close()
@@ -91,10 +96,23 @@ elif phase == "early-external-release":
         out(refused=type(exc).__name__, record=record_phase())
 elif phase == "start":
     try:
-        native.start_successor()
-        out(result="started", record=record_phase())
+        record = native.start_successor()
+        out(result="started", session=record["native"]["successor_session_id"],
+            successor=native.status()["successor"], record=record_phase())
     except NativeMaintenanceRefused as exc:
         out(result="refused", reason=str(exc), successor=native.status()["successor"], record=record_phase())
+elif phase == "start-retry":
+    # Fresh adapter object == controller crash/restart after (or during) start.
+    again = HostNativeMaintenance(RUN, owner="fao:owner", transport=http_transport(base, state["bearer"]))
+    record = again.start_successor()
+    out(result="started", session=record["native"]["successor_session_id"],
+        successor=again.status()["successor"], record=record_phase())
+elif phase == "release":
+    native.release()
+    native.release()  # idempotent retry
+    ext = external.release()
+    out(record=ext["phase"], released_for=json.load(open(RUN))["native"]["released_for"],
+        prior_pauses=ext["manifest"]["prior_pauses"])
 elif phase == "rollback-release":
     native.release(rollback=True)
     native.release(rollback=True)  # idempotent retry

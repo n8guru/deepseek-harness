@@ -3,7 +3,7 @@ import { defineConfig } from 'tsdown'
 /** Build the package root and optional invariant companion as independent bundles. */
 export default defineConfig([
   {
-    entry: ['lib/types/index.js', 'lib/types/maintenance.js'],
+    entry: ['lib/types/index.js', 'lib/types/maintenance.js', 'lib/types/maintenance-successor.js'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',
