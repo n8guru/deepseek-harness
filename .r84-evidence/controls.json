@@ -1,0 +1,39 @@
+{
+  "inventory_cases": 14311,
+  "executed_cases": 96,
+  "all_passed": true,
+  "roots_before": {
+    "host": 916,
+    "client": 313
+  },
+  "roots_after": {
+    "host": 915,
+    "client": 313
+  },
+  "rename_blob": "ae109cf28d760bce2e624e94c22bb51ff56d7633",
+  "all_tracked_blob_identity_after_build": true,
+  "tracked_entries": 7848,
+  "unrelated_roots_unchanged": true,
+  "run_totals_before": {
+    "numTotalTestSuites": 7,
+    "numPassedTestSuites": 7,
+    "numFailedTestSuites": 0,
+    "numPendingTestSuites": 0,
+    "numTotalTests": 96,
+    "numPassedTests": 96,
+    "numFailedTests": 0,
+    "numPendingTests": 0,
+    "numTodoTests": 0
+  },
+  "run_totals_after": {
+    "numTotalTestSuites": 7,
+    "numPassedTestSuites": 7,
+    "numFailedTestSuites": 0,
+    "numPendingTestSuites": 0,
+    "numTotalTests": 96,
+    "numPassedTests": 96,
+    "numFailedTests": 0,
+    "numPendingTests": 0,
+    "numTodoTests": 0
+  }
+}
