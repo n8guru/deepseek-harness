@@ -48,4 +48,3 @@ export function FocusControl({ operation, revision, running, notify, sessionId }
     <button type="button" disabled={busy || running || state === undefined || (state.queued === 0 && pendingCheck.current === undefined)} onClick={() => { void act(true) }}>Check now</button>
   </div>
 }
-
