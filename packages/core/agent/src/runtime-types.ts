@@ -284,7 +284,9 @@ declare module '@deepseek-ai/cordis' {
     'agent/status'(this: Scoped<Agent>, payload: { agent: Agent; status: AgentStatus }): void
     /**
      * Synchronous cancellation intent after abort; includes idle human Stop.
-     * @param payload - exact Agent and caller cause.
+     * @param payload.agent - the exact cancelled agent.
+     * @param payload.cause - the caller's cancellation cause.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
      * @mode emit
      */
     'agent/cancelled'(this: Scoped<Agent>, payload: { agent: Agent; cause: AgentCancelCause }): void
