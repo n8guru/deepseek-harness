@@ -819,7 +819,7 @@ cover(kind: HostWorkKind, joined: () => boolean): void
  * Snapshot admission, pending reservations, uncovered producer kinds and backend settlement.
  * @returns the admission status; `busy` is true unless everything is provably settled.
  */
-status(): { open: boolean; pending: HostWorkKind[]; unknown: HostWorkKind[]; backend: 'JOINED' | 'UNKNOWN'; busy: boolean }
+status(): { open: boolean pending: HostWorkKind[] unknown: HostWorkKind[] backend: 'JOINED' | 'UNKNOWN' busy: boolean }
 ```
 
 Types: [UserMessage](session.md)

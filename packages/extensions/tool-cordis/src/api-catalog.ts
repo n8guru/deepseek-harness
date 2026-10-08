@@ -880,7 +880,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'kind', description: 'the producer kind covered.' }, { name: 'joined', description: 'reports whether that producer\'s work has settled.' }],
       },
       {
-        signature: 'status(): { open: boolean; pending: HostWorkKind[]; unknown: HostWorkKind[]; backend: \'JOINED\' | \'UNKNOWN\'; busy: boolean }',
+        signature: 'status(): { open: boolean pending: HostWorkKind[] unknown: HostWorkKind[] backend: \'JOINED\' | \'UNKNOWN\' busy: boolean }',
         description: 'Snapshot admission, pending reservations, uncovered producer kinds and backend settlement.',
         parameters: [],
         returns: 'the admission status; `busy` is true unless everything is provably settled.',
