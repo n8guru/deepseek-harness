@@ -211,4 +211,3 @@ export async function controlFocus(ctx: Context, request: Request): Promise<Resp
     return new Response('Check boundary already owned', { status: 409 })
   }
 }
-
