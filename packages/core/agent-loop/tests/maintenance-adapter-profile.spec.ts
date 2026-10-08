@@ -23,14 +23,6 @@ it.skipIf(!process.env.DSH_FAO_LIB)('closes the built Host via the real adapter 
   disabled: true
 - id: headless-startup
   disabled: true
-- id: llm-deepseek
-  disabled: true
-- id: session-title-llm
-  disabled: true
-- id: llm-deepseek-account
-  disabled: true
-- id: plugin-package-inventory-deepseek
-  disabled: true
 - id: session-persistence-jsonl
   config:
     root: !!js dshHomePath('sessions')
@@ -60,6 +52,16 @@ it.skipIf(!process.env.DSH_FAO_LIB)('closes the built Host via the real adapter 
   expect(snapshot.phases.close.drain.verdict).not.toBe('idle')
   expect(snapshot.phases.close.record).toBe('native_closed')
   expect(snapshot.phases.probe.drain).toMatchObject({ verdict: 'unknown', unknown: ['provider-backends'] })
+  // Stock shipped LLM rows stay ENABLED: their adapters report truthful backendStatus (joined, idle) instead of
+  // 'backend settlement unsupported'; only the gated in-flight caller backend keeps drain unknown until it settles.
+  type Participant = { providers: string[]; reason: string | null; joined: string | null }
+  const { coverageAt } = snapshot as { coverageAt: Record<'probe' | 'settled', Participant[]> }
+  const stock = (at: 'probe' | 'settled', provider: string) => coverageAt[at].find(p => p.providers.includes(provider))
+  for (const provider of ['deepseek-account', 'deepseek-official']) {
+    expect(stock('probe', provider), provider).toMatchObject({ reason: null, joined: 'JOINED' })
+  }
+  expect(stock('probe', 'keyless-maint')).toMatchObject({ reason: 'backend has unjoined or ambiguous work', joined: 'UNKNOWN' })
+  expect(coverageAt.settled.every(p => p.reason === null)).toBe(true)
   expect(snapshot.phases.drain).toMatchObject({ result: 'drained', record: 'native_drained' })
   expect(snapshot.phases.claim).toMatchObject({ same: true, record: 'successor_claimed' })
   expect(snapshot.phases.claim.session).toMatch(/^successor-[a-f0-9]{64}$/)

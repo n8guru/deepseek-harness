@@ -1,7 +1,7 @@
 /** Direct Messages transport with one cancellable lifecycle per model request. */
 
-import { attributionHeaders, LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, ImageAttachmentAccessResolver, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { attributionHeaders, LlmAdapter, LlmBackendLedger, LlmError } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmBackendCall, LlmBackendStatus, ImageAttachmentAccessResolver, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { DeepSeekLlmApiJson } from '@deepseek-ai/dsh-deepseek-llm-api-extensions'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import { modelInfo } from './model-info.ts'
@@ -19,6 +19,7 @@ import { providerError, providerErrorDetail } from './transport.ts'
 /** DeepSeek provider using Messages content and native thinking replay. */
 export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapter {
   private readonly files: DeepSeekFileStore
+  private readonly backend = new LlmBackendLedger()
   private readonly imageAccess: ImageAttachmentAccessResolver = (ref) => {
     const attachments = this.dependencies.resolveAttachments?.()
     return attachments === undefined ? undefined : this.dependencies.resolveImageAccess?.(attachments, ref)
@@ -29,6 +30,8 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
     this.files = dependencies.resolveFiles?.() ?? new DeepSeekFileStore()
   }
 
+  /** Provider-terminal evidence for every Messages call this instance started. */
+  override backendStatus(): LlmBackendStatus { return this.backend.status() }
   override providerInfo(provider: string) { return { id: provider, name: this.dependencies.providerName ?? 'DeepSeek' } }
   override providerRetryPolicy(_provider: string) { return this.dependencies.options().retryPolicy }
   override async listModels(provider: string) {
@@ -51,8 +54,9 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
   private async * generate(options: GenerateOptions, connection: C): AsyncGenerator<StreamChunk> {
     const consumer = new AbortController()
     const signal = options.signal === undefined ? consumer.signal : AbortSignal.any([consumer.signal, options.signal])
+    const backend = this.backend.begin(options.sessionId === undefined ? undefined : String(options.sessionId))
     using watchdog = idleWatchdog(signal, connection.streamIdleTimeoutMs, 'MESSAGES_IDLE')
-    const iterator = this.request(options, connection, watchdog.signal, () => { watchdog.pulse() })
+    const iterator = this.request(options, connection, watchdog.signal, () => { watchdog.pulse() }, backend)
     try {
       while (true) {
         const next = await watchdog.next(iterator)
@@ -69,11 +73,12 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
       try { await iterator.return(undefined) } catch (_abortedRequestCleanup) {
         // The request already settled; aborting its reader cannot replace that outcome.
       }
+      backend.close() // after reader teardown; an unanswered request stays UNKNOWN
     }
   }
 
   private async * request(
-    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void,
+    options: GenerateOptions, connection: C, signal: AbortSignal, activity: () => void, backend: LlmBackendCall,
   ): AsyncGenerator<StreamChunk> {
     signal.throwIfAborted()
     const { messages, versions } = await prepareImages(
@@ -117,6 +122,7 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
             ? [MESSAGES_TOOL_CHANGES_BETA]
             : [],
         ]
+        backend.dispatch()
         const response = await fetch(`${messagesApiRoot(connection.baseURL)}/messages`, {
           method: 'POST', signal, body: extensions.payload, redirect: 'error',
           headers: {
@@ -132,6 +138,7 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
         })
         if (!response.ok) {
           const text = await response.text()
+          backend.answered() // complete provider error response
           let raw: unknown
           try { raw = JSON.parse(text) } catch (_nonJsonGatewayError) {
             // HTTP status is authoritative when a gateway does not return JSON.
@@ -144,7 +151,11 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
         }
         await extensions.accept()
         if (response.body === null) throw new LlmError('DeepSeek Messages returned no response body', 'EMPTY_RESPONSE')
-        yield* translate(parseSse(response.body, activity), options.model)
+        for await (const chunk of translate(parseSse(response.body, activity), options.model)) {
+          // translate emits finish only after the provider's message_stop, i.e. after any backend tool work.
+          if (chunk.type === 'finish') backend.terminal('completed')
+          yield chunk
+        }
         return
       }
     } catch (error) {

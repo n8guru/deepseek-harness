@@ -60,6 +60,9 @@ try {
   const statePath = join(process.cwd(), 'maint-adapter-state.json')
   writeFileSync(statePath, JSON.stringify({ bearer, faoLib, runDir: join(process.cwd(), 'run') }))
   const phases: Record<string, unknown> = {}
+  const coverage = () => ctx.llm.backendCoverage().participants
+    .map(p => ({ providers: p.providers, reason: p.reason ?? null, joined: p.status?.state ?? null }))
+  const coverageAt: Record<string, unknown> = {}
   const run = async (phase: string) => {
     const stdout = await new Promise<string>((ok, reject) => {
       execFile(python, [caller, phase, base, statePath], { timeout: 60_000 }, (error, out, err) => {
@@ -81,17 +84,21 @@ try {
   // Caller returns on its own; maintenance never cancelled it.
   adapter.open()
   await agent.whenIdle()
-  const callerCompleted = adapter.requests.length === 1 && agent.status === 'idle'
+  // The stock session-title-llm row (enabled) may add its own titling request; count only the caller's turns.
+  const callerRequests = () => adapter.requests.filter(request => request.purpose !== 'session-title')
+  const callerCompleted = callerRequests().length === 1 && agent.status === 'idle'
   // Agent idle is NOT backend settlement (Oct 3 d24 defect): must still refuse idle.
   await run('probe')
+  coverageAt.probe = coverage()
   adapter.settle()
+  coverageAt.settled = coverage()
   await run('drain')
   const drained = (phases.drain as { result: string }).result === 'drained'
   if (drained) { await run('claim'); await run('start') }
   await run('rollback-release')
   console.log('MAINT_ADAPTER_SNAPSHOT ' + JSON.stringify({
     closedWhileCallerActive, callerCompleted, reopenedAfterRelease: isOpen(),
-    modelTurns: adapter.requests.length, phases,
+    modelTurns: callerRequests().length, titleRequests: adapter.requests.length - callerRequests().length, phases, coverageAt,
   }))
 } finally {
   await handle?.dispose()

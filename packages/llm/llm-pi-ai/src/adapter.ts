@@ -39,14 +39,19 @@ import type {
 } from '@earendil-works/pi-ai'
 import {
   attributionHeaders,
+  CONTEXT_WINDOW_EXCEEDED_CODE,
   contentHasImage,
+  EMPTY_RESPONSE_CODE,
   LlmAdapter,
+  LlmBackendLedger,
   LlmError,
+  QUOTA_EXCEEDED_CODE,
   ReasoningEffortId,
 } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   ImageAttachmentAccess,
+  LlmBackendStatus,
   LlmModelInfo,
   LlmProviderInfo,
   LlmResolvedModelInfo,
@@ -218,6 +223,7 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
  */
 export class PiAiAdapter extends LlmAdapter {
   private snapshot: PiAiSnapshot | undefined
+  private readonly backend = new LlmBackendLedger()
 
   constructor(private readonly config: PiAiAdapterOptions) {
     super()
@@ -261,6 +267,9 @@ export class PiAiAdapter extends LlmAdapter {
     }
     return resolved
   }
+
+  /** Provider-terminal evidence for every pi-ai call this instance started. */
+  override backendStatus(): LlmBackendStatus { return this.backend.status() }
 
   override providerInfo(provider: string): LlmProviderInfo {
     // The configured name, not the route key: `displayName` exists so a
@@ -347,6 +356,7 @@ export class PiAiAdapter extends LlmAdapter {
     )
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 
+    const backend = this.backend.begin(options.sessionId === undefined ? undefined : String(options.sessionId))
     const consumer = new AbortController()
     const upstream = options.signal === undefined
       ? consumer.signal
@@ -377,6 +387,7 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade)
+      backend.dispatch()
       const events = snapshot.models.streamSimple(model, context, {
         ...profileOptions(profile, reasoning, apiKey),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
@@ -398,6 +409,8 @@ export class PiAiAdapter extends LlmAdapter {
             exhausted = true
             return
           }
+          const terminal = result.value.type === 'finish' ? providerTerminal(result.value.reason) : undefined
+          if (terminal !== undefined) backend.terminal(terminal)
           yield result.value
         }
       } finally {
@@ -420,6 +433,21 @@ export class PiAiAdapter extends LlmAdapter {
       throw error
     } finally {
       consumer.abort('pi-ai stream consumer stopped')
+      backend.close() // a dispatched call without a provider terminal stays UNKNOWN
     }
   }
+}
+
+/** Failure codes that only a provider's own completed response produces. */
+const PROVIDER_ANSWERED = new Set(['AUTH', QUOTA_EXCEEDED_CODE, 'RATE_LIMIT', 'INVALID_REQUEST', 'SERVER', CONTEXT_WINDOW_EXCEEDED_CODE, EMPTY_RESPONSE_CODE])
+
+/**
+ * Settle only on a provider-sent terminal. Aborts, transport/timeout truncation,
+ * `pending`/`deferred` (backend work still running) and unclassified errors are
+ * not provider terminals and leave the call UNKNOWN.
+ */
+function providerTerminal(reason: Extract<StreamChunk, { type: 'finish' }>['reason']): 'completed' | 'failed' | undefined {
+  if (reason.kind === 'stop' || reason.kind === 'tool-calls' || reason.kind === 'max-tokens') return 'completed'
+  if (reason.kind === 'error' && PROVIDER_ANSWERED.has(reason.failure.code)) return 'failed'
+  return undefined
 }
