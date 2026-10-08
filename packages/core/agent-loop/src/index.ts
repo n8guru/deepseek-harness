@@ -103,6 +103,8 @@ class FactoryOwnership {
   private readonly inactive = Promise.withResolvers<void>()
   private readonly liveAgents = new Set<() => Promise<void>>()
   private startupTasks = new Set<Promise<void>>()
+  /** Abandoned backend/setup work: reported as uncovered until it settles, never awaited by unload. */
+  private abandonableJoins = new Set<Promise<void>>()
 
   constructor(private readonly fiber: Context['fiber']) {}
 
@@ -111,7 +113,7 @@ class FactoryOwnership {
     return this.teardown.signal
   }
 
-  get pendingStartup(): boolean { return this.startupTasks.size > 0 }
+  get pendingStartup(): boolean { return this.startupTasks.size > 0 || this.abandonableJoins.size > 0 }
 
   isActive(): boolean {
     return this.accepting && !INACTIVE_STATES.has(this.fiber.state)
@@ -127,6 +129,17 @@ class FactoryOwnership {
   trackStartup(job: Promise<void>): void {
     this.startupTasks.add(job)
     const forget = () => { this.startupTasks.delete(job) }
+    void job.then(forget, forget)
+  }
+
+  /**
+   * Observe work whose public waiter may be cancelled (a never-settling persistence
+   * open or setup). Unload must stay bounded, so dispose does not await it; maintenance
+   * coverage stays false (`pendingStartup`) until it actually settles.
+   */
+  trackAbandonable(job: Promise<void>): void {
+    this.abandonableJoins.add(job)
+    const forget = () => { this.abandonableJoins.delete(job) }
     void job.then(forget, forget)
   }
 
@@ -808,7 +821,7 @@ export class AgentLoop extends Service implements AgentFactory {
 
   /** Track the actual publication backend/setup promise even if its public waiter is cancelled. */
   private trackPublication<T>(pending: Promise<T>): Promise<T> {
-    this.ownership.trackStartup(pending.then(() => undefined, () => undefined))
+    this.ownership.trackAbandonable(pending.then(() => undefined, () => undefined))
     return pending
   }
 
@@ -837,7 +850,7 @@ export class AgentLoop extends Service implements AgentFactory {
     }
     return await this.initializeAgent(prepared, async () => {
       const setupPending = Promise.resolve(setup?.(prepared.agent.ctx, prepared.agent))
-      this.ownership.trackStartup(setupPending.then(() => undefined, () => undefined))
+      this.ownership.trackAbandonable(setupPending.then(() => undefined, () => undefined))
       const setupCommit = await raceAbort(setupPending, prepared.signal, id)
       setupCommit?.commit()
       await this.appendUnstoredSuffix(stored, session)
