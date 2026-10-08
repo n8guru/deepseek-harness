@@ -1,0 +1,16 @@
+b1542cf345d36a2bc3d70dc19ba0ac42abf91493f648aab755d2765b5a259570  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/AUTO_MERGE
+f38f68cf0e011e20dfc60877194d2f4cad08cac7f20fa5286ea856da611acc37  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/COMMIT_EDITMSG
+340ddcb67a6204f742cd1e28e5b462622dde7daaa8ee36001897196aacdc6d47  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/commondir
+5622b56e611039bcaebaa2d505fe65d2f9d9499c812cc4a52f7523c87bfa240a  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/config.worktree
+41e94b866c39ea1ef7f1640049630231406cdd4ce3a5088f757d4ff8265cde61  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/dsh-hooks/.dsh-lefthook-owned
+655a1adfcdf0b739e72323091b7afbdf29b83305254690342e6bdeffb2066268  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/dsh-hooks/pre-commit
+708bc599409146f51e4c87e45ce91e3cbe0f92fd92446978200e45a02aa2de5f  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/dsh-hooks/pre-merge-commit
+c789ae4525b2983e143bd48340bc368ea7e0492a1caddf35a5a6ceef4f80bf47  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/dsh-hooks/pre-push
+295a8554b00dc68dffe4ee467aad8131efacf8d19a5a264ee502404d4386171b  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/gitdir
+705fbf32c51049aabc605c01b845c4af67e8e68a5ec78890b0340b12edb55d47  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/HEAD
+d625ab1e688d233ed3852326c04c45b9696089a2fe936ee2540321fa1db100e5  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/index
+cd97459dd2f736e7878ab9b1473b14fb36789ebdc41b7f6f480a2c8ff6e74adf  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/logs/HEAD
+cbc3e0967a38594c578aa682932dc6b341e1dd73a4315e38f8940dc1cb7cf601  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/MERGE_HEAD
+5940fba849655f7fd20878b451607d8f40866326bde6753ac71ebc855b646a55  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/MERGE_MODE
+aee6d9030b3d754e9e6048e1287a8f6094e976b4b9d968deb793ca7d0c411225  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/MERGE_MSG
+dd9bd7d536dbb66ee22851ce39740efbf928f9f8126821f459928c3eb2286321  home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/ORIG_HEAD

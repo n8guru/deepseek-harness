@@ -1,0 +1,5 @@
+[merge "dsh-translation-pairing"]
+	name = DeepSeek Harness bilingual pairing records
+	driver = scripts/merge-translation-pairing-driver.sh %O %A %B %P
+[core]
+	hooksPath = /home/n8/deepseek-harness/.git/worktrees/dsh-spoken-partition/dsh-hooks
