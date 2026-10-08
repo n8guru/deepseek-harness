@@ -195,10 +195,12 @@ export class SubagentRuntime extends Service {
 
   constructor(ctx: Context, config?: SubagentModelsSettings) {
     super(ctx, 'subagents')
-    ctx.hostAdmission.cover('delegate', () => false) // continuable materialization not yet instrumented
+    // Fresh continuable starts reserve exactly; a cold-resume followup between its
+    // entry assert and the factory resume reservation is still uncounted.
+    ctx.hostAdmission.cover('delegate', () => false)
     this.readModels = installSubagentModels(ctx, { roles: config?.roles ?? {} })
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
-    ctx.inject(['agents'], (childCtx: Context) => {
+    ctx.inject(['agents', 'hostAdmission'], (childCtx: Context) => {
       const manager = new SubagentContinuationManager(childCtx, {
         prepareContinuable: (name, request) => this.prepareContinuable(name, request),
         observeActivation: (provider, childId, parent) => this.observeActivation(provider, childId, parent),
@@ -484,8 +486,17 @@ export class SubagentRuntime extends Service {
     const initialAdmission = reservation.child!(childId, initialMessage, parent, signal, resolved)
     Object.defineProperty(resolved, 'initialAdmission', { value: initialAdmission, enumerable: true })
     Object.freeze(resolved)
-    // A provider rejection supplies no disposal/join proof; retain UNKNOWN.
-    const run = observeRun(this.emitLifecycle, name, request.parent, await provider.start(resolved))
+    let started: SubagentRun
+    try {
+      started = await provider.start(resolved)
+    } catch (error: unknown) {
+      // A rejection retires the delegate reservation only through an
+      // authenticated failed-publication receipt; otherwise it stays UNKNOWN.
+      const cutoff = this.ctx.hostAdmission
+      void cutoff.failure(initialAdmission)?.then((receipt) => { if (cutoff.verify(receipt)) reservation.release() })
+      throw error
+    }
+    const run = observeRun(this.emitLifecycle, name, request.parent, started)
     return { ...run, dispose: async () => { await run.dispose(); reservation.release() } }
   }
 

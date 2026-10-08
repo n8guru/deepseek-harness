@@ -83,6 +83,12 @@ export interface CreateAgentOptions {
   readonly initialAdmission?: import('./admission.ts').HostInitialAdmission
   readonly parentAgent?: Agent
   /**
+   * `caller`: the factory publishes the claimed initial grant without inserting
+   * its message; the caller delivers the exact reserved message through
+   * `followup(message, initialAdmission)`. Omitted: the factory inserts it.
+   */
+  readonly initialDelivery?: 'caller'
+  /**
    * Session creation metadata: validated absolute `cwd`, `parentSession`
    * fork lineage, the `seedLength` seed boundary, the coarse `origin`
    * classification, and the `delegationDepth` recursion budget. Mirrors the
@@ -256,7 +262,7 @@ interface FactorySlot {
  * nested lineage that starts an owning-fiber unload is excluded from its own drain.
  */
 export { HostCutoff } from './admission.ts'
-export type { HostInitialAdmission } from './admission.ts'
+export type { HostInitialAdmission, HostPublicationFailureReceipt } from './admission.ts'
 import { HostCutoff } from './admission.ts'
 
 export class AgentRegistry extends Service {

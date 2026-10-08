@@ -122,10 +122,13 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
   })
 
   private readonly config: ResolvedConfig
+  private failedJoins = 0
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
-    ctx.hostAdmission.cover('workflow', () => false) // old worker dispose may force-settle; not authoritative join
+    // A run's reservation retires only on actual WorkerRun.joined() JOINED
+    // evidence; a FAILED join keeps both its reservation and this coverage UNKNOWN.
+    ctx.hostAdmission.cover('workflow', () => this.failedJoins === 0)
     // schemastery (static Config) has already filled the defaulted fields;
     // the assertion records that resolution, not a hidden fallback.
     this.config = config as ResolvedConfig
@@ -204,9 +207,13 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
       id: workerRun.id, meta: workerRun.meta, result: workerRun.result,
       cancel: reason => workerRun.cancel(reason),
       dispose: async () => {
+        // Public disposal stays bounded by disposeGraceMs. Release follows only the
+        // unbounded actual pending-start/child-disposal join, never the grace receipt.
+        void workerRun.joined().then((join) => {
+          if (join.state === 'JOINED') reservation.release()
+          else this.failedJoins += 1
+        })
         await workerRun.dispose()
-        // Old dispose() may abandon pending providers after grace. No authoritative join.
-        void reservation
       },
     }
   }

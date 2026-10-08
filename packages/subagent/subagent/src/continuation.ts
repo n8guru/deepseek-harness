@@ -29,6 +29,7 @@ import type {
   AgentOptions,
   AgentSetupCommit,
   CreateAgentOptions,
+  HostInitialAdmission,
 } from '@deepseek-ai/dsh-agent'
 import { boundContextSummary, createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
@@ -248,6 +249,8 @@ interface Activation {
 /** Inputs shared by fresh and resumed Activation materialization. */
 interface MaterializeInputs {
   childId: SessionId
+  /** Exact reserved initial grant of a fresh start; the caller delivers its message. */
+  initialAdmission?: HostInitialAdmission
   provider: string
   parent: Agent
   /**
@@ -431,13 +434,44 @@ export class SubagentContinuationManager {
     // Capture before the first await: a later parent switch belongs to the
     // parent's future, not to this child.
     const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
+    // Exact initial acceptance: reserve the delegate start, the publication of
+    // this child id and the original initial message BEFORE any await. A later
+    // HostCutoff close still admits only this one publication and message.
+    const cutoff = this.ctx.hostAdmission
+    const reservation = cutoff.reserve('delegate', parent)
+    const initialAdmission = reservation.child!(childId,
+      createUserMessage({ content: structuredClone(request.prompt), source: { kind: 'user' } }), parent, spec.signal, spec)
+    try {
+      const start = await this.startReserved(spec, childId, childDepth, descriptor, delegatedPolicies, persistence, initialAdmission)
+      reservation.release()
+      return start
+    } catch (error: unknown) {
+      // Retire the delegate reservation only through an authenticated
+      // failed-publication receipt; a pending or failed cleanup stays UNKNOWN.
+      void cutoff.failure(initialAdmission)?.then((receipt) => { if (cutoff.verify(receipt)) reservation.release() })
+      throw error
+    }
+  }
 
+  /** Materialize and admit one reserved continuable start with its exact initial grant. */
+  private async startReserved(
+    spec: ContinuableStartSpec,
+    childId: SessionId,
+    childDepth: number,
+    descriptor: SubagentDescriptorData,
+    delegatedPolicies: DelegatedPolicyOverrides,
+    persistence: SessionPersistence,
+    initialAdmission: HostInitialAdmission,
+  ): Promise<ContinuableStart> {
+    const request = spec.request
+    const parent = request.parent
     const prepared = await this.host.prepareContinuable(spec.provider, {
       sessionId: childId,
       parent,
       signal: spec.signal,
     })
-    spec.signal.throwIfAborted()
+    // Provider preparation succeeded; the canonical manager owns the exact start.
+    this.ctx.hostAdmission.request(initialAdmission, spec)
     this.assertAdmitting(parent)
 
     const lineageSeedLength = prepared.seed?.length ?? 0
@@ -457,6 +491,7 @@ export class SubagentContinuationManager {
       }
       const activation = await this.materialize({
         childId,
+        initialAdmission,
         provider: spec.provider,
         parent,
         create: { seed, meta: childSessionMeta(parent, childDepth, lineageSeedLength), delegatedPolicies },
@@ -470,6 +505,7 @@ export class SubagentContinuationManager {
         { kind: 'user' },
         parent,
         spec.signal,
+        initialAdmission,
       )
     })
     return { childId, messageId }
@@ -1008,9 +1044,10 @@ export class SubagentContinuationManager {
     source: MessageSource,
     parent: Agent,
     signal: AbortSignal,
+    initial?: HostInitialAdmission,
   ): Promise<MessageId> {
     try {
-      return this.submitAdmitted(activation, content, source, parent, signal)
+      return this.submitAdmitted(activation, content, source, parent, signal, initial)
     } catch (error: unknown) {
       /* v8 ignore next -- rollback disposal failures must not mask the
        * pre-acceptance signal, drain, or lifecycle failure. */
@@ -1077,6 +1114,9 @@ export class SubagentContinuationManager {
       })
       : await this.ownerCtx.agents.create({
         sessionId: childId,
+        ...inputs.initialAdmission === undefined ? {} : {
+          initialAdmission: inputs.initialAdmission, parentAgent: parent, initialDelivery: 'caller' as const,
+        },
         meta: create.meta,
         seed: create.seed,
         agentOptions: inputs.agentOptions,
@@ -1194,13 +1234,18 @@ export class SubagentContinuationManager {
     content: ContentBlock[],
     source: MessageSource,
     parent: Agent,
+    initial?: HostInitialAdmission,
   ): MessageId {
     // Parent-originated delivery keeps the parent live through ownership, so
     // establish it before the message can enter the child's inbox.
     this.acquireOwnership(parent, activation.childId)
-    const message = createUserMessage({ content, source })
+    // An initial grant delivers its exact reserved message, never `content`.
+    const agent = activation.handle.agent
+    const message = initial === undefined
+      ? createUserMessage({ content, source })
+      : this.ctx.hostAdmission.initialMessage(initial, agent)
     const accepted = this.admitWaking(activation, message.id, () => {
-      activation.handle.agent.followup(message)
+      agent.followup(message, initial)
     })
     // Past this point the caller has an id for this child, so its eventual
     // settlement is something the parent is owed an account of.
@@ -1246,6 +1291,7 @@ export class SubagentContinuationManager {
     source: MessageSource,
     parent: Agent,
     signal: AbortSignal,
+    initial?: HostInitialAdmission,
   ): MessageId {
     signal.throwIfAborted()
     this.assertAdmitting(parent)
@@ -1262,7 +1308,7 @@ export class SubagentContinuationManager {
       activation.childId,
       activation.handle.agent.session.header.parentSession,
     )
-    return this.submit(activation, content, source, parent)
+    return this.submit(activation, content, source, parent, initial)
   }
 
   /**

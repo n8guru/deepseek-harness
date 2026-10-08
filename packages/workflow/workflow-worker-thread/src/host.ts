@@ -90,6 +90,12 @@ function resolveWorkerSpawn(init: WorkerInit): { entry: string | URL; options: W
   }
 }
 
+/** Join evidence of one disposed workflow run; see {@link WorkerRun.joined}. */
+export interface WorkerRunJoin {
+  readonly state: 'JOINED' | 'FAILED'
+  readonly failures: readonly string[]
+}
+
 /**
  * One live worker-engine run — the seam's {@link WorkflowRun}, returned by
  * `start()` directly. Owns the Worker, the child registry, and the result
@@ -128,6 +134,9 @@ export class WorkerRun implements WorkflowRun {
   private inputSignal: AbortSignal | undefined
   private inputSignalAbort: (() => void) | undefined
   private disposed: Promise<void> | undefined
+  /** Child/refused-start disposal failures, retained independent of bounded public disposal. */
+  private readonly disposalFailures: string[] = []
+  private joinEvidence: Promise<WorkerRunJoin> | undefined
 
   constructor(
     private readonly ctx: Context,
@@ -249,6 +258,27 @@ export class WorkerRun implements WorkflowRun {
       (error: unknown) => { claimed.reject(error) },
     )
     return this.disposed
+  }
+
+  /**
+   * Actual all-producer join evidence, independent of the bounded public
+   * {@link dispose}. Disposes idempotently, then waits WITHOUT a grace bound for
+   * worker termination and for every pending provider start and published
+   * child disposal to settle. `JOINED` only when none of those disposals
+   * failed; a start or child that never settles leaves this pending.
+   * @returns the memoized join evidence.
+   */
+  joined(): Promise<WorkerRunJoin> {
+    return this.joinEvidence ??= (async (): Promise<WorkerRunJoin> => {
+      try {
+        await this.dispose()
+      } catch (error: unknown) {
+        this.disposalFailures.push(`worker termination failed: ${renderThrown(error)}`)
+      }
+      await this.childQuiescence()
+      const failures = Object.freeze([...this.disposalFailures])
+      return Object.freeze({ state: failures.length === 0 ? 'JOINED' : 'FAILED', failures })
+    })()
   }
 
   /** Post one message to the worker (payload looked up from the tag's map entry), tolerating a thread that is already gone. */
@@ -380,6 +410,7 @@ export class WorkerRun implements WorkflowRun {
       try {
         await run.dispose()
       } catch (error: unknown) {
+        this.disposalFailures.push(`refused child dispose failed: ${renderThrown(error)}`)
         this.ctx.logger.warn(`workflow-worker-thread: refused child dispose failed: ${renderThrown(error)}`)
       }
       return
@@ -443,6 +474,7 @@ export class WorkerRun implements WorkflowRun {
     record.disposal = Promise.resolve()
       .then(() => record.run.dispose())
       .catch((error: unknown) => {
+        this.disposalFailures.push(`child dispose failed: ${renderThrown(error)}`)
         this.ctx.logger.warn(`workflow-worker-thread: child dispose failed: ${renderThrown(error)}`)
       })
       .then(() => { this.finishChild(callId) })

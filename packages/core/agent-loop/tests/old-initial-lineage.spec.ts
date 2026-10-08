@@ -127,8 +127,11 @@ it('post-close starts and aborted prepublication initial requests stay fail clos
     ctx.hostAdmission.close(); abort.abort(); release.resolve()
     expect(await outcome).toBeInstanceOf(Error)
     expect(ctx.agents.get(resolved.initialAdmission!.sessionId)).toBeUndefined()
-    expect(ctx.hostAdmission.status().pending).toContain('delegate')
-    expect(ctx.hostAdmission.status().pending).toContain('publication')
+    // The canonical driver refused before claiming: an authenticated unpublished
+    // receipt retires both reservations and revokes the capability.
+    await new Promise(resolve => setImmediate(resolve))
+    expect(ctx.hostAdmission.status().pending).not.toContain('delegate')
+    expect(ctx.hostAdmission.status().pending).not.toContain('publication')
     await expect(ctx.subagents.start('aborted', { parent, signal: new AbortController().signal, prompt: [] })).rejects.toThrow('CLOSED')
   } finally { release.resolve(); await ctx.fiber.dispose() }
 })

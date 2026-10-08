@@ -103,13 +103,22 @@ export async function startInProcessRun(
   request: ResolvedSubagentStartRequest,
   options: InProcessRunOptions,
 ): Promise<SubagentRun> {
+  // Take ownership of the exact initial grant first, so every later refusal
+  // before the factory claim is authoritative unpublished evidence.
+  if (request.initialAdmission !== undefined) {
+    try {
+      request.parent.ctx.hostAdmission.request(request.initialAdmission, request)
+    } catch (error: unknown) {
+      if (request.signal.aborted) throw prePublicationAbort()
+      throw error
+    }
+  }
   assertSubagentMaxDepth(request.maxDepth)
   if (request.signal.aborted) throw prePublicationAbort()
   const parent = request.parent
   const childDepth = resolveChildDepth(parent, request.maxDepth)
 
   const childId = request.initialAdmission?.sessionId ?? SessionId(randomUUID())
-  if (request.initialAdmission !== undefined) parent.ctx.hostAdmission.request(request.initialAdmission, request)
   const seed = options.seed
   const activationBoundary = seed?.length ?? 0
 

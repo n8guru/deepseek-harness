@@ -294,6 +294,22 @@ function validateConfiguredAgents(agents: Config['agents']): void {
   }
 }
 
+/**
+ * Per-create cleanup evidence for a claimed initial publication that failed
+ * before a handle existed. `prepared`: a session preparation was acquired.
+ * `settled`: resolves `true` once the prepared agent disposed and its raw setup
+ * promise settled, `false` when prepared-agent disposal rejected.
+ */
+interface StartupCleanup { prepared?: boolean; settled?: Promise<boolean> }
+
+/**
+ * Whether a rejection carries a suppressed scope-exit disposal failure (the
+ * `using` session preparation threw while unwinding). Its cleanup is not proven.
+ */
+function isSuppressedDisposal(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'SuppressedError'
+}
+
 /** Concrete agent factory and driver service. */
 export class AgentLoop extends Service implements AgentFactory {
   static inject = ['agents', 'hostAdmission', 'sessions', 'llm', 'tools', 'systemPrompt']
@@ -614,27 +630,34 @@ export class AgentLoop extends Service implements AgentFactory {
       : this.runtime.ctx.hostAdmission.initial(options.initialAdmission, options.sessionId, options.parentAgent, options.signal)
     const reservation = initial === undefined ? this.runtime.ctx.hostAdmission.reserve('publication') : undefined
     let handle: AgentHandle | undefined
+    const cleanup: StartupCleanup = {}
     try {
-      handle = await this.createAdmitted(ownerCtx, options)
+      handle = await this.createAdmitted(ownerCtx, options, cleanup)
       if (initial !== undefined) {
         initial.publish(handle.agent)
-        handle.agent.followup(initial.message, options.initialAdmission)
+        if (options.initialDelivery !== 'caller') handle.agent.followup(initial.message, options.initialAdmission)
         const owned = handle
         return { ...owned, dispose: async () => { await owned.dispose(); initial.join() } }
       }
       return handle
     } catch (error) {
-      // Missing/failed actual cleanup keeps publication UNKNOWN.
+      // Only actual cleanup joins a claimed initial publication; a failed or
+      // still-pending cleanup leaves it UNKNOWN for HostCutoff.failure().
       if (handle !== undefined) { await handle.dispose(); initial?.join() }
+      else if (initial !== undefined && !isSuppressedDisposal(error)) {
+        if (cleanup.settled === undefined) { if (!cleanup.prepared) initial.join() }
+        else void cleanup.settled.then((joined) => { if (joined) initial.join() })
+      }
       throw error
     } finally { reservation?.release() }
   }
 
-  private async createAdmitted(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
+  private async createAdmitted(ownerCtx: Context, options: CreateAgentOptions, cleanup?: StartupCleanup): Promise<AgentHandle> {
     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
       ...options.seed === undefined ? {} : { seed: options.seed },
       ...options.meta === undefined ? {} : { meta: options.meta },
     }))
+    if (cleanup !== undefined) cleanup.prepared = true
     const published = this.setupAndPublish(
       ownerCtx,
       options.sessionId,
@@ -643,6 +666,7 @@ export class AgentLoop extends Service implements AgentFactory {
       options.setup,
       options.signal,
       'startup',
+      cleanup,
     )
     this.ownership.trackWrapper(published)
     return published
@@ -657,18 +681,30 @@ export class AgentLoop extends Service implements AgentFactory {
     setup: AgentSetup | undefined,
     signal: AbortSignal | undefined,
     source: SessionStartSource,
+    cleanup?: StartupCleanup,
   ): Promise<AgentHandle> {
     using ownedPreparation = preparation
     const session = ownedPreparation.session
     const prepared = this.prepare(ownerCtx, id, agentOptions, session, signal)
+    let rawSetup: Promise<unknown> | undefined
     try {
-      const rawSetup = Promise.resolve(setup?.(prepared.agent.ctx))
-      this.ownership.trackWrapper(rawSetup)
-      const setupCommit = await raceAbort(rawSetup, prepared.signal, id)
+      const raw = Promise.resolve(setup?.(prepared.agent.ctx))
+      rawSetup = raw
+      this.ownership.trackWrapper(raw)
+      const setupCommit = await raceAbort(raw, prepared.signal, id)
       setupCommit?.commit()
       return prepared.publish(source)
     } catch (error: unknown) {
-      await prepared.dispose()
+      try {
+        await prepared.dispose()
+      } catch (disposalError: unknown) {
+        if (cleanup !== undefined) cleanup.settled = Promise.resolve(false)
+        throw disposalError
+      }
+      if (cleanup !== undefined) {
+        const raw = rawSetup
+        cleanup.settled = raw === undefined ? Promise.resolve(true) : raw.then(() => true, () => true)
+      }
       throw error
     }
   }
