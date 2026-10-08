@@ -31,6 +31,7 @@ type Initial = {
   joined: PromiseWithResolvers<undefined>
   child?: Agent
 }
+/** Native Host admission cutoff: gates producer reservations and exact initial-message grants. */
 export class HostCutoff {
   private accepting: boolean
   private readonly reservations = new Map<object, HostWorkKind>()
@@ -66,8 +67,16 @@ export class HostCutoff {
     let released = false
     return () => { if (!released) { released = true; this.holds -= 1 } }
   }
+  /** Close admission for this Host lifetime; nothing reopens it in-process. */
   close(): void { this.accepting = false }
+  /** Throw when admission is not open. */
   assert(): void { if (!this.open) throw new Error('native Host admission CLOSED') }
+  /**
+   * Reserve one unit of producer work while admission is open.
+   * @param kind - the producer kind being reserved.
+   * @param parent - the live parent Agent, required for delegate initial lineage.
+   * @returns the reservation with its idempotent release.
+   */
   reserve(kind: HostWorkKind, parent?: Agent): HostReservation {
     this.assert()
     const identity = Object.freeze({})
@@ -90,6 +99,11 @@ export class HostCutoff {
       },
     })
   }
+  /**
+   * Bind the canonical driver to an exact initial grant request.
+   * @param capability - the initial capability issued by `reserve().child`.
+   * @param request - the exact provider request object bound at issue.
+   */
   request(capability: HostInitialAdmission, request: object): void {
     const grant = this.initials.get(capability)
     if (!grant || grant.claimed || grant.revoked || grant.request !== request) throw new Error('native initial request refused')
@@ -98,8 +112,17 @@ export class HostCutoff {
     grant.driven = true
     grant.signal.throwIfAborted()
   }
-  /** Exact pre-await request identity; never ambient permission for new work. */
-  initial(capability: HostInitialAdmission, id: SessionId, parent: Agent | undefined, signal: AbortSignal | undefined) {
+  /**
+   * Claim an exact initial grant by pre-await request identity; never ambient permission for new work.
+   * @param capability - the initial capability issued by `reserve().child`.
+   * @param id - the child session id the grant names.
+   * @param parent - the live parent Agent bound at issue.
+   * @param signal - the abort signal bound at issue.
+   * @returns the reserved message plus one-shot publish and join callbacks.
+   */
+  initial(
+    capability: HostInitialAdmission, id: SessionId, parent: Agent | undefined, signal: AbortSignal | undefined,
+  ): { message: UserMessage; publish: (child: Agent) => void; join: () => void } {
     const grant = this.initials.get(capability)
     if (!grant || grant.claimed || grant.revoked || capability.sessionId !== id || grant.parent !== parent
       || grant.signal !== signal || this.live(grant.parent.id) !== grant.parent
@@ -114,6 +137,9 @@ export class HostCutoff {
   /**
    * The exact reserved initial message for a caller-delivered claimed grant
    * (continuable materialization delivers through its own Activation accounting).
+   * @param capability - the claimed initial capability.
+   * @param child - the Agent published for that grant.
+   * @returns a copy of the reserved initial message.
    */
   initialMessage(capability: HostInitialAdmission, child: Agent): UserMessage {
     const grant = this.initials.get(capability)
@@ -145,9 +171,18 @@ export class HostCutoff {
     }
     return grant.joined.promise.then(() => issue('joined'))
   }
-  /** @returns whether this exact receipt object was issued by this cutoff. */
+  /**
+   * Authenticate a failed-publication receipt by object identity.
+   * @param receipt - the receipt to check.
+   * @returns whether this exact receipt object was issued by this cutoff.
+   */
   verify(receipt: HostPublicationFailureReceipt): boolean { return this.receipts.has(receipt) }
-  /** Inbox consumes once, at the durable insertion boundary, including while OPEN. */
+  /**
+   * Consume a claimed grant once at the inbox durable insertion boundary, including while OPEN.
+   * @param capability - the claimed initial capability.
+   * @param child - the published child Agent.
+   * @param message - the message being inserted; must equal the reserved message.
+   */
   accept(capability: HostInitialAdmission, child: Agent, message: UserMessage): void {
     const grant = this.initials.get(capability)
     if (!grant || !grant.claimed || grant.accepted || grant.child !== child || capability.sessionId !== child.id
@@ -158,13 +193,27 @@ export class HostCutoff {
     grant.signal.throwIfAborted()
     grant.accepted = true
   }
-  /** Constructor-only instrumentation, retained after provider deregistration. */
+  /**
+   * Register settlement coverage for a producer kind; constructor-only, retained after provider deregistration.
+   * @param kind - the producer kind covered.
+   * @param joined - reports whether that producer's work has settled.
+   */
   cover(kind: HostWorkKind, joined: () => boolean): void {
     const owners = this.coverage.get(kind) ?? new Set()
     owners.add(joined)
     this.coverage.set(kind, owners)
   }
-  status() {
+  /**
+   * Snapshot admission, pending reservations, uncovered producer kinds and backend settlement.
+   * @returns the admission status; `busy` is true unless everything is provably settled.
+   */
+  status(): {
+    open: boolean
+    pending: HostWorkKind[]
+    unknown: HostWorkKind[]
+    backend: 'JOINED' | 'UNKNOWN'
+    busy: boolean
+  } {
     const pending = [...this.reservations.values()]
     const unknown = (['publication', 'job', 'delegate', 'workflow'] as const).filter((kind) => {
       const owners = this.coverage.get(kind)

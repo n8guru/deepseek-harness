@@ -385,7 +385,7 @@ async resume(ownerCtx: Context, options: ResumeAgentOptions): Promise<AgentHandl
 
 Types: [SessionHeader](persistence.md)
 
-Source: [`packages/core/agent-loop/src/index.ts:296`](../../packages/core/agent-loop/src/index.ts)
+Source: [`packages/core/agent-loop/src/index.ts:317`](../../packages/core/agent-loop/src/index.ts)
 
 <a id="ctxagentpresets--agentpresets"></a>
 
@@ -728,7 +728,134 @@ list(): Agent[]
 roots(): Agent[]
 ```
 
-Source: [`packages/core/agent/src/index.ts:256`](../../packages/core/agent/src/index.ts)
+Source: [`packages/core/agent/src/index.ts:268`](../../packages/core/agent/src/index.ts)
+
+<a id="ctxhostadmission--hostcutoff"></a>
+
+### `ctx.hostAdmission` — `HostCutoff`
+
+Native Host admission cutoff: gates producer reservations and exact initial-message grants.
+
+```ts cordis-catalog
+/**
+ * Claim the boot barrier armed at registry construction, before any producer
+ * can observe hostAdmission. Missing or duplicate receiver wiring fails closed.
+ * @returns the one-shot release, called only after successful durable replay.
+ */
+claimMaintenanceReplay(): () => void
+
+/**
+ * Hold admission during durable replay. A failed replay keeps its hold;
+ * releasing a hold never reopens an explicit close.
+ * @returns an idempotent release for this hold.
+ */
+hold(): () => void
+
+/** Close admission for this Host lifetime; nothing reopens it in-process. */
+close(): void
+
+/** Throw when admission is not open. */
+assert(): void
+
+/**
+ * Reserve one unit of producer work while admission is open.
+ * @param kind - the producer kind being reserved.
+ * @param parent - the live parent Agent, required for delegate initial lineage.
+ * @returns the reservation with its idempotent release.
+ */
+reserve(kind: HostWorkKind, parent?: Agent): HostReservation
+
+/**
+ * Bind the canonical driver to an exact initial grant request.
+ * @param capability - the initial capability issued by `reserve().child`.
+ * @param request - the exact provider request object bound at issue.
+ */
+request(capability: HostInitialAdmission, request: object): void
+
+/**
+ * Claim an exact initial grant by pre-await request identity; never ambient permission for new work.
+ * @param capability - the initial capability issued by `reserve().child`.
+ * @param id - the child session id the grant names.
+ * @param parent - the live parent Agent bound at issue.
+ * @param signal - the abort signal bound at issue.
+ * @returns the reserved message plus one-shot publish and join callbacks.
+ */
+initial( capability: HostInitialAdmission, id: SessionId, parent: Agent | undefined, signal: AbortSignal | undefined, ): { message: UserMessage; publish: (child: Agent) => void; join: () => void }
+
+/**
+ * The exact reserved initial message for a caller-delivered claimed grant
+ * (continuable materialization delivers through its own Activation accounting).
+ * @param capability - the claimed initial capability.
+ * @param child - the Agent published for that grant.
+ * @returns a copy of the reserved initial message.
+ */
+initialMessage(capability: HostInitialAdmission, child: Agent): UserMessage
+
+/**
+ * Failed-start receipt. An unclaimed grant is revoked and its publication
+ * retired immediately. A claimed grant yields a receipt only after its actual
+ * publication cleanup calls `join`; a cleanup that never completes or fails
+ * leaves the promise pending, so callers retain their reservation as UNKNOWN.
+ * @param capability - the failed start's initial capability.
+ * @returns the pending receipt, or undefined for an unknown capability.
+ */
+failure(capability: HostInitialAdmission): Promise<HostPublicationFailureReceipt> | undefined
+
+/**
+ * Authenticate a failed-publication receipt by object identity.
+ * @param receipt - the receipt to check.
+ * @returns whether this exact receipt object was issued by this cutoff.
+ */
+verify(receipt: HostPublicationFailureReceipt): boolean
+
+/**
+ * Consume a claimed grant once at the inbox durable insertion boundary, including while OPEN.
+ * @param capability - the claimed initial capability.
+ * @param child - the published child Agent.
+ * @param message - the message being inserted; must equal the reserved message.
+ */
+accept(capability: HostInitialAdmission, child: Agent, message: UserMessage): void
+
+/**
+ * Register settlement coverage for a producer kind; constructor-only, retained after provider deregistration.
+ * @param kind - the producer kind covered.
+ * @param joined - reports whether that producer's work has settled.
+ */
+cover(kind: HostWorkKind, joined: () => boolean): void
+
+/**
+ * Snapshot admission, pending reservations, uncovered producer kinds and backend settlement.
+ * @returns the admission status; `busy` is true unless everything is provably settled.
+ */
+status(): { open: boolean; pending: HostWorkKind[]; unknown: HostWorkKind[]; backend: 'JOINED' | 'UNKNOWN'; busy: boolean }
+```
+
+Types: [UserMessage](session.md)
+
+Source: [`packages/core/agent/src/admission.ts:35`](../../packages/core/agent/src/admission.ts)
+
+<a id="ctxhostmaintenance--oldhostmaintenance"></a>
+
+### `ctx.hostMaintenance` — `OldHostMaintenance`
+
+Durable receiver. Construction holds HostCutoff admission until the control log replays; a replayed `closed` run closes the cutoff before release. Any persistence failure leaves admission held (fail closed).
+
+```ts cordis-catalog
+/**
+ * Apply one command for a transport-authenticated owner, serialized with every
+ * other command. `close` closes the live cutoff BEFORE its durable append; a
+ * failed append poisons the receiver and keeps the cutoff closed. `release`
+ * records the durable released phase; the live cutoff stays CLOSED and held
+ * work is not resumed. Released-run retries return the durable tombstone,
+ * including when a different run is active, without appending again.
+ * @param owner - owner identity authenticated by the transport, never the body.
+ * @param body - untrusted command body.
+ * @returns the requested run (or null) and live cutoff status after the command.
+ */
+async receive(owner: string, body: unknown): Promise<{ run: OldMaintenanceRun | null; cutoff: ReturnType<Context['hostAdmission']['status']> }>
+```
+
+Source: [`packages/core/agent-loop/src/maintenance.ts:73`](../../packages/core/agent-loop/src/maintenance.ts)
 
 <a id="agent-events"></a>
 
@@ -1051,7 +1178,7 @@ A declarative agent entry failed before it could publish a live agent. Consumers
 'agent-loop/config-start-failed'(payload: { sessionId: SessionId; error: unknown }): void
 ```
 
-Source: [`packages/core/agent-loop/src/index.ts:183`](../../packages/core/agent-loop/src/index.ts)
+Source: [`packages/core/agent-loop/src/index.ts:185`](../../packages/core/agent-loop/src/index.ts)
 
 <a id="agent-preset-events"></a>
 

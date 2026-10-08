@@ -763,6 +763,12 @@ The abstract `llm` service: an adapter registry plus a streaming model-call API,
 
 ```ts cordis-catalog
 /**
+ * Report whether every registered adapter's backend turns are provably settled.
+ * @returns aggregate and per-adapter JOINED/UNKNOWN state; unsupported evidence is UNKNOWN.
+ */
+backendCoverage(): { state: 'JOINED' | 'UNKNOWN' participants: { registrations: { provider: string; generation: number }[]; state: 'JOINED' | 'UNKNOWN' }[] }
+
+/**
  * Register an adapter for the given provider routes. Throws `LlmError` with code
  * `DUPLICATE_ADAPTER` if any provider already has an adapter (all-or-nothing).
  * Disposed with the fiber.
@@ -879,7 +885,7 @@ async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<Prepared
 stream(options: GenerateOptions): AsyncIterable<StreamChunk>
 ```
 
-Source: [`packages/llm/llm/src/index.ts:284`](../../packages/llm/llm/src/index.ts)
+Source: [`packages/llm/llm/src/index.ts:287`](../../packages/llm/llm/src/index.ts)
 
 <a id="llm-events"></a>
 
@@ -928,5 +934,5 @@ Waterfall around every streaming model call (retry, replay, routing). Bound to t
 'llm/stream'(this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk>
 ```
 
-Source: [`packages/llm/llm/src/index.ts:64`](../../packages/llm/llm/src/index.ts)
+Source: [`packages/llm/llm/src/index.ts:66`](../../packages/llm/llm/src/index.ts)
 <!-- END GENERATED cordis-surface -->

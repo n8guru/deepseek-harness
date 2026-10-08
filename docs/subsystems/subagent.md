@@ -490,6 +490,20 @@ Named provider registry with one-shot runs, durable discovery, and continuable-c
 
 ```ts cordis-catalog
 /**
+ * Child model for a role in the editable subagent model table, read live.
+ * @param role - table key; omit for the `default` role.
+ * @returns the route, or `undefined` when no `default` row exists (inherit the parent's model).
+ * @throws {SubagentError} `UNKNOWN_MODEL_ROLE` for an unlisted explicit role.
+ */
+resolveModel(role?: string): SubagentModelRoute | undefined
+
+/**
+ * Role names currently in the model table.
+ * @returns the configured role names.
+ */
+modelRoles(): string[]
+
+/**
  * Establish one durable continuable child and deliver its initial prompt.
  * Resolves when the child's inbox accepts that prompt, without waiting for the
  * turn to start or for the message to reach the Session log; any earlier
@@ -665,7 +679,7 @@ async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>
 
 Types: [Agent](core.md) · [ContentBlock](llm-streaming.md) · [MessageId](llm-streaming.md) · [SessionId](core.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:171`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:178`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagent-events"></a>
 
@@ -691,7 +705,7 @@ A published child settled. Scope-filtered dispatch uses the same delegating pare
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:166`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:173`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-added--emit"></a>
 
@@ -708,7 +722,7 @@ A provider became resolvable in the registry.
 'subagent/provider-added'(provider: SubagentProvider): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:140`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:147`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentprovider-removed--emit"></a>
 
@@ -725,7 +739,7 @@ A provider left the registry. Accepted runs remain holder-owned.
 'subagent/provider-removed'(name: string): void
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:146`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:153`](../../packages/subagent/subagent/src/index.ts)
 
 <a id="subagentstart--emit"></a>
 
@@ -749,5 +763,5 @@ A provider established a published child. For in-process providers, `ctx.agents.
 
 Types: [Scoped](scope.md)
 
-Source: [`packages/subagent/subagent/src/index.ts:157`](../../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:164`](../../packages/subagent/subagent/src/index.ts)
 <!-- END GENERATED cordis-surface -->

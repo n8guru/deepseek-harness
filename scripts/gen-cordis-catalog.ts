@@ -54,6 +54,8 @@ export const SERVICE_PAGE: Record<string, string> = {
   agentDefaultModel: 'core.md',
   agentPresets: 'core.md',
   agents: 'core.md',
+  hostAdmission: 'core.md',
+  hostMaintenance: 'core.md',
   apiProxy: 'typert.md',
   approval: 'approval.md',
   attachments: 'attachment.md',
@@ -518,12 +520,19 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
   'Promise',
   'Record',
   'Readonly',
+  'ReturnType',
   'Uint8Array',
 ])
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',
+  HostInitialAdmission: 'native admission capability is owned by packages/core/agent/src/admission.ts',
+  HostPublicationFailureReceipt: 'native admission receipt is owned by packages/core/agent/src/admission.ts',
+  HostReservation: 'native admission reservation is owned by packages/core/agent/src/admission.ts',
+  HostWorkKind: 'native admission producer kind is owned by packages/core/agent/src/admission.ts',
+  OldMaintenanceRun: 'opt-in old-source maintenance run is owned by packages/core/agent-loop/README.md',
+  SubagentModelRoute: 'subagent model-table route is owned by packages/subagent/subagent/src/models.ts',
   BeginCommandRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   InsertReferenceRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   ConsumeTokenRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',

@@ -229,7 +229,10 @@ export class SubagentRuntime extends Service {
     return routeForRole(table, role ?? DEFAULT_SUBAGENT_ROLE)
   }
 
-  /** Role names currently in the model table. */
+  /**
+   * Role names currently in the model table.
+   * @returns the configured role names.
+   */
   modelRoles(): string[] {
     return Object.keys(this.readModels().roles)
   }

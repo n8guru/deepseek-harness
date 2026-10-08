@@ -770,6 +770,7 @@ describe('background execution through the job runtime', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(LocalJobRegistry)
     await ctx.plugin(BashEnvPlugin)
     await ctx.plugin(FakeBash)

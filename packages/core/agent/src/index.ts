@@ -249,6 +249,10 @@ interface FactorySlot {
   readonly target: AgentFactory
 }
 
+export { HostCutoff } from './admission.ts'
+export type { HostInitialAdmission, HostPublicationFailureReceipt } from './admission.ts'
+import { HostCutoff } from './admission.ts'
+
 /**
  * Agent service (`ctx.agents`): tracks live agents and carries the initiating
  * Agent through one process-local asynchronous driver chain. Agent *creation*
@@ -261,10 +265,6 @@ interface FactorySlot {
  * boundaries. Returned Promise boundaries drain during teardown, except a
  * nested lineage that starts an owning-fiber unload is excluded from its own drain.
  */
-export { HostCutoff } from './admission.ts'
-export type { HostInitialAdmission, HostPublicationFailureReceipt } from './admission.ts'
-import { HostCutoff } from './admission.ts'
-
 export class AgentRegistry extends Service {
   private store = new Map<SessionId, AgentEntry>()
   private factory: FactorySlot | undefined

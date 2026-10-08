@@ -291,8 +291,15 @@ export class LlmRuntime extends Service {
   private readonly backendCallers = new Set<{ registration: AdapterRegistration }>()
   private readonly backendIdentities = new WeakMap<LlmAdapter, Set<string>>()
 
-  backendCoverage() {
-    const participants = [...new Set([...this.backendRegistrations].map(row => row.adapter))].map(adapter => {
+  /**
+   * Report whether every registered adapter's backend turns are provably settled.
+   * @returns aggregate and per-adapter JOINED/UNKNOWN state; unsupported evidence is UNKNOWN.
+   */
+  backendCoverage(): {
+    state: 'JOINED' | 'UNKNOWN'
+    participants: { registrations: { provider: string; generation: number }[]; state: 'JOINED' | 'UNKNOWN' }[]
+  } {
+    const participants = [...new Set([...this.backendRegistrations].map(row => row.adapter))].map((adapter) => {
       const registrations = [...this.backendRegistrations].filter(row => row.adapter === adapter)
         .map(row => ({ provider: row.provider.id, generation: row.generation }))
       let joined = false
@@ -811,39 +818,39 @@ export class LlmRuntime extends Service {
     const caller = { registration }
     this.backendCallers.add(caller)
     try {
-    const resolved = await this.resolveCallFor(registration, config, signal)
-    const resolvedConfig = deepFreeze(structuredClone(resolved.config))
-    const context = resolved.context === undefined
-      ? undefined
-      : deepFreeze(structuredClone(resolved.context))
-    const adapterDefaults = deepFreeze<LlmCallConfigAdapterDefaults>({
-      ...config.reasoningEffort === undefined && resolvedConfig.reasoningEffort !== undefined
-        ? { reasoningEffort: true }
-        : {},
-      ...config.maxTokens === undefined && resolvedConfig.maxTokens !== undefined
-        ? { maxTokens: true }
-        : {},
-    })
-    let dispatched = false
-    return Object.freeze({
-      config: resolvedConfig,
-      retryPolicy: registration.retryPolicy,
-      adapterDefaults,
-      ...context === undefined ? {} : { context },
-      stream: (options: GenerateOptions): AsyncIterable<StreamChunk> => {
-        if (dispatched) {
-          throw new LlmError('a prepared LLM call can only be dispatched once', 'INVALID_PREPARED_CALL')
-        }
-        if (!callConfigEquals(options, resolvedConfig)) {
-          throw new LlmError(
-            'prepared LLM call config changed before adapter dispatch',
-            'INVALID_PREPARED_CALL',
-          )
-        }
-        dispatched = true
-        return this.streamWithRegistration(options, { registration, config: resolvedConfig })
-      },
-    })
+      const resolved = await this.resolveCallFor(registration, config, signal)
+      const resolvedConfig = deepFreeze(structuredClone(resolved.config))
+      const context = resolved.context === undefined
+        ? undefined
+        : deepFreeze(structuredClone(resolved.context))
+      const adapterDefaults = deepFreeze<LlmCallConfigAdapterDefaults>({
+        ...config.reasoningEffort === undefined && resolvedConfig.reasoningEffort !== undefined
+          ? { reasoningEffort: true }
+          : {},
+        ...config.maxTokens === undefined && resolvedConfig.maxTokens !== undefined
+          ? { maxTokens: true }
+          : {},
+      })
+      let dispatched = false
+      return Object.freeze({
+        config: resolvedConfig,
+        retryPolicy: registration.retryPolicy,
+        adapterDefaults,
+        ...context === undefined ? {} : { context },
+        stream: (options: GenerateOptions): AsyncIterable<StreamChunk> => {
+          if (dispatched) {
+            throw new LlmError('a prepared LLM call can only be dispatched once', 'INVALID_PREPARED_CALL')
+          }
+          if (!callConfigEquals(options, resolvedConfig)) {
+            throw new LlmError(
+              'prepared LLM call config changed before adapter dispatch',
+              'INVALID_PREPARED_CALL',
+            )
+          }
+          dispatched = true
+          return this.streamWithRegistration(options, { registration, config: resolvedConfig })
+        },
+      })
     } finally { this.backendCallers.delete(caller) }
   }
 
@@ -885,60 +892,60 @@ export class LlmRuntime extends Service {
     this.backendCallers.add(caller)
     let nativeJoined = false
     try {
-    let iterator: AsyncIterator<StreamChunk>
-    try {
-      const resolvedConfig = prepared === undefined
-        ? (await this.resolveCallFor(registration, options, options.signal)).config
-        : prepared.config
-      if (prepared !== undefined && !callConfigEquals(options, resolvedConfig)) {
-        throw new LlmError(
-          'prepared LLM call config changed before adapter dispatch',
-          'INVALID_PREPARED_CALL',
-        )
+      let iterator: AsyncIterator<StreamChunk>
+      try {
+        const resolvedConfig = prepared === undefined
+          ? (await this.resolveCallFor(registration, options, options.signal)).config
+          : prepared.config
+        if (prepared !== undefined && !callConfigEquals(options, resolvedConfig)) {
+          throw new LlmError(
+            'prepared LLM call config changed before adapter dispatch',
+            'INVALID_PREPARED_CALL',
+          )
+        }
+        const resolvedOptions = callConfigEquals(options, resolvedConfig)
+          ? options
+          : Object.isFrozen(options)
+            ? deepFreeze({ ...options, ...resolvedConfig })
+            : { ...options, ...resolvedConfig }
+        const adapter = registration.adapter
+        const stream = adapter.stream(this.forAdapter(resolvedOptions, adapter))
+        iterator = stream[Symbol.asyncIterator]()
+      } catch (error: unknown) {
+        yield adapterFailureChunk(error, options.signal)
+        return
       }
-      const resolvedOptions = callConfigEquals(options, resolvedConfig)
-        ? options
-        : Object.isFrozen(options)
-          ? deepFreeze({ ...options, ...resolvedConfig })
-          : { ...options, ...resolvedConfig }
-      const adapter = registration.adapter
-      const stream = adapter.stream(this.forAdapter(resolvedOptions, adapter))
-      iterator = stream[Symbol.asyncIterator]()
-    } catch (error: unknown) {
-      yield adapterFailureChunk(error, options.signal)
-      return
-    }
 
-    let completed = false
-    try {
-      while (true) {
-        let item: { done: true } | { done: false; value: StreamChunk }
-        try {
-          const next = await iterator.next()
-          item = next.done
-            ? { done: true }
-            : { done: false, value: next.value }
-        } catch (error: unknown) {
-          completed = true
-          yield adapterFailureChunk(error, options.signal)
-          return
+      let completed = false
+      try {
+        while (true) {
+          let item: { done: true } | { done: false; value: StreamChunk }
+          try {
+            const next = await iterator.next()
+            item = next.done
+              ? { done: true }
+              : { done: false, value: next.value }
+          } catch (error: unknown) {
+            completed = true
+            yield adapterFailureChunk(error, options.signal)
+            return
+          }
+          if (item.done) {
+            completed = true
+            nativeJoined = true
+            return
+          }
+          // End the adapter-owned try before yielding: consumer/middleware
+          // failures resumed into this generator must remain thrown.
+          yield item.value
         }
-        if (item.done) {
-          completed = true
+      } finally {
+        if (!completed) {
+          const close = iterator.return?.bind(iterator)
+          if (close) await close()
           nativeJoined = true
-          return
         }
-        // End the adapter-owned try before yielding: consumer/middleware
-        // failures resumed into this generator must remain thrown.
-        yield item.value
       }
-    } finally {
-      if (!completed) {
-        const close = iterator.return?.bind(iterator)
-        if (close) await close()
-        nativeJoined = true
-      }
-    }
     } finally { if (nativeJoined) this.backendCallers.delete(caller) }
   }
 

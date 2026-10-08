@@ -808,6 +808,99 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'hostAdmission',
+    summary: 'Native Host admission cutoff: gates producer reservations and exact initial-message grants.',
+    description: 'Native Host admission cutoff: gates producer reservations and exact initial-message grants.',
+    methods: [
+      {
+        signature: 'claimMaintenanceReplay(): () => void',
+        description: 'Claim the boot barrier armed at registry construction, before any producer can observe hostAdmission. Missing or duplicate receiver wiring fails closed.',
+        parameters: [],
+        returns: 'the one-shot release, called only after successful durable replay.',
+      },
+      {
+        signature: 'hold(): () => void',
+        description: 'Hold admission during durable replay. A failed replay keeps its hold; releasing a hold never reopens an explicit close.',
+        parameters: [],
+        returns: 'an idempotent release for this hold.',
+      },
+      {
+        signature: 'close(): void',
+        description: 'Close admission for this Host lifetime; nothing reopens it in-process.',
+        parameters: [],
+      },
+      {
+        signature: 'assert(): void',
+        description: 'Throw when admission is not open.',
+        parameters: [],
+      },
+      {
+        signature: 'reserve(kind: HostWorkKind, parent?: Agent): HostReservation',
+        description: 'Reserve one unit of producer work while admission is open.',
+        parameters: [{ name: 'kind', description: 'the producer kind being reserved.' }, { name: 'parent', description: 'the live parent Agent, required for delegate initial lineage.' }],
+        returns: 'the reservation with its idempotent release.',
+      },
+      {
+        signature: 'request(capability: HostInitialAdmission, request: object): void',
+        description: 'Bind the canonical driver to an exact initial grant request.',
+        parameters: [{ name: 'capability', description: 'the initial capability issued by `reserve().child`.' }, { name: 'request', description: 'the exact provider request object bound at issue.' }],
+      },
+      {
+        signature: 'initial( capability: HostInitialAdmission, id: SessionId, parent: Agent | undefined, signal: AbortSignal | undefined, ): { message: UserMessage; publish: (child: Agent) => void; join: () => void }',
+        description: 'Claim an exact initial grant by pre-await request identity; never ambient permission for new work.',
+        parameters: [{ name: 'capability', description: 'the initial capability issued by `reserve().child`.' }, { name: 'id', description: 'the child session id the grant names.' }, { name: 'parent', description: 'the live parent Agent bound at issue.' }, { name: 'signal', description: 'the abort signal bound at issue.' }],
+        returns: 'the reserved message plus one-shot publish and join callbacks.',
+      },
+      {
+        signature: 'initialMessage(capability: HostInitialAdmission, child: Agent): UserMessage',
+        description: 'The exact reserved initial message for a caller-delivered claimed grant (continuable materialization delivers through its own Activation accounting).',
+        parameters: [{ name: 'capability', description: 'the claimed initial capability.' }, { name: 'child', description: 'the Agent published for that grant.' }],
+        returns: 'a copy of the reserved initial message.',
+      },
+      {
+        signature: 'failure(capability: HostInitialAdmission): Promise<HostPublicationFailureReceipt> | undefined',
+        description: 'Failed-start receipt. An unclaimed grant is revoked and its publication retired immediately. A claimed grant yields a receipt only after its actual publication cleanup calls `join`; a cleanup that never completes or fails leaves the promise pending, so callers retain their reservation as UNKNOWN.',
+        parameters: [{ name: 'capability', description: 'the failed start\'s initial capability.' }],
+        returns: 'the pending receipt, or undefined for an unknown capability.',
+      },
+      {
+        signature: 'verify(receipt: HostPublicationFailureReceipt): boolean',
+        description: 'Authenticate a failed-publication receipt by object identity.',
+        parameters: [{ name: 'receipt', description: 'the receipt to check.' }],
+        returns: 'whether this exact receipt object was issued by this cutoff.',
+      },
+      {
+        signature: 'accept(capability: HostInitialAdmission, child: Agent, message: UserMessage): void',
+        description: 'Consume a claimed grant once at the inbox durable insertion boundary, including while OPEN.',
+        parameters: [{ name: 'capability', description: 'the claimed initial capability.' }, { name: 'child', description: 'the published child Agent.' }, { name: 'message', description: 'the message being inserted; must equal the reserved message.' }],
+      },
+      {
+        signature: 'cover(kind: HostWorkKind, joined: () => boolean): void',
+        description: 'Register settlement coverage for a producer kind; constructor-only, retained after provider deregistration.',
+        parameters: [{ name: 'kind', description: 'the producer kind covered.' }, { name: 'joined', description: 'reports whether that producer\'s work has settled.' }],
+      },
+      {
+        signature: 'status(): { open: boolean; pending: HostWorkKind[]; unknown: HostWorkKind[]; backend: \'JOINED\' | \'UNKNOWN\'; busy: boolean }',
+        description: 'Snapshot admission, pending reservations, uncovered producer kinds and backend settlement.',
+        parameters: [],
+        returns: 'the admission status; `busy` is true unless everything is provably settled.',
+      },
+    ],
+  },
+  {
+    key: 'hostMaintenance',
+    summary: 'Durable receiver.',
+    description: 'Durable receiver. Construction holds HostCutoff admission until the control log replays; a replayed `closed` run closes the cutoff before release. Any persistence failure leaves admission held (fail closed).',
+    methods: [
+      {
+        signature: 'async receive(owner: string, body: unknown): Promise<{ run: OldMaintenanceRun | null; cutoff: ReturnType<Context[\'hostAdmission\'][\'status\']> }>',
+        description: 'Apply one command for a transport-authenticated owner, serialized with every other command. `close` closes the live cutoff BEFORE its durable append; a failed append poisons the receiver and keeps the cutoff closed. `release` records the durable released phase; the live cutoff stays CLOSED and held work is not resumed. Released-run retries return the durable tombstone, including when a different run is active, without appending again.',
+        parameters: [{ name: 'owner', description: 'owner identity authenticated by the transport, never the body.' }, { name: 'body', description: 'untrusted command body.' }],
+        returns: 'the requested run (or null) and live cutoff status after the command.',
+      },
+    ],
+  },
+  {
     key: 'invariants',
     summary: 'Package-owned invariant registry with global and regex-based selection.',
     description: 'Package-owned invariant registry with global and regex-based selection.',
@@ -886,6 +979,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
     description: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
     methods: [
+      {
+        signature: 'backendCoverage(): { state: \'JOINED\' | \'UNKNOWN\' participants: { registrations: { provider: string; generation: number }[]; state: \'JOINED\' | \'UNKNOWN\' }[] }',
+        description: 'Report whether every registered adapter\'s backend turns are provably settled.',
+        parameters: [],
+        returns: 'aggregate and per-adapter JOINED/UNKNOWN state; unsupported evidence is UNKNOWN.',
+      },
       {
         signature: 'registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle',
         description: 'Register an adapter for the given provider routes. Throws `LlmError` with code `DUPLICATE_ADAPTER` if any provider already has an adapter (all-or-nothing). Disposed with the fiber.',
@@ -1692,6 +1791,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Named provider registry with one-shot runs, durable discovery, and continuable-child operations.',
     description: 'Named provider registry with one-shot runs, durable discovery, and continuable-child operations.',
     methods: [
+      {
+        signature: 'resolveModel(role?: string): SubagentModelRoute | undefined',
+        description: 'Child model for a role in the editable subagent model table, read live.',
+        parameters: [{ name: 'role', description: 'table key; omit for the `default` role.' }],
+        returns: 'the route, or `undefined` when no `default` row exists (inherit the parent\'s model).',
+        throws: ['{SubagentError} `UNKNOWN_MODEL_ROLE` for an unlisted explicit role.'],
+      },
+      {
+        signature: 'modelRoles(): string[]',
+        description: 'Role names currently in the model table.',
+        parameters: [],
+        returns: 'the configured role names.',
+      },
       {
         signature: 'async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>',
         description: 'Establish one durable continuable child and deliver its initial prompt. Resolves when the child\'s inbox accepts that prompt, without waiting for the turn to start or for the message to reach the Session log; any earlier failure rejects with no ids and rolls back the child entirely.',
@@ -2726,7 +2838,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Agent',
-    declaration: 'export interface Agent {\n    readonly id: SessionId;\n    readonly options: AgentOptions;\n    readonly session: Session;\n    readonly inbox: Inbox;\n    readonly status: AgentStatus;\n    readonly ctx: Context;\n    cancel(cause: AgentCancelCause, options?: CancelOptions): void;\n    whenIdle(): Promise<void>;\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n    send(message: UserMessage, target: InboxTarget, wakeup: boolean): void;\n    followup(message: UserMessage): void;\n    steer(message: UserMessage): void;\n    inject(message: UserMessage): void;\n}',
+    declaration: 'export interface Agent {\n    readonly id: SessionId;\n    readonly options: AgentOptions;\n    readonly session: Session;\n    readonly inbox: Inbox;\n    readonly status: AgentStatus;\n    readonly ctx: Context;\n    cancel(cause: AgentCancelCause, options?: CancelOptions): void;\n    whenIdle(): Promise<void>;\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n    send(message: UserMessage, target: InboxTarget, wakeup: boolean): void;\n    followup(message: UserMessage, initial?: import(\'./admission.ts\').HostInitialAdmission): void;\n    steer(message: UserMessage): void;\n    inject(message: UserMessage): void;\n}',
   },
   {
     name: 'AgentCancelCause',
@@ -3010,7 +3122,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateAgentOptions',
-    declaration: 'export interface CreateAgentOptions {\n    readonly sessionId: SessionId;\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n    readonly seed?: readonly SessionEvent[];\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+    declaration: 'export interface CreateAgentOptions {\n    readonly sessionId: SessionId;\n    readonly initialAdmission?: import(\'./admission.ts\').HostInitialAdmission;\n    readonly parentAgent?: Agent;\n    readonly initialDelivery?: \'caller\';\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n    readonly seed?: readonly SessionEvent[];\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
   },
   {
     name: 'CreateGoalRequest',
@@ -3022,7 +3134,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CreateSessionOptions',
-    declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n    };\n}',
+    declaration: 'export interface CreateSessionOptions {\n    readonly seed?: readonly SessionEvent[];\n    readonly meta?: {\n        readonly cwd?: string;\n        readonly parentSession?: SessionId;\n        readonly createdAt?: number;\n        readonly seedLength?: number;\n        readonly origin?: \'subagent\';\n        readonly delegationDepth?: number;\n        readonly agentPreset?: string;\n        readonly focusedContext?: {\n            readonly slug: string;\n            readonly title?: string;\n            readonly url: string;\n            readonly excerpt?: string;\n        };\n    };\n}',
   },
   {
     name: 'CreateTeamTaskRequest',
@@ -3253,6 +3365,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface GoalView extends GoalSnapshot {\n    readonly roundsStarted: number;\n    readonly createdAt: number;\n    readonly updatedAt: number;\n    readonly activation: GoalActivation;\n}',
   },
   {
+    name: 'HostInitialAdmission',
+    declaration: 'export interface HostInitialAdmission {\n    readonly sessionId: SessionId;\n    readonly messageId: UserMessage[\'id\'];\n}',
+  },
+  {
+    name: 'HostPublicationFailureReceipt',
+    declaration: 'export interface HostPublicationFailureReceipt {\n    readonly sessionId: SessionId;\n    readonly outcome: \'unpublished\' | \'joined\';\n}',
+  },
+  {
+    name: 'HostReservation',
+    declaration: 'export interface HostReservation {\n    release(): void;\n    child?(id: SessionId, message: UserMessage, parent: Agent, signal: AbortSignal, request: object): HostInitialAdmission;\n}',
+  },
+  {
+    name: 'HostWorkKind',
+    declaration: 'export type HostWorkKind = \'publication\' | \'job\' | \'delegate\' | \'workflow\';',
+  },
+  {
     name: 'ImageAttachmentLimits',
     declaration: 'export interface ImageAttachmentLimits {\n    maxImageBytes: number;\n    maxImagesPerMessage: number;\n    maxMessageImageBytes: number;\n    maxImagePixels: number;\n    maxImageDimension: number;\n    mediaTypes: readonly ImageMediaType[];\n}',
   },
@@ -3270,7 +3398,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Inbox',
-    declaration: 'export class Inbox {\n    constructor(private readonly session: Session, private readonly notifications: InboxNotifications);\n    get nextTurn(): readonly UserMessage[];\n    get nextStep(): readonly UserMessage[];\n    get hasPending(): boolean;\n    clear(): void;\n    claim(target: InboxTarget, turn: number): UserMessage[];\n    append(target: InboxTarget, message: UserMessage): void;\n    prepend(target: InboxTarget, message: UserMessage): void;\n    replace(messageId: MessageId, newMessage: UserMessage): boolean;\n    remove(messageId: MessageId): boolean;\n    splice(target: InboxTarget, start: number, deleteCount: number, inserted: UserMessage[]): UserMessage[];\n}',
+    declaration: 'export class Inbox {\n    constructor(private readonly session: Session, private readonly notifications: InboxNotifications, private readonly beforeInsert: ((messages: UserMessage[], initial?: import(\'./admission.ts\').HostInitialAdmission) => void) | undefined = undefined);\n    get nextTurn(): readonly UserMessage[];\n    get nextStep(): readonly UserMessage[];\n    get hasPending(): boolean;\n    clear(): void;\n    claim(target: InboxTarget, turn: number): UserMessage[];\n    append(target: InboxTarget, message: UserMessage): void;\n    prepend(target: InboxTarget, message: UserMessage): void;\n    replace(messageId: MessageId, newMessage: UserMessage): boolean;\n    remove(messageId: MessageId): boolean;\n    splice(target: InboxTarget, start: number, deleteCount: number, inserted: UserMessage[], initial?: import(\'./admission.ts\').HostInitialAdmission): UserMessage[];\n}',
   },
   {
     name: 'InboxNotifications',
@@ -3386,7 +3514,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmAdapter',
-    declaration: 'export abstract class LlmAdapter {\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
+    declaration: 'export abstract class LlmAdapter {\n    backendStatus(): LlmBackendStatus | undefined;\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
+  },
+  {
+    name: 'LlmBackendStatus',
+    declaration: 'export interface LlmBackendStatus {\n    state: \'JOINED\' | \'UNKNOWN\';\n    turns: readonly LlmBackendTurn[];\n    startingTurns: number;\n    uncertainStarts: number;\n    unattributedEvents: number;\n}',
+  },
+  {
+    name: 'LlmBackendTurn',
+    declaration: 'export interface LlmBackendTurn {\n    threadId: string;\n    turnId: string;\n    state: \'JOINED\' | \'UNKNOWN\';\n    pendingRequests: readonly (string | number)[];\n    terminal?: {\n        threadId: string;\n        turnId: string;\n        status: \'completed\' | \'failed\' | \'interrupted\';\n    };\n}',
   },
   {
     name: 'LlmCallConfig',
@@ -3438,7 +3574,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmRuntime',
-    declaration: 'export class LlmRuntime extends Service {\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
+    declaration: 'export class LlmRuntime extends Service {\n    backendCoverage(): {\n        state: \'JOINED\' | \'UNKNOWN\';\n        participants: {\n            registrations: {\n                provider: string;\n                generation: number;\n            }[];\n            state: \'JOINED\' | \'UNKNOWN\';\n        }[];\n    };\n    constructor(ctx: Context);\n    registerAdapter(providers: string[], adapter: LlmAdapter): AdapterRegistrationHandle;\n    listProviders(): LlmProviderInfo[];\n    registerConfigurableProviders(entries: readonly LlmConfigurableProvider[]): DirectoryRegistrationHandle;\n    listConfigurableProviders(): LlmConfigurableProvider[];\n    registerModelDiscovery(settingsNs: string, discover: (request: LlmModelDiscoveryRequest) => Promise<readonly LlmDiscoveredModel[]>): () => void;\n    async discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<LlmDiscoveredModel[]>;\n    providerRetryPolicy(provider: string): ResolvedRetryPolicy;\n    async listModels(provider: string): Promise<LlmModelInfo[]>;\n    async resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    async resolveCallConfig(config: LlmCallConfig, signal?: AbortSignal): Promise<LlmCallConfig>;\n    async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall>;\n    stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
   {
     name: 'LspHover',
@@ -3593,6 +3729,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ObjectJsonSchema = JsonSchemaNode & {\n    type: \'object\';\n};',
   },
   {
+    name: 'OldMaintenanceRun',
+    declaration: 'export interface OldMaintenanceRun {\n    readonly owner: string;\n    readonly runId: string;\n    readonly phase: \'closed\' | \'released\';\n}',
+  },
+  {
     name: 'OneShotSubagentDescriptorData',
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
@@ -3742,7 +3882,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ResolvedSubagentStartRequest',
-    declaration: 'export interface ResolvedSubagentStartRequest extends SubagentStartRequest {\n    readonly descriptor: SubagentDescriptorData;\n}',
+    declaration: 'export interface ResolvedSubagentStartRequest extends SubagentStartRequest {\n    readonly descriptor: SubagentDescriptorData;\n    readonly initialAdmission?: import(\'@deepseek-ai/dsh-agent\').HostInitialAdmission;\n}',
   },
   {
     name: 'RestoredSessionOptions',
@@ -3930,7 +4070,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionHeader',
-    declaration: 'export interface SessionHeader {\n    readonly version: number;\n    readonly id: SessionId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly seedLength?: number;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n}',
+    declaration: 'export interface SessionHeader {\n    readonly version: number;\n    readonly id: SessionId;\n    readonly createdAt: number;\n    readonly cwd?: string;\n    readonly parentSession?: SessionId;\n    readonly seedLength?: number;\n    readonly origin?: \'subagent\';\n    readonly delegationDepth?: number;\n    readonly agentPreset?: string;\n    readonly focusedContext?: {\n        readonly slug: string;\n        readonly title?: string;\n        readonly url: string;\n        readonly excerpt?: string;\n    };\n}',
   },
   {
     name: 'SessionId',
@@ -4261,6 +4401,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SubagentInterruptAuthority = {\n    readonly kind: \'user\';\n    readonly parentSessionId: SessionId;\n} | {\n    readonly kind: \'ancestor\';\n    readonly agent: Agent;\n};',
   },
   {
+    name: 'SubagentModelRoute',
+    declaration: 'export interface SubagentModelRoute {\n    provider: string;\n    model: string;\n    maxTokens?: number;\n}',
+  },
+  {
+    name: 'SubagentModelsSettings',
+    declaration: 'export interface SubagentModelsSettings {\n    roles: Record<string, SubagentModelRoute>;\n}',
+  },
+  {
     name: 'SubagentProvider',
     declaration: 'export interface SubagentProvider {\n    readonly name: string;\n    readonly capabilities: SubagentCapabilities;\n    readonly inheritsParentContext: boolean;\n    start(request: ResolvedSubagentStartRequest): Promise<SubagentRun>;\n    prepareContinuable?(request: ContinuableCreateRequest): Promise<ContinuableCreateSpec>;\n}',
   },
@@ -4294,7 +4442,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubagentRuntime',
-    declaration: 'export class SubagentRuntime extends Service {\n    constructor(ctx: Context);\n    async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>;\n    async followup(parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentFollowupOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async reportFrom(child: Agent, content: ContentBlock[], options: SubagentReportOptions): Promise<MessageId>;\n    registerContinuableSetup(contribution: ContinuableSetupContribution): () => void;\n    async drainContinuableDescendants(parents: readonly Agent[]): Promise<void>;\n    async drainContinuableChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>;\n    listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentListEntry[]>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    registerProvider(provider: SubagentProvider): () => void;\n    getProvider(name: string): SubagentProvider | undefined;\n    list(): string[];\n    async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>;\n}',
+    declaration: 'export class SubagentRuntime extends Service {\n    static inject;\n    static Config: z<SubagentModelsSettings>;\n    constructor(ctx: Context, config?: SubagentModelsSettings);\n    resolveModel(role?: string): SubagentModelRoute | undefined;\n    modelRoles(): string[];\n    async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart>;\n    async followup(parent: Agent, childId: SessionId, content: ContentBlock[], options: SubagentFollowupOptions): Promise<MessageId>;\n    interrupt(targetSessionId: SessionId, authority: SubagentInterruptAuthority): void;\n    async reportFrom(child: Agent, content: ContentBlock[], options: SubagentReportOptions): Promise<MessageId>;\n    registerContinuableSetup(contribution: ContinuableSetupContribution): () => void;\n    async drainContinuableDescendants(parents: readonly Agent[]): Promise<void>;\n    async drainContinuableChildren(parent: Agent, childIds: readonly SessionId[]): Promise<void>;\n    listChildren(parentSessionId: SessionId, signal?: AbortSignal): Promise<SubagentListEntry[]>;\n    listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<SubagentDescendantListEntry[]>;\n    registerProvider(provider: SubagentProvider): () => void;\n    getProvider(name: string): SubagentProvider | undefined;\n    list(): string[];\n    async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>;\n}',
   },
   {
     name: 'SubagentStartRequest',
