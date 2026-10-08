@@ -73,6 +73,31 @@ async function service(): Promise<{ ctx: Context; subagents: SubagentRuntime }> 
 }
 
 describe('SubagentRuntime', () => {
+  it('keeps completed/aborted remote work reserved until its actual dispose join', async () => {
+    const { ctx, subagents } = await service()
+    let count = 0
+    const joined = Promise.withResolvers<void>()
+    ctx.provide('hostAdmission', {
+      open: true, assert() {}, begin: () => ({}),
+      reserve() { count += 1; let released = false; return { ticket: {}, release() { if (!released) { released = true; count -= 1 } } } },
+    })
+    const provider = new StubProvider('join-probe')
+    provider.start = async () => ({ id: SessionId('remote'), localAgent: undefined,
+      result: Promise.resolve({ output: [], stopReason: 'aborted' }),
+      dispose: () => joined.promise })
+    subagents.registerProvider(provider)
+    try {
+      const run = await subagents.start('join-probe', baseRequest())
+      await run.result
+      expect(count).toBe(1) // Terminal model outcome does not join provider.
+      const disposing = run.dispose()
+      await Promise.resolve()
+      expect(count).toBe(1)
+      joined.resolve()
+      await disposing
+      expect(count).toBe(0)
+    } finally { await ctx.fiber.dispose() }
+  })
   it('releases its catalog projection binding with the service fiber', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionProjectionRegistry)

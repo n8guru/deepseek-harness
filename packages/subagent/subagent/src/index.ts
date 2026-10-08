@@ -36,6 +36,9 @@ import type {} from '@deepseek-ai/dsh-attachment'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { randomUUID } from 'node:crypto'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SessionId as nativeSessionId } from '@deepseek-ai/dsh-session'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -202,6 +205,7 @@ export class SubagentRuntime extends TypertRemoteService {
     maxDepth: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(1).volatile(),
     maxActiveSubagents: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(8).volatile(),
   })
+  readonly maintenanceCoverage: object | undefined
   private providers = new Map<string, SubagentProvider>()
   private continuations: SubagentContinuationManager | undefined
   /**
@@ -213,6 +217,7 @@ export class SubagentRuntime extends TypertRemoteService {
 
   constructor(ctx: Context, private config: Config) {
     super(ctx, 'subagents')
+    this.maintenanceCoverage = ctx.get('hostAdmission')?.coverage?.('delegate', this)
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
     ctx.inject(['agents'], (childCtx: Context) => {
       const manager = new SubagentContinuationManager(childCtx, {
@@ -259,6 +264,7 @@ export class SubagentRuntime extends TypertRemoteService {
    * @throws when continuation services are unavailable or materialization fails.
    */
   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
+    this.ctx.get('hostAdmission')?.assert()
     return this.requireContinuations().startContinuable(spec)
   }
 
@@ -282,6 +288,7 @@ export class SubagentRuntime extends TypertRemoteService {
     content: ContentBlock[],
     options: SubagentSendMessageOptions,
   ): Promise<MessageId> {
+    this.ctx.get('hostAdmission')?.assert()
     return this.requireContinuations().sendMessage(sender, targetId, content, options)
   }
 
@@ -557,6 +564,8 @@ export class SubagentRuntime extends TypertRemoteService {
    * @returns the published holder-owned run.
    */
   async start(name: string, request: SubagentStartRequest): Promise<SubagentRun> {
+    const admission = this.ctx.get('hostAdmission')
+    admission?.assert()
     const provider = this.expectProvider(name)
     this.assertCapabilities(provider, request)
     assertSubagentMaxDepth(request.maxDepth)
@@ -566,8 +575,18 @@ export class SubagentRuntime extends TypertRemoteService {
       provider: name,
       ...request.label !== undefined ? { label: request.label } : {},
     })
-    const resolved: ResolvedSubagentStartRequest = { ...request, descriptor }
+    const reservation = admission?.reserve?.('delegate', request.parent.id)
+    const initialAdmission = reservation?.child?.(nativeSessionId(randomUUID()), createUserMessage({ content: request.prompt, source: { kind: 'user' } }), request.parent, request.signal)
+    // Never inherit an alleged capability from an untrusted/model-authored request.
+    const resolved: ResolvedSubagentStartRequest = { ...request, descriptor, initialAdmission }
+    const ticket = reservation?.ticket ?? admission?.begin()
     const run = await provider.start(resolved)
+    try { admission?.assert(ticket) }
+    catch (error) {
+      void run.result.catch(() => {})
+      await run.dispose().catch(cleanup => { this.ctx.logger.warn(String(cleanup)) })
+      throw error
+    }
     const child = run.localAgent?.session
     if (child !== undefined) {
       try {
@@ -577,6 +596,7 @@ export class SubagentRuntime extends TypertRemoteService {
         void run.result.catch(() => undefined)
         try {
           await run.dispose()
+          reservation?.release()
         } catch (cleanupError: unknown) {
           this.ctx.logger.warn(
             `subagent: disposal after catalog append failure also failed: ${String(cleanupError)}`,
@@ -585,7 +605,11 @@ export class SubagentRuntime extends TypertRemoteService {
         throw error
       }
     }
-    return observeRun(this.emitLifecycle, name, request.parent, run)
+    const observed = observeRun(this.emitLifecycle, name, request.parent, run)
+    if (reservation === undefined) return observed
+    // Result or Agent idle/aborted is not backend quiescence. Only the provider's
+    // documented dispose join retires this reservation; failure remains busy.
+    return { id: observed.id, localAgent: observed.localAgent, result: observed.result, dispose: async () => { await observed.dispose(); reservation?.release() } }
   }
 
   /**

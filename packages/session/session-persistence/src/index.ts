@@ -136,6 +136,9 @@ export abstract class SessionPersistence extends Service {
   /** Process-local instance identity, stable through Context proxies and distinct after service replacement. */
   readonly identity: symbol = Symbol('sessionPersistence')
 
+  /** Optional actual owned write/publication settlement; undefined must remain UNKNOWN. No I/O. */
+  writeJoined(): boolean | undefined { return undefined }
+
   constructor(ctx: Context) {
     super(ctx, 'sessionPersistence')
   }

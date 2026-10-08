@@ -850,7 +850,7 @@ describe('same-session goal driving', () => {
     expect(test.adapter.requests).toHaveLength(0)
   })
 
-  it('disarms without durably pausing when cancellation belongs to unrelated human work', async () => {
+  it('human Stop durably pauses the current goal even during ordinary human work', async () => {
     const test = await harness(['hang'])
     test.agent.followup(createUserMessage({ content: [{ type: 'text', text: 'inspect something first' }], source: { kind: 'user' } }))
     await waitForRequests(test.adapter, 1)
@@ -861,8 +861,8 @@ describe('same-session goal driving', () => {
 
     expect(test.ctx.goals.get(test.agent)).toMatchObject({
       id: created.id,
-      revision: created.revision,
-      phase: 'active',
+      revision: created.revision + 1,
+      phase: 'paused',
       activation: 'disarmed',
       roundsStarted: 0,
     })

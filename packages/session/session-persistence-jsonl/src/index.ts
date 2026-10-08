@@ -302,6 +302,10 @@ class JsonlSessionPersistence extends SessionPersistence {
 
   // --- SessionPersistence service API ---
 
+  override writeJoined(): boolean {
+    return this.migrationPreparations.size === 0 && this.tracker.writeJoined()
+  }
+
   /**
    * Create a new stored session and take its write ownership. The session is
    * visible to this process immediately; the physical artifact appears on the
@@ -312,6 +316,8 @@ class JsonlSessionPersistence extends SessionPersistence {
    * @returns the owned write handle.
    */
   async create(header: SessionHeader, options?: SessionPersistenceCreateOptions): Promise<SessionHandle> {
+    this.tracker.pendingPublications += 1
+    try {
     options?.signal?.throwIfAborted()
     const snapshot = materializeCreateHeader(header)
     // Fail fast on a seeded/cut mismatch with the exact refusal the header
@@ -330,6 +336,7 @@ class JsonlSessionPersistence extends SessionPersistence {
     // session leaves no filesystem footprint at all.
     this.tracker.registerCreated(snapshot, inheritedEventCount)
     return this.tracker.adopt(new JsonlSessionHandle(this, snapshot.id, snapshot, 'write', { cursor: 0, materialized: false, inheritedEventCount }))
+    } finally { this.tracker.pendingPublications -= 1 }
   }
 
   /**
@@ -340,6 +347,8 @@ class JsonlSessionPersistence extends SessionPersistence {
    * @returns the open handle.
    */
   async open(id: SessionId, access: SessionAccess, options?: SessionPersistenceOpenOptions): Promise<SessionHandle> {
+    this.tracker.pendingPublications += 1
+    try {
     options?.signal?.throwIfAborted()
     await this.ensureRootEncoding()
     options?.signal?.throwIfAborted()
@@ -412,10 +421,12 @@ class JsonlSessionPersistence extends SessionPersistence {
       }
       this.tracker.releaseClaim(id)
       if (releaseFailure !== undefined) {
+        this.tracker.uncertainWrite = true
         throw new AggregateError([failure, releaseFailure], `session "${id}": write open failed and its lock release failed`)
       }
       throw failure
     }
+    } finally { this.tracker.pendingPublications -= 1 }
   }
 
   /**

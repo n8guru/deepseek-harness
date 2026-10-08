@@ -1,0 +1,28 @@
+# Explicit staging opt-in only. No production grants or successor authority.
+# The readiness service is absent until native control replay AND flush succeed.
+# Producer rows depend on it, irrespective of row ordering in the Loader.
+- id: agent
+  inject: [hostMaintenanceReady]
+- id: agent-loop
+  inject: [hostMaintenanceReady]
+- id: tools
+  inject: [hostMaintenanceReady]
+- id: jobs
+  inject: [hostMaintenanceReady]
+- id: goal
+  inject: [hostMaintenanceReady]
+- id: goal-round-driver
+  inject: [hostMaintenanceReady]
+- id: subagent
+  inject: [hostMaintenanceReady]
+- id: subagent-spawn-in-process
+  inject: [hostMaintenanceReady]
+- id: subagent-fork-in-process
+  inject: [hostMaintenanceReady]
+- id: workflow-ptc
+  inject: [hostMaintenanceReady]
+- id: headless-runner
+  inject: [hostMaintenanceReady]
+- insert:
+    - id: host-maintenance
+      name: '@deepseek-ai/dsh-agent-loop/maintenance'

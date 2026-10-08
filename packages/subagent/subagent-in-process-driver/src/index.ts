@@ -18,7 +18,7 @@ import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionLogOffset as SessionLogOffsetType, TurnEndReason } from '@deepseek-ai/dsh-session'
-import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type ContentBlock, type MessageId } from '@deepseek-ai/dsh-llm'
 import {
   appendDelegatedPolicyOverrides,
   applyChildComposition,
@@ -110,7 +110,7 @@ export async function startInProcessRun(
   const parent = request.parent
   const childDepth = resolveChildDepth(parent, request.maxDepth)
 
-  const childId = brandString<SessionId>(randomUUID())
+  const childId = request.initialAdmission?.sessionId ?? brandString<SessionId>(randomUUID())
   const seed = options.seed
   const activationBoundary = SessionLogOffset(seed?.length ?? 0)
 
@@ -133,6 +133,7 @@ export async function startInProcessRun(
 
   const handle = await parent.ctx.agents.create({
     sessionId: childId,
+    ...(request.initialAdmission === undefined ? {} : { initialAdmission: request.initialAdmission }),
     parentAgent: parent,
     meta: childSessionMeta(parent, childDepth, seed !== undefined),
     ...seed !== undefined ? { seed } : {},
@@ -148,6 +149,7 @@ export async function startInProcessRun(
     childId,
     activationBoundary,
     structured,
+    request.initialAdmission?.messageId,
   )
 }
 
@@ -162,11 +164,20 @@ function drivePublishedRun(
   childId: SessionId,
   boundary: SessionLogOffsetType,
   structured: StructuredAttachment | undefined,
+  initialMessageId: MessageId | undefined,
 ): SubagentRun {
   const child = handle.agent
   const flags = { cancelled: false }
+  const claimed = Promise.withResolvers<void>()
+  const releaseClaimObserver = initialMessageId === undefined ? () => {} : child.ctx.on('agent/inbox/claimed', ({ message }) => {
+    if (message.id === initialMessageId) claimed.resolve()
+  })
+  const releaseAdmissionObserver = initialMessageId === undefined ? () => {} : child.ctx.on('host-admission/changed', () => { child.wakeInbox?.() })
+  // Publication may race an OPEN driver claiming the input before it returns.
+  if (initialMessageId === undefined || child.session.snapshotEvents().some(event => event.type === 'user/message' && event.data.id === initialMessageId)) claimed.resolve()
   const onAbort = (): void => {
     flags.cancelled = true
+    claimed.resolve()
     child.cancel({ kind: 'parent' })
   }
   signal.addEventListener('abort', onAbort, { once: true })
@@ -178,7 +189,8 @@ function drivePublishedRun(
   const result: Promise<SubagentResult> = (async () => {
     try {
       if (!flags.cancelled) {
-        child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
+        if (initialMessageId === undefined) child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
+        await claimed.promise
         await child.whenIdle()
       }
       return readResult(
@@ -188,6 +200,8 @@ function drivePublishedRun(
         structured ? { captured: structured.captured() } : undefined,
       )
     } finally {
+      releaseClaimObserver()
+      releaseAdmissionObserver()
       signal.removeEventListener('abort', onAbort)
     }
   })()
@@ -199,6 +213,7 @@ function drivePublishedRun(
     async dispose(): Promise<void> {
       signal.removeEventListener('abort', onAbort)
       flags.cancelled = true
+      claimed.resolve()
       const settlements = await Promise.allSettled([handle.dispose(), result])
       const disposal = settlements[0]
       // The result channel owns run faults; disposal reports only failure to

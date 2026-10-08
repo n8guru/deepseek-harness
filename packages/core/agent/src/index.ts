@@ -13,7 +13,7 @@ import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { installTurnArchiveAdmission } from './archive-admission.ts'
-import type { Agent } from './types.ts'
+import type { Agent, HostAdmissionTicket, HostInitialAdmission } from './types.ts'
 import type { AgentOptions, SessionStartSource } from './runtime-types.ts'
 
 export * from './runtime-types.ts'
@@ -61,6 +61,10 @@ export type AgentSetup = (
  * lineage); the factory creates the session and agent under that identity.
  */
 export interface CreateAgentOptions {
+  /** Native identity capability for an individually pre-admitted child/input. */
+  readonly initialAdmission?: HostInitialAdmission
+  /** Opaque trusted native maintenance permit; never accepted from transport JSON. */
+  readonly maintenancePermit?: HostAdmissionTicket
   /** The live agent/session identity. */
   readonly sessionId: SessionId
   /** Live parent Agent for runtime ownership; omit for a root Agent. */
@@ -123,6 +127,8 @@ export interface CreateAgentOptions {
  * ({@link AgentRegistry.resume}).
  */
 export interface ResumeAgentOptions {
+  /** Opaque trusted native maintenance permit; never accepted from transport JSON. */
+  readonly maintenancePermit?: HostAdmissionTicket
   /** The persisted session id to load and use as the live agent/session identity. */
   readonly resumeSessionId: SessionId
   /** Live parent Agent for runtime ownership; omit for a root Agent. */
@@ -389,6 +395,15 @@ export class AgentRegistry extends Service {
    * @returns the handle after setup, rollback-covered publication, and loop start complete.
    */
   async create(options: CreateAgentOptions): Promise<AgentHandle> {
+    const admission = this.ctx.get('hostAdmission')
+    if (options.initialAdmission !== undefined) {
+      if (options.maintenancePermit !== undefined || admission?.initial === undefined) throw new Error('native initial admission unsupported')
+      admission.initial(options.initialAdmission, options.sessionId, options.parentAgent, false)
+    } else if (options.maintenancePermit !== undefined) {
+      admission?.assertMaintenancePermit?.(options.maintenancePermit)
+      if (admission?.forSession === undefined) throw new Error('native maintenance permit unsupported')
+      admission.forSession(options.maintenancePermit, options.sessionId).assert()
+    } else admission?.assert()
     const ownerCtx = this.ctx
     // Re-trace a Service-backed factory through the accessing context
     // explicitly. This preserves AgentLoop's dependency origin while binding
@@ -408,6 +423,12 @@ export class AgentRegistry extends Service {
    * @returns the handle after setup, rollback-covered publication, and loop start complete.
    */
   async resume(options: ResumeAgentOptions): Promise<AgentHandle> {
+    const admission = this.ctx.get('hostAdmission')
+    if (options.maintenancePermit !== undefined) {
+      admission?.assertMaintenancePermit?.(options.maintenancePermit)
+      if (admission?.forSession === undefined) throw new Error('native maintenance permit unsupported')
+      admission.forSession(options.maintenancePermit, options.resumeSessionId).assert()
+    } else admission?.assert()
     const ownerCtx = this.ctx
     const { target } = this.requireFactory()
     const receiver = getTraceable(ownerCtx, target)
@@ -456,7 +477,12 @@ export class AgentRegistry extends Service {
    *   `agent/created` listener, removal and disposal wait until the serial
    *   creation dispatch settles.
    */
-  enter(agent: Agent, owner: Agent | undefined): () => void {
+  enter(agent: Agent, owner: Agent | undefined, maintenancePermit?: HostAdmissionTicket): () => void {
+    const admission = this.ctx.get('hostAdmission')
+    if (maintenancePermit !== undefined) {
+      if (admission?.forSession === undefined) throw new Error('native maintenance permit unsupported')
+      admission.forSession(maintenancePermit, agent.id).assert()
+    } else admission?.assert()
     const id = agent.id
     if (id !== agent.session.id) {
       throw new Error(`agent id "${id}" does not match session id "${agent.session.id}"`)

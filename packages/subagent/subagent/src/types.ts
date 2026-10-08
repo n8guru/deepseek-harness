@@ -9,7 +9,7 @@
  * @module @deepseek-ai/dsh-subagent/types
  */
 
-import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentOptions, HostInitialAdmission } from '@deepseek-ai/dsh-agent'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
@@ -205,6 +205,8 @@ export interface SubagentStartRequest {
  * the durable child descriptor.
  */
 export interface ResolvedSubagentStartRequest extends SubagentStartRequest {
+  /** Native identity capability, never supplied by the caller/model body. */
+  readonly initialAdmission?: HostInitialAdmission | undefined
   /** Detached descriptor a session-backed provider persists in the child log. */
   readonly descriptor: SubagentDescriptorData
 }

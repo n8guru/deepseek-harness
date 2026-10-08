@@ -13,6 +13,7 @@
     "src/client/rpc.ts",
     "src/http-bridge.ts",
     "src/index.ts",
+    "src/notification-admission.ts",
     "src/loopback-hostname.ts",
     "src/operator-peer.ts",
     "src/recovery-config.ts",
@@ -21,6 +22,8 @@
     "src/rpc.ts"
   ],
   "references": [
+    { "path": "../../core/agent" },
+    { "path": "../../llm/llm" },
     {
       "path": "../../../vendor/cordis"
     },
