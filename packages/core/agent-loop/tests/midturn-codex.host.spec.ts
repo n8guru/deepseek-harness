@@ -7,13 +7,22 @@ import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '../src/index.ts'
 import { SessionCommandController } from '../../../api/session-controller/src/commands.ts'
-import { CodexAppServerAdapter } from '/home/n8/forage-worktrees/codex-adapter-recovery/lib/index.js'
+import { pathToFileURL } from 'node:url'
 import { expect, it, onTestFinished } from 'vitest'
+
+// The Codex app-server adapter is an out-of-tree native artifact (DGPisces
+// dsh-openai-oauth). Point DSH_CODEX_ADAPTER_LIB at its compiled lib/index.js
+// to run this proof; without it the spec is skipped instead of failing to
+// resolve a host-specific absolute path.
+const adapterLib = process.env.DSH_CODEX_ADAPTER_LIB
+const { CodexAppServerAdapter } = adapterLib
+  ? await import(pathToFileURL(adapterLib).href)
+  : { CodexAppServerAdapter: undefined as never }
 
 /** Real controller -> native loop/tool/inbox -> compiled staged adapter.
  * Only the remote Codex model endpoint is keyless/scripted; no live session.
  */
-it.each(['steer', 'queue'] as const)('preserves two ordered controller replies with %s delivery during toolwork', async mode => {
+it.skipIf(!adapterLib).each(['steer', 'queue'] as const)('preserves two ordered controller replies with %s delivery during toolwork', async mode => {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   await ctx.plugin(LlmRuntime)
