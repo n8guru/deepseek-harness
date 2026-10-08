@@ -41,6 +41,58 @@ async function harness(options: { persistence?: boolean } = {}) {
 const tick = () => new Promise(resolve => setImmediate(resolve))
 const pending = (ctx: Context) => ctx.hostAdmission.status().pending
 
+it.each(['continuable', 'one-shot'] as const)('already-aborted %s start rejects before reserving or invoking a provider', async (mode) => {
+  const { ctx, parent } = await harness({ persistence: true })
+  const signal = AbortSignal.abort(new Error('already aborted'))
+  let providerCalls = 0
+  try {
+    ctx.subagents.registerProvider({
+      name: 'never-start',
+      inheritsParentContext: false,
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      async start() { providerCalls++; throw new Error('must not start') },
+      async prepareContinuable() { providerCalls++; return {} },
+    })
+    const before = [...pending(ctx)]
+    const prompt = [{ type: 'text' as const, text: 'not admitted' }]
+    const started = mode === 'continuable'
+      ? ctx.subagents.startContinuable({ provider: 'never-start', label: 'c', request: { parent, prompt }, signal })
+      : ctx.subagents.start('never-start', { parent, prompt, signal })
+    await expect(started).rejects.toThrow('already aborted')
+    expect(providerCalls).toBe(0)
+    expect(pending(ctx)).toEqual(before)
+  } finally { await ctx.fiber.dispose() }
+})
+
+it.each(['continuable', 'one-shot'] as const)('%s synchronous capability setup failure rolls back only its reservation', async (mode) => {
+  const { ctx, parent } = await harness({ persistence: true })
+  let calls = 0
+  try {
+    ctx.subagents.registerProvider({
+      name: 'never-start', inheritsParentContext: false,
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      async start() { calls++; throw new Error('must not start') },
+      async prepareContinuable() { calls++; return {} },
+    })
+    const reserve = ctx.hostAdmission.reserve.bind(ctx.hostAdmission)
+    const existing = reserve('job')
+    const before = [...pending(ctx)]
+    vi.spyOn(ctx.hostAdmission, 'reserve').mockImplementation((...args) => {
+      const reservation = reserve(...args)
+      return { ...reservation, child() { throw new Error('capability setup refused') } }
+    })
+    const signal = new AbortController().signal
+    const prompt: [] = []
+    const started = mode === 'continuable'
+      ? ctx.subagents.startContinuable({ provider: 'never-start', label: 'c', request: { parent, prompt }, signal })
+      : ctx.subagents.start('never-start', { parent, prompt, signal })
+    await expect(started).rejects.toThrow('capability setup refused')
+    expect(calls).toBe(0)
+    expect(pending(ctx)).toEqual(before)
+    existing.release()
+  } finally { await ctx.fiber.dispose() }
+})
+
 it('continuable start: preclose exact initial acceptance publishes after CLOSED with original message, zero forced turns', async () => {
   const { ctx, parent, adapter } = await harness({ persistence: true })
   const entered = Promise.withResolvers<undefined>()

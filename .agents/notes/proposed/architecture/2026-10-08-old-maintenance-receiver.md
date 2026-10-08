@@ -12,6 +12,8 @@ An in-memory cutoff cannot preserve closure across process replacement. A caller
 
 Retain exact initial-admission capabilities and actual failed-publication/WorkerRun join evidence from the old-source candidate. The opt-in maintenance receiver records full revisions in the existing session persistence backend, rejects malformed transitions, snapshots queued commands and responses, retains retired owner/run identities, and joins in-flight writes on teardown. Close precedes persistence; uncertain durability leaves the live Host closed. Release never reopens the current process.
 
+Both public subagent start paths snapshot inputs and reject an already-aborted signal before reserving admission. A synchronous initial-capability setup failure releases its reservation because provider ownership has not begun. After provider invocation, rejection alone still cannot retire unknown work; authenticated cleanup evidence remains required.
+
 The source candidate deliberately has no HTTP binding until an authenticated transport principal is identified. The existing Connection Host/Origin fence explicitly excludes authentication. The receiver is not enabled in shipped bundles.
 
 ## Alternatives considered

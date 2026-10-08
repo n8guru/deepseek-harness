@@ -30,7 +30,7 @@ The [subagent family overview](../README.md) maps implementations and model-faci
 
 Follow-up authority comes from the exact live direct parent recorded in the child's durable header. Cold resume checks that authority before reconstruction and again in the final no-await inbox-admission span, so a parent unregistered or replaced during materialization cannot authorize delivery. The `source` on a follow-up records who supplied the delivered message and grants no authority.
 
-Same-process requests, descriptors, results, and event payloads are trusted typed values borrowed as immutable. The service does not clone or freeze them; serialization and hostile-input validation belong at actual process, worker, persistence, and model boundaries.
+Same-process values are trusted typed inputs. Initial messages and delegation inputs are snapshotted before provider work so caller mutation cannot change the admitted request. Already-aborted signals are rejected before reserving admission; synchronous initial-capability setup failures release their reservation before any provider is called. After provider invocation, rejection alone is not proof that unpublished resources joined: cleanup requires the authenticated finish receipt. Serialization and hostile-input validation belong at actual process, worker, persistence, and model boundaries.
 
 ## Capabilities
 

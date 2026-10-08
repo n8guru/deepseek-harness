@@ -37,7 +37,7 @@ import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, HostInitialAdmission } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -473,7 +473,6 @@ export class SubagentRuntime extends Service {
       provider: name,
       ...request.label !== undefined ? { label: request.label } : {},
     })
-    const reservation = this.ctx.hostAdmission.reserve('delegate', request.parent)
     const initialMessage = createUserMessage({ content: structuredClone(request.prompt), source: { kind: 'user' } })
     const childId = SessionId(randomUUID())
     const { parent, signal, ...input } = request
@@ -483,7 +482,17 @@ export class SubagentRuntime extends Service {
     }
     freeze(snapshot)
     const resolved: ResolvedSubagentStartRequest = { ...snapshot, parent, signal, descriptor }
-    const initialAdmission = reservation.child!(childId, initialMessage, parent, signal, resolved)
+    signal.throwIfAborted()
+    const reservation = this.ctx.hostAdmission.reserve('delegate', parent)
+    let initialAdmission: HostInitialAdmission
+    try {
+      if (reservation.child === undefined) throw new Error('native initial admission unavailable')
+      initialAdmission = reservation.child(childId, initialMessage, parent, signal, resolved)
+    } catch (error: unknown) {
+      // Provider ownership has not begun; synchronous setup owns no live work.
+      reservation.release()
+      throw error
+    }
     Object.defineProperty(resolved, 'initialAdmission', { value: initialAdmission, enumerable: true })
     Object.freeze(resolved)
     let started: SubagentRun

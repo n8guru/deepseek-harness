@@ -437,10 +437,19 @@ export class SubagentContinuationManager {
     // Exact initial acceptance: reserve the delegate start, the publication of
     // this child id and the original initial message BEFORE any await. A later
     // HostCutoff close still admits only this one publication and message.
+    const message = createUserMessage({ content: structuredClone(request.prompt), source: { kind: 'user' } })
+    spec.signal.throwIfAborted()
     const cutoff = this.ctx.hostAdmission
     const reservation = cutoff.reserve('delegate', parent)
-    const initialAdmission = reservation.child!(childId,
-      createUserMessage({ content: structuredClone(request.prompt), source: { kind: 'user' } }), parent, spec.signal, spec)
+    let initialAdmission: HostInitialAdmission
+    try {
+      if (reservation.child === undefined) throw new Error('native initial admission unavailable')
+      initialAdmission = reservation.child(childId, message, parent, spec.signal, spec)
+    } catch (error: unknown) {
+      // No provider or publication owns work until capability setup succeeds.
+      reservation.release()
+      throw error
+    }
     try {
       const start = await this.startReserved(spec, childId, childDepth, descriptor, delegatedPolicies, persistence, initialAdmission)
       reservation.release()

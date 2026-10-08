@@ -45,6 +45,21 @@ try {
   const parent = ctx.agentLoop.create(SessionId('loader-finish-parent'), { provider: 'keyless', model: 'none' });
   const pending = () => ctx.hostAdmission.status().pending;
 
+  // Already-aborted calls own no reservation and never invoke either provider path.
+  let forbiddenStarts = 0;
+  ctx.subagents.registerProvider({ name: 'never', inheritsParentContext: false,
+    capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+    async start() { forbiddenStarts++; throw new Error('must not start'); },
+    async prepareContinuable() { forbiddenStarts++; return {}; },
+  });
+  const preAborted = AbortSignal.abort(new Error('already aborted'));
+  const beforeAbort = [...pending()];
+  await assert.rejects(ctx.subagents.start('never', { parent, signal: preAborted, prompt: [] }), /already aborted/);
+  await assert.rejects(ctx.subagents.startContinuable({ provider: 'never', label: 'no',
+    request: { parent, prompt: [] }, signal: preAborted }), /already aborted/);
+  assert.equal(forbiddenStarts, 0);
+  assert.deepEqual(pending(), beforeAbort);
+
   // (1) Canonical driver refusal before claim: authenticated unpublished receipt.
   const abort = new AbortController();
   let captured;

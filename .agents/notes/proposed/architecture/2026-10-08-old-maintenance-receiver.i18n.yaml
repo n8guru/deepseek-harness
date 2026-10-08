@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-10-08-old-maintenance-receiver.md
-2026-10-08-old-maintenance-receiver.md: 334bb4015881df2b51babadc58aaf6984d0e16ea
-2026-10-08-old-maintenance-receiver.zh.md: 6326b67c76d2b84dff4657a9b2cdf054f573d417
+2026-10-08-old-maintenance-receiver.md: 72e98ebc4f78014b32b57e0a50176ad48495039a
+2026-10-08-old-maintenance-receiver.zh.md: 5982ca3f274272fa61bef3ca5e03a2b33019baf2
