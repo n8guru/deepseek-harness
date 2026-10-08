@@ -275,9 +275,9 @@ export class AgentRegistry extends Service {
   private initiatorDrain: PromiseWithResolvers<void> | undefined
   private initiatorDisposal: Promise<void> | undefined
 
-  constructor(ctx: Context, config: { admissionClosed?: boolean } = {}) {
+  constructor(ctx: Context, config: { admissionClosed?: boolean; maintenanceReplay?: boolean } = {}) {
     super(ctx, 'agents')
-    ctx.provide('hostAdmission', new HostCutoff(config.admissionClosed === true, () => ctx.get('llm')?.backendCoverage(), id => this.get(id)))
+    ctx.provide('hostAdmission', new HostCutoff(config.admissionClosed === true, () => ctx.get('llm')?.backendCoverage(), id => this.get(id), config.maintenanceReplay === true))
     ctx.inject(['typert'], (typeCtx) => {
       typeCtx.typert.lookups.register('agent', {
         parameter: 'agent',

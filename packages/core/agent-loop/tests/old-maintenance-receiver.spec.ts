@@ -19,7 +19,7 @@ async function boot(root: string, receiver = true) {
   await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime)
   await ctx.plugin(JsonlSessionPersistence, { root })
-  await ctx.plugin(AgentRegistry); await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(AgentRegistry, { maintenanceReplay: true }); await ctx.plugin(AgentLoop, { agents: [] })
   if (receiver) await ctx.plugin(OldHostMaintenance)
   return ctx
 }
@@ -67,6 +67,29 @@ it('a failed durable close append keeps the cutoff closed and poisons the receiv
     expect(ctx.hostAdmission.open).toBe(false)
     await expect(ctx.hostMaintenance.receive('owner-a', { runId: 'r1', action: 'status' })).rejects.toThrow('poisoned')
   } finally { await ctx.fiber.dispose() }
+})
+
+it('registry boot barrier precedes every producer and requires one successful receiver replay', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'step73-old-maint-'))
+  roots.push(root)
+  const ctx = await boot(root, false)
+  try {
+    // Receiver has not even been constructed; producers are already mounted.
+    for (const kind of ['publication', 'job', 'delegate', 'workflow'] as const) {
+      expect(() => ctx.hostAdmission.reserve(kind)).toThrow('CLOSED')
+    }
+    expect(() => ctx.agentLoop.create(SessionId('premature'))).toThrow('CLOSED')
+    await ctx.plugin(OldHostMaintenance)
+    expect(ctx.hostAdmission.open).toBe(true)
+    expect(() => ctx.hostAdmission.claimMaintenanceReplay()).toThrow('boot barrier')
+    expect(ctx.hostAdmission.open).toBe(false)
+  } finally { await ctx.fiber.dispose() }
+})
+
+it('receiver without a prearmed registry barrier refuses and closes admission', () => {
+  const cutoff = new HostCutoff()
+  expect(() => cutoff.claimMaintenanceReplay()).toThrow('boot barrier')
+  expect(cutoff.open).toBe(false)
 })
 
 it('replay hold refuses admission until released and never reopens an explicit close', () => {

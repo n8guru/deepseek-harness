@@ -9,6 +9,7 @@ import { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
 import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
 import { HostConnectionService } from './rpc-host.ts'
+import { receiveMaintenance, notificationProducerSchema, type NotificationProducer } from './maintenance-admission.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
 export type {
@@ -48,6 +49,10 @@ export const inject = ['webServer']
 
 /** Plugin config: the deployment's non-loopback serving authorities. */
 export interface ConnectionConfig {
+  /** Explicit rc2-shaped bearer grants; only maintenance ingress is backported. */
+  notificationProducers?: NotificationProducer[]
+  /** Explicit producer origins allowed to own maintenance; none by default. */
+  maintenanceOwners?: string[]
   /**
    * Authorities this deployment serves beyond loopback: exact `host:port`, or
    * port-less `host` matching any port. The /api trust fence refuses any
@@ -62,6 +67,8 @@ export interface ConnectionConfig {
 }
 
 export const Config: z<ConnectionConfig> = z.object({
+  notificationProducers: z.array(notificationProducerSchema).default([]),
+  maintenanceOwners: z.array(z.string().min(1).max(128)).default([]),
   trustedHosts: z.array(String).default([]),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
@@ -135,6 +142,20 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
   // silently authorizing its hostname prefix at request time.
   for (const entry of trustedHosts) assertTrustedAuthority(entry)
   if (ctx.get('apiProxy') !== undefined) assertImageBodyCapacity(ctx, maxRequestBodyBytes)
+  const origins = new Set<string>()
+  const hashes = new Set<string>()
+  const producers = (config?.notificationProducers ?? []).map((raw) => {
+    const producer = notificationProducerSchema(raw)
+    if (producer.origin.startsWith('native:') || origins.has(producer.origin) || hashes.has(producer.bearerSha256)) throw new Error('maintenance grants require unique non-native origins and bearers')
+    origins.add(producer.origin)
+    hashes.add(producer.bearerSha256)
+    return producer
+  })
+  const maintenanceOwners = [...config?.maintenanceOwners ?? []]
+  if (maintenanceOwners.some(owner => !origins.has(owner))) throw new Error('maintenance owner must name an explicitly provisioned producer origin')
+  const maintenanceHandler = {
+    fetch: (request: Request) => receiveMaintenance(ctx, request, producers, maintenanceOwners),
+  }
   const connection = new HostConnectionService(ctx, trustedHosts)
   const fetchHandler = connection.createSharedFetchHandler(API_PATH, {
     async fetch(request) {
@@ -167,7 +188,9 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         res.end('forbidden')
         return
       }
-      await bridge(req, res, fetchHandler, maxRequestBodyBytes)
+      // This exact path never falls back to unauthenticated RPC or browser cookies.
+      const handler = req.url?.split('?', 1)[0] === '/api/maintenance.receive' ? maintenanceHandler : fetchHandler
+      await bridge(req, res, handler, maxRequestBodyBytes)
     },
   }
   ctx.effect(() => ctx.webServer.register(route), 'client-connection: /api route')

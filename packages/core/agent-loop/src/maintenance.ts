@@ -2,8 +2,8 @@
  * Old-source durable maintenance receiver. Persists the owner-bound CLOSED
  * phase in one control session so a restarted Host boots CLOSED. It has no
  * process restart, activation, live reopen, receipt outbox or successor authority.
- * This same-process service has no authenticated transport binding. Its caller
- * must establish owner authority; Host/Origin trust is not authentication.
+ * The existing Connection HTTP bridge authenticates configured bearer owners;
+ * this internal service trusts that caller, never body/Host/Origin authority.
  */
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
@@ -86,7 +86,7 @@ export default class OldHostMaintenance extends Service {
     super(ctx, 'hostMaintenance')
     this.persistence = ctx.sessionPersistence
     const cutoff = ctx.hostAdmission
-    this.releaseBoot = cutoff.hold()
+    this.releaseBoot = cutoff.claimMaintenanceReplay()
     ctx.effect(() => async () => {
       this.stopping = true
       cutoff.hold()

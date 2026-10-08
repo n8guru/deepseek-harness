@@ -38,9 +38,24 @@ export class HostCutoff {
   private readonly initials = new WeakMap<HostInitialAdmission, Initial>()
   private readonly receipts = new WeakSet<HostPublicationFailureReceipt>()
   constructor(closed = false, private readonly backend: () => { state: 'JOINED' | 'UNKNOWN' } | undefined = () => undefined,
-    private readonly live: (id: SessionId) => Agent | undefined = () => undefined) { this.accepting = !closed }
+    private readonly live: (id: SessionId) => Agent | undefined = () => undefined,
+    private maintenanceReplayPending = false) { this.accepting = !closed }
   private holds = 0
-  get open(): boolean { return this.accepting && this.holds === 0 }
+  get open(): boolean { return this.accepting && this.holds === 0 && !this.maintenanceReplayPending }
+  /**
+   * Claim the boot barrier armed at registry construction, before any producer
+   * can observe hostAdmission. Missing or duplicate receiver wiring fails closed.
+   * @returns the one-shot release, called only after successful durable replay.
+   */
+  claimMaintenanceReplay(): () => void {
+    if (!this.maintenanceReplayPending || this.maintenanceReplayClaimed) {
+      this.close()
+      throw new Error('maintenance receiver requires the registry maintenanceReplay boot barrier')
+    }
+    this.maintenanceReplayClaimed = true
+    return () => { this.maintenanceReplayPending = false }
+  }
+  private maintenanceReplayClaimed = false
   /**
    * Hold admission during durable replay. A failed replay keeps its hold;
    * releasing a hold never reopens an explicit close.

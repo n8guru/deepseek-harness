@@ -6,7 +6,8 @@
 
 import { expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import WorkerThreadWorkflowEngine from '../src/index.ts'
@@ -18,6 +19,8 @@ vi.setConfig({ testTimeout: 30_000 })
 
 it('runs the default config through the source worker', async () => {
   const ctx = new Context()
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
   const subagents = await ctx.plugin(SubagentRuntime)
   const provider: SubagentProvider = {
     name: 'spawn',
@@ -27,7 +30,7 @@ it('runs the default config through the source worker', async () => {
   }
   ctx.subagents.registerProvider(provider)
   const engine = await ctx.plugin(WorkerThreadWorkflowEngine, {})
-  const parent = { id: SessionId('workflow-compat-parent'), options: {} } as unknown as Agent
+  const parent = ctx.agentLoop.create(SessionId('workflow-compat-parent'), {})
   try {
     const run = ctx.workflowEngine.start({
       script: 'return 6 * 7',

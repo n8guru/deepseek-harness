@@ -47,7 +47,11 @@
     "lib/client.js",
     "lib/types/**/*.d.ts"
   ],
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-agent-loop": { "optional": true }
+  },
   "peerDependencies": {
+    "@deepseek-ai/dsh-agent-loop": "workspace:^",
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
@@ -59,6 +63,7 @@
     "@deepseek-ai/dsh-tools": "workspace:^"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-agent-loop": "workspace:^",
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@types/ws": "^8.18.1",

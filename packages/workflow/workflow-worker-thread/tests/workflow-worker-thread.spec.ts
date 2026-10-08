@@ -6,6 +6,8 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { SubagentCapabilities, SubagentProvider, SubagentResult, SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
 import type { WorkflowMeta, WorkflowResult, WorkflowResultInfo, WorkflowRun, WorkflowRunInfo } from '@deepseek-ai/dsh-workflow'
 import * as workerEngineModule from '../src/index.ts'
@@ -14,9 +16,39 @@ import { workerSpawnEnv } from '../src/host.ts'
 import { HostToWorkerType, WorkerToHostType } from '../src/protocol.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 
-/** A minimal parent stand-in: the engine only threads it through to the provider. */
-function fakeParent(): Agent {
-  return { id: SessionId('workflow-parent'), options: {} } as unknown as Agent
+// Observe the real worker at its owning class, not through a public run handle
+// whose disposal wrapper intentionally exposes no private worker fields.
+const workers = vi.hoisted(() => new Map<string, Worker>())
+vi.mock('../src/host.ts', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/host.ts')>()
+  return {
+    ...original,
+    WorkerRun: class extends original.WorkerRun {
+      constructor(...args: ConstructorParameters<typeof original.WorkerRun>) {
+        super(...args)
+        workers.set(this.id, (this as unknown as { worker: Worker }).worker)
+      }
+    },
+  }
+})
+function workerFor(handle: WorkflowRun): Worker {
+  const worker = workers.get(handle.id)
+  if (worker === undefined) throw new Error('real workflow worker missing')
+  return worker
+}
+
+/** Real parent identity: native admission now authenticates the live registry. */
+function fixtureParent(ctx: Context): Agent {
+  const parent = ctx.agents.get(SessionId('workflow-parent'))
+  if (parent === undefined) throw new Error('workflow fixture parent missing')
+  return parent
+}
+
+async function mountSubagents(ctx: Context): Promise<void> {
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  ctx.agentLoop.create(SessionId('workflow-parent'), {})
 }
 
 // Allow cold worker startup on contended CI runners.
@@ -143,7 +175,7 @@ interface SetupOptions {
 
 async function setup(options?: SetupOptions) {
   const ctx = new Context()
-  await ctx.plugin(SubagentRuntime)
+  await mountSubagents(ctx)
   const provider = new StubProvider(
     'stub',
     options?.manual ? undefined : options?.reply ?? (() => text('stub reply')),
@@ -157,7 +189,7 @@ async function setup(options?: SetupOptions) {
   // (cores - 2, floored at 1), so tests that expect N children in flight
   // would wedge on small CI runners.
   const engineFiber = await ctx.plugin(WorkerThreadWorkflowEngine, { provider: 'stub', maxConcurrentAgents: 8, ...options?.config })
-  return { ctx, provider, parent: fakeParent(), engineFiber }
+  return { ctx, provider, parent: fixtureParent(ctx), engineFiber }
 }
 
 /** The standard test meta plus a body, spread into a start request. */
@@ -378,7 +410,7 @@ describe('dsh-workflow-worker-thread', () => {
         ...scripted("try { await agent('p'); return 'unreachable' } catch (e) { return { code: e.code, message: e.message } }"),
         parent,
       })
-      const worker = (handle as unknown as { worker: { postMessage(message: unknown): void } }).worker
+      const worker = workerFor(handle)
       const post = vi.spyOn(worker, 'postMessage')
       const childMessageTypes = (): HostToWorkerType[] => post.mock.calls
         .map(([message]) => (message as { type: HostToWorkerType }).type)
@@ -456,7 +488,7 @@ describe('dsh-workflow-worker-thread', () => {
 
     it('a child result REJECTION crosses back as a fatal AGENT_RESULT error (a broken provider is not a failed child)', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       const provider: SubagentProvider = {
         name: 'rejecting',
         capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: false },
@@ -470,7 +502,7 @@ describe('dsh-workflow-worker-thread', () => {
       }
       ctx.subagents.registerProvider(provider)
       await ctx.plugin(WorkerThreadWorkflowEngine, { provider: 'rejecting', maxConcurrentAgents: 2 })
-      const result = await run(ctx, fakeParent(), scripted(`
+      const result = await run(ctx, fixtureParent(ctx), scripted(`
         try { await agent('p'); return 'unreachable' } catch (e) { return { name: e.name, code: e.code, fatal: e.fatal, message: e.message } }
       `))
       expect(result.value).toMatchObject({ name: 'WorkflowError', code: 'AGENT_RESULT', fatal: true })
@@ -515,7 +547,7 @@ describe('dsh-workflow-worker-thread', () => {
 
     it('a child whose dispose() throws synchronously cannot wedge the script (the host acks anyway)', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       const provider: SubagentProvider = {
         name: 'bad-dispose',
         capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: false },
@@ -530,14 +562,14 @@ describe('dsh-workflow-worker-thread', () => {
       }
       ctx.subagents.registerProvider(provider)
       await ctx.plugin(WorkerThreadWorkflowEngine, { provider: 'bad-dispose', maxConcurrentAgents: 2 })
-      const result = await run(ctx, fakeParent(), scripted("return await agent('p')"))
+      const result = await run(ctx, fixtureParent(ctx), scripted("return await agent('p')"))
       expect(result.stopReason).toBe('completed')
       expect(result.value).toBe('fine')
     })
 
     it('a child dispose() rejecting an UNRENDERABLE value still acks — the containment warn is total', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       const provider: SubagentProvider = {
         name: 'coercion-trap-dispose',
         capabilities: { outputSchema: true, depthLimit: true, toolFilter: true, persona: false },
@@ -556,7 +588,7 @@ describe('dsh-workflow-worker-thread', () => {
       }
       ctx.subagents.registerProvider(provider)
       await ctx.plugin(WorkerThreadWorkflowEngine, { provider: 'coercion-trap-dispose', maxConcurrentAgents: 2 })
-      const result = await run(ctx, fakeParent(), scripted("return await agent('p')"))
+      const result = await run(ctx, fixtureParent(ctx), scripted("return await agent('p')"))
       expect(result.stopReason).toBe('completed')
       expect(result.value).toBe('fine')
     })
@@ -871,7 +903,7 @@ describe('dsh-workflow-worker-thread', () => {
       // Claim the host result while the real worker remains wedged, so it can
       // send neither ChildDispose nor an exit. This leaves the accepted child
       // in the host registry when public disposal begins.
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
       worker.emit('message', {
         type: WorkerToHostType.Result,
         result: { value: 'synthetic completion', stopReason: 'completed', agentsStarted: 1 },
@@ -887,7 +919,7 @@ describe('dsh-workflow-worker-thread', () => {
 
     it('the settle-reap fires the request signal too: a provider honoring ONLY the signal winds its stray down promptly', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       const aborted: string[] = []
       const provider: SubagentProvider = {
         name: 'signal-only',
@@ -915,7 +947,7 @@ describe('dsh-workflow-worker-thread', () => {
           agent('stray, never awaited')
           return 'done'
         `),
-        parent: fakeParent(),
+        parent: fixtureParent(ctx),
       })
       const result = await handle.result
       expect(result.stopReason).toBe('completed')
@@ -969,7 +1001,7 @@ describe('dsh-workflow-worker-thread', () => {
         parent,
       })
       await waitFor(() => { expect(provider.runs).toHaveLength(1) })
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
 
       worker.emit('message', {
         type: WorkerToHostType.Result,
@@ -1154,7 +1186,7 @@ describe('dsh-workflow-worker-thread', () => {
         ...scripted('await new Promise(() => {})'),
         parent,
       })
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
 
       // Node may physically emit error -> queued message -> exit. Reproduce
       // that ordering deterministically at the Worker event boundary: the
@@ -1182,7 +1214,7 @@ describe('dsh-workflow-worker-thread', () => {
 
     it('refuses and disposes a provider run that becomes ready after its real worker dies', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       const requested = Promise.withResolvers<SubagentStartRequest>()
       const ready = Promise.withResolvers<SubagentRun>()
       let disposeCalls = 0
@@ -1207,10 +1239,10 @@ describe('dsh-workflow-worker-thread', () => {
 
       const handle = ctx.workflowEngine.start({
         ...scripted("return await agent('pending startup')"),
-        parent: fakeParent(),
+        parent: fixtureParent(ctx),
       })
       const request = await requested.promise
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
 
       // Kill the actual Worker while provider startup is independently
       // pending. Death closes admission and aborts the shared signal, but this
@@ -1244,7 +1276,7 @@ describe('dsh-workflow-worker-thread', () => {
 
     it('a worker that exits before settling reports an error result and reaps its children', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       // The child's dispose() REJECTS on top of the worker death: the reap
       // must contain it (warn, not crash) while still emptying the registry.
       const signalAborts: unknown[] = []
@@ -1275,9 +1307,9 @@ describe('dsh-workflow-worker-thread', () => {
       ctx.on('workflow/agent-start', () => { childStarted.resolve(undefined) })
       const handle = ctx.workflowEngine.start({
         ...scripted("return await agent('doomed')"),
-        parent: fakeParent(),
+        parent: fixtureParent(ctx),
       })
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
       await childStarted.promise
       await worker.terminate()
       const result = await handle.result
@@ -1341,7 +1373,7 @@ describe('dsh-workflow-worker-thread', () => {
         `),
         parent,
       })
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
       await waitFor(() => { expect(order.filter(entry => entry.startsWith('start:')).length).toBe(2) })
       const fast = provider.runs.find(run => (run.request.prompt[0] as { text?: string }).text === 'fast')!
       fast.settle(text('fast done'))
@@ -1370,7 +1402,7 @@ describe('dsh-workflow-worker-thread', () => {
         `),
         parent,
       })
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
       await waitFor(() => {
         expect(provider.runs).toHaveLength(1)
         expect(provider.runs[0]!.disposeCalls).toBe(1)
@@ -1396,7 +1428,7 @@ describe('dsh-workflow-worker-thread', () => {
         `),
         parent,
       })
-      const worker = (handle as unknown as { worker: Worker }).worker
+      const worker = workerFor(handle)
       const logs: string[] = []
       ctx.on('workflow/log', (_info, message) => { logs.push(message) })
       await waitFor(() => { expect(logs).toContain('armed') })
@@ -1428,7 +1460,7 @@ describe('dsh-workflow-worker-thread', () => {
 
     it('unregisters ctx.workflowEngine when the engine fiber is disposed (HMR safety)', async () => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountSubagents(ctx)
       const fiber = await ctx.plugin(WorkerThreadWorkflowEngine, {})
       expect(ctx.get('workflowEngine')).toBeDefined()
       await fiber.dispose()

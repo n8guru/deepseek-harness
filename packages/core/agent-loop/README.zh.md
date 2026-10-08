@@ -128,13 +128,13 @@ interface Config {
 
 ## 可选的旧源码维护接收器
 
-`@deepseek-ai/dsh-agent-loop/maintenance` Loader 入口提供 `ctx.hostMaintenance`，要求注入 `sessionPersistence` 和 `hostAdmission`。它将绑定 owner/run 的 close、status 和 release 命令串行处理，并记录到专用的 `old-host-maintenance-control` 会话。构造时暂停准入直到重放完成；重放失败则保留暂停。Close 在持久追加前生效，追加失败会使接收器停止接受命令。Release 被持久化，但不会重新打开当前 Host；已退役的 owner/run 标识不能再次关闭。重复的 close 和 release 命令不追加额外修订；即使新 run 已启动，release 重试仍返回其持久化的退役记录。销毁拒绝排队工作、等待进行中的写入，并保持准入暂停。
+`@deepseek-ai/dsh-agent-loop/maintenance` Loader 入口提供 `ctx.hostMaintenance`，要求注入 `sessionPersistence` 和 `hostAdmission`。它将绑定 owner/run 的 close、status 和 release 命令串行处理，并记录到专用的 `old-host-maintenance-control` 会话。注册表必须配置 `maintenanceReplay: true`：在向任何生产者暴露 `hostAdmission` 服务之前暂停准入，不依赖接收器配置行的顺序。接收器认领这个一次性启动屏障；缺失或重复的接线会关闭准入并失败。仅成功重放才能释放屏障；失败或缺失的重放始终保持关闭。Close 在持久追加前生效，追加失败会使接收器停止接受命令。Release 被持久化，但不会重新打开当前 Host；已退役的 owner/run 标识不能再次关闭。重复的 close 和 release 命令不追加额外修订；即使新 run 已启动，release 重试仍返回其持久化的退役记录。销毁拒绝排队工作、等待进行中的写入，并保持准入暂停。
 
-`receive(owner, body)` 是受信任的同进程入口，不是认证机制。它没有注册 HTTP 端点。传输层必须独立认证 owner；从消息体、Host、Origin 或服务存在性推断 owner 权限均不安全。现有 Connection 浏览器信任检查明确不认证调用者。
+`receive(owner, body)` 是受信任的同进程入口。现有 Connection `/api/maintenance.receive` 桥根据显式配置的 `notificationProducers` SHA256 哈希认证 bearer，并要求其 origin 列在 `maintenanceOwners` 中。这项仅维护用途的 rc2 回移从配置授权派生 owner，而非消息体、浏览器 cookie、Host、Origin 或服务存在性检查。它不自动配置授权，也不添加第二个服务器。
 
 ## 已知限制与暂缓事项
 
-- **未提供维护传输和启动顺序保证**：可选接收器不认证调用者，也不能隔离已经加载的 Host。其构造时暂停不能阻止其他插件在构造前启动工作。组合必须在生产者挂载前建立准入关闭；隔离 Loader 测试只在重放完成后驱动工作。
+- **仅支持冷安装**：可选接收器及注册表屏障不能隔离已经加载的 Host。在重放前尝试启动的生产者会被拒绝，而不是排队。Release 仅在全新启动后生效。公开测试 bearer 的 HTTP Loader 测试证明的是重建源码产物，不是原始运行时的首次截止或部署授权。
 
 - **分类是一元的**：安全性取决于比较同级调用或资源的调用必须保持独占（参见[设计原理](../../../.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.md)）。
 - **配置 label 默认对应新会话**：省略 `sessionId` 时，每次启动都会创建新的 `${id}-session-<uuid>`；如需确切的恢复或创建行为，必须显式提供稳定的 `sessionId`，而 `resumeSessionId` 要求已有持久化历史。

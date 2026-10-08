@@ -10,6 +10,7 @@
     "src/api-request-trust.ts",
     "src/http-bridge.ts",
     "src/index.ts",
+    "src/maintenance-admission.ts",
     "src/invariant.ts",
     "src/loopback-hostname.ts",
     "src/rpc-host.ts",
@@ -17,6 +18,7 @@
     "src/websocket-downlink.ts"
   ],
   "references": [
+    { "path": "../../core/agent-loop" },
     {
       "path": "../../attachment/attachment"
     },

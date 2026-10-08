@@ -139,6 +139,8 @@ export class FakeApiClient implements IApiClient {
   // without built lib/, so IApiClient's indexed-access types collapse to any
   // and inferred parameters would trip no-unsafe-argument.
   readonly sessions: IApiClient['sessions'] = {
+    // Browser fixture only; this is not maintenance-owner authentication.
+    presence: (payload: unknown) => this.record('session.presence', payload, Promise.resolve(ok({ accepted: true as const }))),
     list: (payload: unknown) => this.record('session.list', payload, this.onList(payload)),
     search: (payload: unknown, signal?: AbortSignal) => {
       this.lastSearchSignal = signal
