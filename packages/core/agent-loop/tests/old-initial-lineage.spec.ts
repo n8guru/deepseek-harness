@@ -29,11 +29,11 @@ async function harness() {
 it('canonical old service/provider await -> CLOSED -> canonical driver publishes exactly original input, zero forced turns', async () => {
   const { ctx, parent, adapter } = await harness()
   const entered = Promise.withResolvers<ResolvedSubagentStartRequest>()
-  const release = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<undefined>()
   const abort = new AbortController()
   let run: Awaited<ReturnType<typeof startInProcessRun>> | undefined
   try {
-    ctx.subagents.registerProvider({ name: 'delayed', capabilities: {}, async start(request) {
+    ctx.subagents.registerProvider({ name: 'delayed', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }, async start(request) {
       entered.resolve(request); await release.promise
       return startInProcessRun(request, {})
     } })
@@ -61,7 +61,7 @@ it('canonical old service/provider await -> CLOSED -> canonical driver publishes
     // Copied or modified resolved request cannot reuse original child authority.
     await expect(startInProcessRun({ ...resolved }, {})).rejects.toThrow('initial request')
     await expect(startInProcessRun({ ...resolved, prompt: [{ type: 'text', text: 'replacement' }] }, {})).rejects.toThrow('initial request')
-    release.resolve()
+    release.resolve(undefined)
     run = await pending
     const child = run.localAgent!
     expect(child.id).toBe(capability.sessionId)
@@ -78,7 +78,7 @@ it('canonical old service/provider await -> CLOSED -> canonical driver publishes
     await expect(ctx.subagents.start('delayed', { parent: child, signal: abort.signal, prompt: [] })).rejects.toThrow('CLOSED')
     let finished = false
     void run.result.then(() => { finished = true })
-    await Promise.resolve()
+    await Promise.resolve(undefined)
     expect(finished).toBe(false) // Agent idle alone must not pretend the held input ran.
     abort.abort()
     await run.result
@@ -88,14 +88,14 @@ it('canonical old service/provider await -> CLOSED -> canonical driver publishes
     expect(ctx.hostAdmission.status().pending).not.toContain('delegate')
     expect(ctx.hostAdmission.status().pending).not.toContain('publication')
     expect(adapter.calls).toBe(0)
-  } finally { release.resolve(); abort.abort(); await run?.dispose(); await ctx.fiber.dispose() }
+  } finally { release.resolve(undefined); abort.abort(); await run?.dispose(); await ctx.fiber.dispose() }
 })
 
 it('OPEN canonical one-shot accepts only one initial input and result is not owned disposal/join', async () => {
   const { ctx, parent, adapter } = await harness()
   let run: Awaited<ReturnType<typeof startInProcessRun>> | undefined
   try {
-    ctx.subagents.registerProvider({ name: 'immediate', capabilities: {},
+    ctx.subagents.registerProvider({ name: 'immediate', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
       start: request => startInProcessRun(request, {}) })
     run = await ctx.subagents.start('immediate', { parent, signal: new AbortController().signal,
       prompt: [{ type: 'text', text: 'one original' }] })
@@ -114,17 +114,17 @@ it('OPEN canonical one-shot accepts only one initial input and result is not own
 it('post-close starts and aborted prepublication initial requests stay fail closed with honest unresolved ownership', async () => {
   const { ctx, parent } = await harness()
   const entered = Promise.withResolvers<ResolvedSubagentStartRequest>()
-  const release = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<undefined>()
   const abort = new AbortController()
   try {
-    ctx.subagents.registerProvider({ name: 'aborted', capabilities: {}, async start(request) {
+    ctx.subagents.registerProvider({ name: 'aborted', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }, async start(request) {
       entered.resolve(request); await release.promise
       return startInProcessRun(request, {})
     } })
     const pending = ctx.subagents.start('aborted', { parent, signal: abort.signal, prompt: [] })
     const outcome = pending.catch(error => error)
     const resolved = await entered.promise
-    ctx.hostAdmission.close(); abort.abort(); release.resolve()
+    ctx.hostAdmission.close(); abort.abort(); release.resolve(undefined)
     expect(await outcome).toBeInstanceOf(Error)
     expect(ctx.agents.get(resolved.initialAdmission!.sessionId)).toBeUndefined()
     // The canonical driver refused before claiming: an authenticated unpublished
@@ -133,5 +133,5 @@ it('post-close starts and aborted prepublication initial requests stay fail clos
     expect(ctx.hostAdmission.status().pending).not.toContain('delegate')
     expect(ctx.hostAdmission.status().pending).not.toContain('publication')
     await expect(ctx.subagents.start('aborted', { parent, signal: new AbortController().signal, prompt: [] })).rejects.toThrow('CLOSED')
-  } finally { release.resolve(); await ctx.fiber.dispose() }
+  } finally { release.resolve(undefined); await ctx.fiber.dispose() }
 })

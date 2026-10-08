@@ -16,7 +16,13 @@ class Keyless extends LlmAdapter {
   async *stream() { this.turns++; yield { type: 'finish', reason: { kind: 'stop' } }; }
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const until = async (check) => {
+  const deadline = Date.now() + 5000;
+  while (!check()) {
+    assert.ok(Date.now() < deadline, 'bounded fixture condition did not settle');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+};
 const temp = await mkdtemp(join(tmpdir(), 'step73-rebuilt-old-finish-'));
 let ctx;
 const gates = [];
@@ -42,7 +48,7 @@ try {
   // (1) Canonical driver refusal before claim: authenticated unpublished receipt.
   const abort = new AbortController();
   let captured;
-  ctx.subagents.registerProvider({ name: 'canon', capabilities: {}, async start(request) {
+  ctx.subagents.registerProvider({ name: 'canon', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }, async start(request) {
     captured = request; await tick(); return startInProcessRun(request, {});
   } });
   const refused = ctx.subagents.start('canon', { parent, signal: abort.signal, prompt: [] });
@@ -56,25 +62,27 @@ try {
 
   // (2) Workflow: reservation survives bounded disposal, retires only on actual join.
   const startGate = gate(); const disposeGate = gate();
-  ctx.subagents.registerProvider({ name: 'slow', capabilities: {}, async start(request) {
+  const startEntered = gate(); const disposeEntered = gate();
+  ctx.subagents.registerProvider({ name: 'slow', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }, async start(request) {
+    startEntered.resolve();
     await startGate.promise;
     return { id: request.initialAdmission.sessionId, localAgent: undefined, result: new Promise(() => {}),
-      dispose: async () => { await disposeGate.promise; } };
+      dispose: async () => { disposeEntered.resolve(); await disposeGate.promise; } };
   } });
   const run = ctx.workflowEngine.start({ parent, meta: { name: 'j', description: 'j' }, script: "return await agent('p')" });
-  await sleep(300);
+  await startEntered.promise;
   await run.dispose();
   assert.ok(pending().includes('workflow'));
-  startGate.resolve(); await sleep(50);
+  startGate.resolve(); await disposeEntered.promise;
   assert.ok(pending().includes('workflow'));
-  disposeGate.resolve(); await sleep(50);
+  disposeGate.resolve(); await until(() => !pending().includes('workflow'));
   assert.ok(!pending().includes('workflow'));
   // The late provider run was disposed by the run's admission refusal; actual run disposal retires delegate.
   assert.deepEqual(pending(), []);
 
   // (3) Continuable preclose exact acceptance publishes after CLOSED, zero forced turns.
   const prepGate = gate(); const entered = gate();
-  ctx.subagents.registerProvider({ name: 'cont', capabilities: {}, start() { throw new Error('unused'); },
+  ctx.subagents.registerProvider({ name: 'cont', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }, start() { throw new Error('unused'); },
     async prepareContinuable() { entered.resolve(); await prepGate.promise; return {}; } });
   const prompt = [{ type: 'text', text: 'loader continuable original' }];
   const started = ctx.subagents.startContinuable({ provider: 'cont', label: 'c', request: { parent, prompt }, signal: new AbortController().signal });

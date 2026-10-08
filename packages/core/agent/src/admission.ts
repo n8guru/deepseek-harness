@@ -17,9 +17,20 @@ export interface HostReservation {
   release(): void
   child?(id: SessionId, message: UserMessage, parent: Agent, signal: AbortSignal, request: object): HostInitialAdmission
 }
-type Initial = { reservation: object; publication: object; parent: Agent; signal: AbortSignal;
-  message: UserMessage; request: object; claimed: boolean; accepted: boolean; revoked: boolean; driven: boolean
-  joined: PromiseWithResolvers<void>; child?: Agent }
+type Initial = {
+  reservation: object
+  publication: object
+  parent: Agent
+  signal: AbortSignal
+  message: UserMessage
+  request: object
+  claimed: boolean
+  accepted: boolean
+  revoked: boolean
+  driven: boolean
+  joined: PromiseWithResolvers<undefined>
+  child?: Agent
+}
 export class HostCutoff {
   private accepting: boolean
   private readonly reservations = new Map<object, HostWorkKind>()
@@ -28,7 +39,18 @@ export class HostCutoff {
   private readonly receipts = new WeakSet<HostPublicationFailureReceipt>()
   constructor(closed = false, private readonly backend: () => { state: 'JOINED' | 'UNKNOWN' } | undefined = () => undefined,
     private readonly live: (id: SessionId) => Agent | undefined = () => undefined) { this.accepting = !closed }
-  get open(): boolean { return this.accepting }
+  private holds = 0
+  get open(): boolean { return this.accepting && this.holds === 0 }
+  /**
+   * Hold admission during durable replay. A failed replay keeps its hold;
+   * releasing a hold never reopens an explicit close.
+   * @returns an idempotent release for this hold.
+   */
+  hold(): () => void {
+    this.holds += 1
+    let released = false
+    return () => { if (!released) { released = true; this.holds -= 1 } }
+  }
   close(): void { this.accepting = false }
   assert(): void { if (!this.open) throw new Error('native Host admission CLOSED') }
   reserve(kind: HostWorkKind, parent?: Agent): HostReservation {
@@ -47,7 +69,7 @@ export class HostCutoff {
         const publication = Object.freeze({})
         this.reservations.set(publication, 'publication')
         initial = { reservation: identity, publication, parent, signal, request, message: structuredClone(message),
-          claimed: false, accepted: false, revoked: false, driven: false, joined: Promise.withResolvers<void>() }
+          claimed: false, accepted: false, revoked: false, driven: false, joined: Promise.withResolvers<undefined>() }
         this.initials.set(capability, initial)
         return capability
       },
@@ -71,7 +93,7 @@ export class HostCutoff {
     grant.claimed = true
     return { message: structuredClone(grant.message),
       publish: (child: Agent) => { if (grant.child || child.id !== id) throw new Error('native initial publication refused'); grant.child = child },
-      join: () => { this.reservations.delete(grant.publication); grant.joined.resolve() },
+      join: () => { this.reservations.delete(grant.publication); grant.joined.resolve(undefined) },
     }
   }
   /**
@@ -129,7 +151,7 @@ export class HostCutoff {
   }
   status() {
     const pending = [...this.reservations.values()]
-    const unknown = (['publication', 'job', 'delegate', 'workflow'] as const).filter(kind => {
+    const unknown = (['publication', 'job', 'delegate', 'workflow'] as const).filter((kind) => {
       const owners = this.coverage.get(kind)
       if (!owners?.size) return true
       try { return [...owners].some(joined => !joined()) } catch { return true }

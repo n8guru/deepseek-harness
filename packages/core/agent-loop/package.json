@@ -18,6 +18,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./maintenance": {
+      "types": "./lib/types/maintenance.d.ts",
+      "default": "./lib/maintenance.js"
+    },
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
@@ -26,6 +30,7 @@
   },
   "files": [
     "lib/index.js",
+    "lib/maintenance.js",
     "lib/invariant.js",
     "lib/types/**/*.d.ts"
   ],

@@ -126,8 +126,15 @@ One fixed error result per skipped call remains in history until compaction shad
 
 Append-only; each synthetic result follows the reusable request prefix and does not invalidate existing KV-cache entries.
 
+## Opt-in old-source maintenance receiver
+
+The `@deepseek-ai/dsh-agent-loop/maintenance` Loader entry provides `ctx.hostMaintenance` with required `sessionPersistence` and `hostAdmission` injections. It serializes owner/run-bound close, status, and release commands into the dedicated `old-host-maintenance-control` session. Construction holds admission while replay runs; failed replay keeps that hold. Close takes effect before its durable append, and an append failure poisons the receiver. Release is durable but never reopens the current Host; retired owner/run identities cannot close again. Teardown rejects queued work, waits for in-flight writes, and leaves admission held.
+
+`receive(owner, body)` is a trusted same-process entry, not an authentication mechanism. No HTTP endpoint is registered. A transport must authenticate the owner independently; accepting an owner from the body, Host, Origin, or service-presence checks is unsafe. The shipped Connection browser-trust fence explicitly does not authenticate callers.
+
 ## Known Limitations and Deferred Work
 
+- **Maintenance transport and boot ordering are not supplied** — the opt-in receiver does not authenticate a caller or fence an already loaded Host. Its constructor hold cannot prevent a different plugin from starting work before construction. A composition must establish admission closure before producers mount; isolated Loader tests drive only after replay completes.
 - **Classification is unary** — calls whose safety depends on comparing siblings or resources must remain exclusive ([rationale](../../../.agents/notes/implemented/feature/2026-07-10-parallel-tool-call-execution.md)).
 - **Config labels are fresh by default** — omitting `sessionId` creates a fresh `${id}-session-<uuid>` on every startup; exact resume-or-create behavior requires an explicit stable `sessionId`, while `resumeSessionId` requires existing persisted history.
 - **Config agents have no per-agent persona field or setup hook** — they use the deployment persona; scoped persona/tool composition is available only through the programmatic `ctx.agents.create()` / `resume()` factory options.

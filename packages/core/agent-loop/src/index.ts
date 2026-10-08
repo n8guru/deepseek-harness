@@ -310,6 +310,9 @@ function isSuppressedDisposal(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'SuppressedError'
 }
 
+export { default as OldHostMaintenance } from './maintenance.ts'
+export type { OldMaintenanceCommand, OldMaintenanceRun, OldMaintenanceState } from './maintenance.ts'
+
 /** Concrete agent factory and driver service. */
 export class AgentLoop extends Service implements AgentFactory {
   static inject = ['agents', 'hostAdmission', 'sessions', 'llm', 'tools', 'systemPrompt']

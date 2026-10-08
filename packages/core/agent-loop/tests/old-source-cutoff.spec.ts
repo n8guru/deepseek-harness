@@ -49,36 +49,36 @@ describe('exact old-source cutoff', () => {
   })
   it('preserves exact already admitted factory across setup await/close', async () => {
     const ctx = await harness()
-    const entered = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
     try {
       const pending = ctx.agents.create({ sessionId: SessionId('reserved'),
-        setup: async () => { entered.resolve(); await release.promise } })
+        setup: async () => { entered.resolve(undefined); await release.promise } })
       await entered.promise
       ctx.hostAdmission.close()
       expect(ctx.hostAdmission.status().pending).toContain('publication')
-      release.resolve()
+      release.resolve(undefined)
       const handle = await pending
       expect(ctx.agents.get(handle.agent.id)).toBe(handle.agent)
       expect(ctx.hostAdmission.status().pending).not.toContain('publication')
       await handle.dispose()
-    } finally { release.resolve(); await ctx.fiber.dispose() }
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
   })
   it('cancellation does not retire raw delayed setup publication evidence', async () => {
     const ctx = await harness()
-    const entered = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
     const controller = new AbortController()
     try {
       const pending = ctx.agents.create({ sessionId: SessionId('cancelled'), signal: controller.signal,
-        setup: async () => { entered.resolve(); await release.promise } })
+        setup: async () => { entered.resolve(undefined); await release.promise } })
       await entered.promise
       ctx.hostAdmission.close()
       controller.abort()
       await expect(pending).rejects.toThrow()
       expect(ctx.hostAdmission.status().unknown).toContain('publication')
-      release.resolve()
-    } finally { release.resolve(); await ctx.fiber.dispose() }
+      release.resolve(undefined)
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
   })
   it('job cancellation retains producer reservation until genuine done', async () => {
     const ctx = await harness()
@@ -119,11 +119,11 @@ describe('exact old-source cutoff', () => {
   })
   it('captures actual pending prepare/stream consumers through route withdrawal', async () => {
     const ctx = await harness()
-    const entered = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
     class Delayed extends Keyless {
       override async resolveModel(provider: string, id: string) {
-        entered.resolve()
+        entered.resolve(undefined)
         await release.promise
         return { provider, id, name: id }
       }
@@ -137,7 +137,7 @@ describe('exact old-source cutoff', () => {
       remove()
       expect(ctx.llm.backendCoverage().state).toBe('UNKNOWN')
       expect(ctx.hostAdmission.status().backend).toBe('UNKNOWN')
-      release.resolve()
+      release.resolve(undefined)
       const prepared = await pending
       expect(ctx.llm.backendCoverage().state).toBe('JOINED')
       const iterator = prepared.stream({ ...prepared.config, messages: [message()] })[Symbol.asyncIterator]()
@@ -145,19 +145,19 @@ describe('exact old-source cutoff', () => {
       expect(ctx.llm.backendCoverage().state).toBe('UNKNOWN')
       await iterator.next()
       expect(ctx.llm.backendCoverage().state).toBe('JOINED')
-    } finally { release.resolve(); await ctx.fiber.dispose() }
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
   })
-  it('demonstrates the exact missing delayed provider-internal child authority', async () => {
+  it('refuses delayed provider publication that omits its exact initial capability', async () => {
     const ctx = await harness()
-    const entered = Promise.withResolvers<void>()
-    const release = Promise.withResolvers<void>()
+    const entered = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
     try {
       await ctx.plugin(SubagentRuntime)
       const parent = ctx.agentLoop.create(SessionId('parent'))
       ctx.subagents.registerProvider({
-        name: 'delayed', capabilities: {},
+        name: 'delayed', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
         async start(request) {
-          entered.resolve()
+          entered.resolve(undefined)
           await release.promise
           const handle = await request.parent.ctx.agents.create({ sessionId: SessionId('delayed-child') })
           return { id: handle.agent.id, localAgent: handle.agent,
@@ -168,20 +168,20 @@ describe('exact old-source cutoff', () => {
       const pending = ctx.subagents.start('delayed', { parent, prompt: [], signal: new AbortController().signal })
       await entered.promise
       ctx.hostAdmission.close()
-      release.resolve()
+      release.resolve(undefined)
       await expect(pending).rejects.toThrow('CLOSED')
       expect(ctx.hostAdmission.status().pending).toContain('delegate')
       expect(ctx.agents.get(SessionId('delayed-child'))).toBeUndefined()
-      // This is negative feasibility evidence of a source contract still needing
-      // the current native exact initialAdmission backport, NOT acceptance.
-    } finally { release.resolve(); await ctx.fiber.dispose() }
+      // Ignoring the exact grant is not admission or failed-publication evidence;
+      // arbitrary provider work remains UNKNOWN.
+    } finally { release.resolve(undefined); await ctx.fiber.dispose() }
   })
   it('refuses delegate/workflow startup without touching providers or workers', async () => {
     const ctx = await harness()
     try {
       await ctx.plugin(SubagentRuntime)
       let starts = 0
-      ctx.subagents.registerProvider({ name: 'unused', capabilities: {}, async start() {
+      ctx.subagents.registerProvider({ name: 'unused', inheritsParentContext: false, capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false }, async start() {
         starts++
         throw new Error('must not start')
       } })
