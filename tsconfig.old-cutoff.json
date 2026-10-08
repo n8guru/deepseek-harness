@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.host.json",
+  "compilerOptions": { "composite": false, "incremental": false, "noEmit": true },
+  "include": [
+    "packages/core/agent/src/**/*.ts",
+    "packages/core/agent-loop/src/**/*.ts",
+    "packages/llm/llm/src/**/*.ts",
+    "packages/jobs/jobs-local/src/**/*.ts",
+    "packages/subagent/subagent/src/**/*.ts",
+    "packages/workflow/workflow-worker-thread/src/**/*.ts",
+    "packages/core/agent-loop/tests/old-source-cutoff.spec.ts"
+  ],
+  "references": []
+}

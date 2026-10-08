@@ -1377,9 +1377,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-skill':
         specifier: workspace:^
         version: link:../../client/ui-skill
-      '@deepseek-ai/dsh-client-ui-stage-dock':
-        specifier: workspace:^
-        version: link:../../client/ui-stage-dock
       '@deepseek-ai/dsh-client-ui-subagent':
         specifier: workspace:^
         version: link:../../client/ui-subagent

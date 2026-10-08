@@ -89,6 +89,7 @@ class JobLayer implements ScopeLayer {
  * semantics this implementation honors.
  */
 export class LocalJobRegistry extends JobRegistry {
+  static inject = ['agents', 'hostAdmission']
   static Config: z<Config> = z.object({
     maxConcurrentJobsPerOwner: z.number()
       .step(1)
@@ -125,6 +126,7 @@ export class LocalJobRegistry extends JobRegistry {
     // Schemastery validates and fills the default before constructing the service.
     this.maxConcurrentJobsPerOwner = (config as Required<Config>).maxConcurrentJobsPerOwner
     this.selfCtx = ctx
+    ctx.hostAdmission.cover('job', () => true)
     ctx.effect(() => () => this.disposeAll(), 'jobs teardown')
   }
 
@@ -147,7 +149,10 @@ export class LocalJobRegistry extends JobRegistry {
       )
     }
 
-    const hooks = spec.run()
+    const reservation = this.selfCtx.hostAdmission.reserve('job')
+    let hooks: ReturnType<JobStart['run']>
+    try { hooks = spec.run() } catch (error) { reservation.release(); throw error }
+    void hooks.done.then(() => reservation.release(), () => {}) // rejection is not producer join
     const count = (this.counters.get(spec.kind) ?? 0) + 1
     this.counters.set(spec.kind, count)
     const id = JobId(`${spec.kind}-${count}`)

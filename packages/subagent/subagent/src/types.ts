@@ -155,6 +155,7 @@ export interface SubagentStartRequest {
 export interface ResolvedSubagentStartRequest extends SubagentStartRequest {
   /** Detached descriptor a session-backed provider persists in the child log. */
   readonly descriptor: SubagentDescriptorData
+  readonly initialAdmission?: import('@deepseek-ai/dsh-agent').HostInitialAdmission
 }
 
 /**

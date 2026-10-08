@@ -80,6 +80,8 @@ export type AgentSetup = (
 export interface CreateAgentOptions {
   /** The live agent/session identity. */
   readonly sessionId: SessionId
+  readonly initialAdmission?: import('./admission.ts').HostInitialAdmission
+  readonly parentAgent?: Agent
   /**
    * Session creation metadata: validated absolute `cwd`, `parentSession`
    * fork lineage, the `seedLength` seed boundary, the coarse `origin`
@@ -253,6 +255,10 @@ interface FactorySlot {
  * boundaries. Returned Promise boundaries drain during teardown, except a
  * nested lineage that starts an owning-fiber unload is excluded from its own drain.
  */
+export { HostCutoff } from './admission.ts'
+export type { HostInitialAdmission } from './admission.ts'
+import { HostCutoff } from './admission.ts'
+
 export class AgentRegistry extends Service {
   private store = new Map<SessionId, AgentEntry>()
   private factory: FactorySlot | undefined
@@ -263,8 +269,9 @@ export class AgentRegistry extends Service {
   private initiatorDrain: PromiseWithResolvers<void> | undefined
   private initiatorDisposal: Promise<void> | undefined
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config: { admissionClosed?: boolean } = {}) {
     super(ctx, 'agents')
+    ctx.provide('hostAdmission', new HostCutoff(config.admissionClosed === true, () => ctx.get('llm')?.backendCoverage(), id => this.get(id)))
     ctx.inject(['typert'], (typeCtx) => {
       typeCtx.typert.lookups.register('agent', {
         parameter: 'agent',

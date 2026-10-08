@@ -1,0 +1,487 @@
+diff --git a/packages/core/agent-loop/src/agent.ts b/packages/core/agent-loop/src/agent.ts
+index 525cab1940..eef9266d4f 100644
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -88,7 +88,10 @@ export class ReactLoopAgent implements Agent {
+       inserted: (message) => { this.dispatch.emit('agent/inbox/inserted', { message }) },
+       discarded: (message) => { this.dispatch.emit('agent/inbox/discarded', { message }) },
+       claimed: (message, turn) => { this.dispatch.emit('agent/inbox/claimed', { message, turn }) },
+-    }, () => loopCtx.hostAdmission.assert())
++    }, (messages, initial) => {
++      if (initial === undefined) loopCtx.hostAdmission.assert()
++      else loopCtx.hostAdmission.accept(initial, this, messages[0]!)
++    })
+     const lastTurn = session.events.findLast(event => event.type === 'turn/start')?.data.turn ?? 0
+     this.phase = { kind: 'idle', lastTurn }
+     this.scope = createScope(loopCtx, this)
+@@ -110,18 +113,18 @@ export class ReactLoopAgent implements Agent {
+     }
+   }
+ 
+-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void {
+-    this.ctx.hostAdmission.assert()
++  send(message: UserMessage, target: InboxTarget, wakeup: boolean, initial?: import('@deepseek-ai/dsh-agent').HostInitialAdmission): void {
++    if (initial === undefined) this.ctx.hostAdmission.assert()
+     // Waking input cannot join an aborted activity, so it starts the next turn.
+     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
+     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
+     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
+-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
+-    if (wakeup) this.wakeDriver(wakingAfterAbort)
++    this.inbox.splice(resolvedTarget, Infinity, 0, [message], initial)
++    if (wakeup && this.ctx.hostAdmission.open) this.wakeDriver(wakingAfterAbort)
+   }
+ 
+-  followup(input: UserMessage): void {
+-    this.send(input, 'next-turn', true)
++  followup(input: UserMessage, initial?: import('@deepseek-ai/dsh-agent').HostInitialAdmission): void {
++    this.send(input, 'next-turn', true, initial)
+   }
+ 
+   steer(input: UserMessage): void {
+diff --git a/packages/core/agent-loop/src/index.ts b/packages/core/agent-loop/src/index.ts
+index 0223fc6723..012cf535e8 100644
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -609,9 +609,25 @@ export class AgentLoop extends Service implements AgentFactory {
+    * @returns the published handle.
+    */
+   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
+-    const reservation = this.runtime.ctx.hostAdmission.reserve('publication')
+-    try { return await this.createAdmitted(ownerCtx, options) }
+-    finally { reservation.release() }
++    if (options.initialAdmission !== undefined && options.meta?.parentSession !== options.parentAgent?.id) throw new Error('native initial parent refused')
++    const initial = options.initialAdmission === undefined ? undefined
++      : this.runtime.ctx.hostAdmission.initial(options.initialAdmission, options.sessionId, options.parentAgent, options.signal)
++    const reservation = initial === undefined ? this.runtime.ctx.hostAdmission.reserve('publication') : undefined
++    let handle: AgentHandle | undefined
++    try {
++      handle = await this.createAdmitted(ownerCtx, options)
++      if (initial !== undefined) {
++        initial.publish(handle.agent)
++        handle.agent.followup(initial.message, options.initialAdmission)
++        const owned = handle
++        return { ...owned, dispose: async () => { await owned.dispose(); initial.join() } }
++      }
++      return handle
++    } catch (error) {
++      // Missing/failed actual cleanup keeps publication UNKNOWN.
++      if (handle !== undefined) { await handle.dispose(); initial?.join() }
++      throw error
++    } finally { reservation?.release() }
+   }
+ 
+   private async createAdmitted(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
+diff --git a/packages/core/agent-loop/tests/old-initial-lineage.spec.ts b/packages/core/agent-loop/tests/old-initial-lineage.spec.ts
+new file mode 100644
+index 0000000000..91414c983a
+--- /dev/null
++++ b/packages/core/agent-loop/tests/old-initial-lineage.spec.ts
+@@ -0,0 +1,134 @@
++import { it, expect } from 'vitest'
++import { Context } from '@deepseek-ai/cordis'
++import AgentRegistry from '@deepseek-ai/dsh-agent'
++import AgentLoop from '@deepseek-ai/dsh-agent-loop'
++import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
++import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
++import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
++import ToolRuntime from '@deepseek-ai/dsh-tools'
++import SubagentRuntime, { type ResolvedSubagentStartRequest } from '@deepseek-ai/dsh-subagent'
++import { startInProcessRun } from '../../../subagent/subagent-in-process-driver/src/index.ts'
++
++class Keyless extends LlmAdapter {
++  calls = 0
++  override async resolveModel(provider: string, id: string) { return { provider, id, name: id } }
++  async *stream() { this.calls++; yield { type: 'finish' as const, reason: { kind: 'stop' as const } } }
++}
++async function harness() {
++  const ctx = new Context()
++  await ctx.plugin(LlmRuntime); await ctx.plugin(SessionStore)
++  await ctx.plugin(SystemPrompt); await ctx.plugin(ToolRuntime)
++  await ctx.plugin(AgentRegistry); await ctx.plugin(AgentLoop, { agents: [] })
++  await ctx.plugin(SubagentRuntime)
++  const adapter = new Keyless()
++  ctx.llm.registerAdapter(['keyless'], adapter)
++  const parent = ctx.agentLoop.create(SessionId('original-parent'), { provider: 'keyless', model: 'fixture' })
++  return { ctx, parent, adapter }
++}
++
++it('canonical old service/provider await -> CLOSED -> canonical driver publishes exactly original input, zero forced turns', async () => {
++  const { ctx, parent, adapter } = await harness()
++  const entered = Promise.withResolvers<ResolvedSubagentStartRequest>()
++  const release = Promise.withResolvers<void>()
++  const abort = new AbortController()
++  let run: Awaited<ReturnType<typeof startInProcessRun>> | undefined
++  try {
++    ctx.subagents.registerProvider({ name: 'delayed', capabilities: {}, async start(request) {
++      entered.resolve(request); await release.promise
++      return startInProcessRun(request, {})
++    } })
++    const prompt = [{ type: 'text' as const, text: 'immutable original' }]
++    const pending = ctx.subagents.start('delayed', { parent, signal: abort.signal, prompt })
++    const resolved = await entered.promise
++    expect(Object.isFrozen(resolved)).toBe(true)
++    expect(Object.isFrozen(resolved.prompt[0])).toBe(true)
++    expect(Reflect.set(resolved.prompt[0]!, 'text', 'provider mutation')).toBe(false)
++    const capability = resolved.initialAdmission!
++    ctx.hostAdmission.close()
++    prompt[0]!.text = 'caller mutated after await'
++    // All failures occur before publication/consume; original capability remains usable.
++    const options = { sessionId: capability.sessionId, parentAgent: parent, signal: abort.signal,
++      initialAdmission: capability, meta: { parentSession: parent.id } }
++    for (const change of [
++      { initialAdmission: { ...capability } },
++      { sessionId: SessionId('wrong-child') },
++      { parentAgent: { ...parent } },
++      { signal: new AbortController().signal },
++      { meta: { parentSession: SessionId('wrong-parent') } },
++    ]) {
++      await expect(ctx.agents.create({ ...options, ...change } as never)).rejects.toThrow('initial')
++    }
++    // Copied or modified resolved request cannot reuse original child authority.
++    await expect(startInProcessRun({ ...resolved }, {})).rejects.toThrow('initial request')
++    await expect(startInProcessRun({ ...resolved, prompt: [{ type: 'text', text: 'replacement' }] }, {})).rejects.toThrow('initial request')
++    release.resolve()
++    run = await pending
++    const child = run.localAgent!
++    expect(child.id).toBe(capability.sessionId)
++    expect(child.inbox.nextTurn).toHaveLength(1)
++    expect(child.inbox.nextTurn[0]!.content).toEqual([{ type: 'text', text: 'immutable original' }])
++    expect(child.inbox.nextTurn[0]!.id).toBe(capability.messageId)
++    expect(adapter.calls).toBe(0)
++    expect(ctx.hostAdmission.open).toBe(false)
++    expect(ctx.hostAdmission.status().pending).toContain('publication')
++    expect(() => child.followup(child.inbox.nextTurn[0]!, capability)).toThrow('initial input')
++    expect(() => child.inbox.splice('next-turn', 0, 0, [{ ...child.inbox.nextTurn[0]!, content: [{ type: 'text', text: 'mutation' }] }], capability)).toThrow('initial input')
++    expect(() => child.followup(child.inbox.nextTurn[0]!)).toThrow('CLOSED')
++    await expect(ctx.agents.create(options)).rejects.toThrow('initial')
++    await expect(ctx.subagents.start('delayed', { parent: child, signal: abort.signal, prompt: [] })).rejects.toThrow('CLOSED')
++    let finished = false
++    void run.result.then(() => { finished = true })
++    await Promise.resolve()
++    expect(finished).toBe(false) // Agent idle alone must not pretend the held input ran.
++    abort.abort()
++    await run.result
++    expect(ctx.hostAdmission.status().pending).toContain('delegate')
++    expect(ctx.hostAdmission.status().pending).toContain('publication')
++    await run.dispose()
++    expect(ctx.hostAdmission.status().pending).not.toContain('delegate')
++    expect(ctx.hostAdmission.status().pending).not.toContain('publication')
++    expect(adapter.calls).toBe(0)
++  } finally { release.resolve(); abort.abort(); await run?.dispose(); await ctx.fiber.dispose() }
++})
++
++it('OPEN canonical one-shot accepts only one initial input and result is not owned disposal/join', async () => {
++  const { ctx, parent, adapter } = await harness()
++  let run: Awaited<ReturnType<typeof startInProcessRun>> | undefined
++  try {
++    ctx.subagents.registerProvider({ name: 'immediate', capabilities: {},
++      start: request => startInProcessRun(request, {}) })
++    run = await ctx.subagents.start('immediate', { parent, signal: new AbortController().signal,
++      prompt: [{ type: 'text', text: 'one original' }] })
++    await run.result
++    expect(adapter.calls).toBe(1)
++    expect(run.localAgent!.session.events.filter(event => event.type === 'agent/inbox/spliced'
++      && event.data.inserted.length > 0)).toHaveLength(1)
++    expect(ctx.hostAdmission.status().pending).toContain('publication')
++    expect(ctx.hostAdmission.status().pending).toContain('delegate')
++    await run.dispose()
++    expect(ctx.hostAdmission.status().pending).not.toContain('publication')
++    expect(ctx.hostAdmission.status().pending).not.toContain('delegate')
++  } finally { await run?.dispose(); await ctx.fiber.dispose() }
++})
++
++it('post-close starts and aborted prepublication initial requests stay fail closed with honest unresolved ownership', async () => {
++  const { ctx, parent } = await harness()
++  const entered = Promise.withResolvers<ResolvedSubagentStartRequest>()
++  const release = Promise.withResolvers<void>()
++  const abort = new AbortController()
++  try {
++    ctx.subagents.registerProvider({ name: 'aborted', capabilities: {}, async start(request) {
++      entered.resolve(request); await release.promise
++      return startInProcessRun(request, {})
++    } })
++    const pending = ctx.subagents.start('aborted', { parent, signal: abort.signal, prompt: [] })
++    const outcome = pending.catch(error => error)
++    const resolved = await entered.promise
++    ctx.hostAdmission.close(); abort.abort(); release.resolve()
++    expect(await outcome).toBeInstanceOf(Error)
++    expect(ctx.agents.get(resolved.initialAdmission!.sessionId)).toBeUndefined()
++    expect(ctx.hostAdmission.status().pending).toContain('delegate')
++    expect(ctx.hostAdmission.status().pending).toContain('publication')
++    await expect(ctx.subagents.start('aborted', { parent, signal: new AbortController().signal, prompt: [] })).rejects.toThrow('CLOSED')
++  } finally { release.resolve(); await ctx.fiber.dispose() }
++})
+diff --git a/packages/core/agent/src/admission.ts b/packages/core/agent/src/admission.ts
+index bdc0c3108e..2d8bf2faff 100644
+--- a/packages/core/agent/src/admission.ts
++++ b/packages/core/agent/src/admission.ts
+@@ -1,20 +1,74 @@
+ /** Exact old-source cutoff. Process-local; not a fence on an already loaded old Host. */
+ import type {} from '@deepseek-ai/cordis'
++import type { Agent } from './runtime-types.ts'
++import type { SessionId, UserMessage } from '@deepseek-ai/dsh-session'
+ export type HostWorkKind = 'publication' | 'job' | 'delegate' | 'workflow'
+-export interface HostReservation { release(): void }
++export interface HostInitialAdmission { readonly sessionId: SessionId; readonly messageId: UserMessage['id'] }
++export interface HostReservation {
++  release(): void
++  child?(id: SessionId, message: UserMessage, parent: Agent, signal: AbortSignal, request: object): HostInitialAdmission
++}
++type Initial = { reservation: object; publication: object; parent: Agent; signal: AbortSignal;
++  message: UserMessage; request: object; claimed: boolean; accepted: boolean; child?: Agent }
+ export class HostCutoff {
+   private accepting: boolean
+   private readonly reservations = new Map<object, HostWorkKind>()
+   private readonly coverage = new Map<HostWorkKind, Set<() => boolean>>()
+-  constructor(closed = false, private readonly backend: () => { state: 'JOINED' | 'UNKNOWN' } | undefined = () => undefined) { this.accepting = !closed }
++  private readonly initials = new WeakMap<HostInitialAdmission, Initial>()
++  constructor(closed = false, private readonly backend: () => { state: 'JOINED' | 'UNKNOWN' } | undefined = () => undefined,
++    private readonly live: (id: SessionId) => Agent | undefined = () => undefined) { this.accepting = !closed }
+   get open(): boolean { return this.accepting }
+   close(): void { this.accepting = false }
+   assert(): void { if (!this.open) throw new Error('native Host admission CLOSED') }
+-  reserve(kind: HostWorkKind): HostReservation {
++  reserve(kind: HostWorkKind, parent?: Agent): HostReservation {
+     this.assert()
+     const identity = Object.freeze({})
+     this.reservations.set(identity, kind)
+-    return Object.freeze({ release: () => { this.reservations.delete(identity) } })
++    let initial: Initial | undefined
++    return Object.freeze({
++      release: () => { this.reservations.delete(identity); if (initial && !initial.claimed) this.reservations.delete(initial.publication) },
++      child: (id: SessionId, message: UserMessage, exactParent: Agent, signal: AbortSignal, request: object) => {
++        this.assert()
++        if (kind !== 'delegate' || parent !== exactParent || this.live(parent.id) !== parent
++          || !this.reservations.has(identity) || initial !== undefined) throw new Error('native initial lineage refused')
++        signal.throwIfAborted()
++        const capability = Object.freeze({ sessionId: id, messageId: message.id })
++        const publication = Object.freeze({})
++        this.reservations.set(publication, 'publication')
++        initial = { reservation: identity, publication, parent, signal, request, message: structuredClone(message), claimed: false, accepted: false }
++        this.initials.set(capability, initial)
++        return capability
++      },
++    })
++  }
++  request(capability: HostInitialAdmission, request: object): void {
++    const grant = this.initials.get(capability)
++    if (!grant || grant.claimed || grant.request !== request) throw new Error('native initial request refused')
++    grant.signal.throwIfAborted()
++  }
++  /** Exact pre-await request identity; never ambient permission for new work. */
++  initial(capability: HostInitialAdmission, id: SessionId, parent: Agent | undefined, signal: AbortSignal | undefined) {
++    const grant = this.initials.get(capability)
++    if (!grant || grant.claimed || capability.sessionId !== id || grant.parent !== parent
++      || grant.signal !== signal || this.live(grant.parent.id) !== grant.parent
++      || !this.reservations.has(grant.reservation)) throw new Error('native initial admission refused')
++    grant.signal.throwIfAborted()
++    grant.claimed = true
++    return { message: structuredClone(grant.message),
++      publish: (child: Agent) => { if (grant.child || child.id !== id) throw new Error('native initial publication refused'); grant.child = child },
++      join: () => { this.reservations.delete(grant.publication) },
++    }
++  }
++  /** Inbox consumes once, at the durable insertion boundary, including while OPEN. */
++  accept(capability: HostInitialAdmission, child: Agent, message: UserMessage): void {
++    const grant = this.initials.get(capability)
++    if (!grant || !grant.claimed || grant.accepted || grant.child !== child || capability.sessionId !== child.id
++      || this.live(child.id) !== child || this.live(grant.parent.id) !== grant.parent
++      || !this.reservations.has(grant.reservation) || JSON.stringify(message) !== JSON.stringify(grant.message)) {
++      throw new Error('native initial input refused')
++    }
++    grant.signal.throwIfAborted()
++    grant.accepted = true
+   }
+   /** Constructor-only instrumentation, retained after provider deregistration. */
+   cover(kind: HostWorkKind, joined: () => boolean): void {
+diff --git a/packages/core/agent/src/inbox.ts b/packages/core/agent/src/inbox.ts
+index d1bc5bf7c1..a83bd300ab 100644
+--- a/packages/core/agent/src/inbox.ts
++++ b/packages/core/agent/src/inbox.ts
+@@ -28,7 +28,7 @@ export class Inbox {
+   constructor(
+     private readonly session: Session,
+     private readonly notifications: InboxNotifications,
+-    private readonly beforeInsert: (() => void) | undefined = undefined,
++    private readonly beforeInsert: ((messages: UserMessage[], initial?: import('./admission.ts').HostInitialAdmission) => void) | undefined = undefined,
+   ) {
+     for (const event of session.events.slice(session.header.seedLength ?? 0)) {
+       if (event.type !== 'agent/inbox/spliced') continue
+@@ -142,8 +142,10 @@ export class Inbox {
+     start: number,
+     deleteCount: number,
+     inserted: UserMessage[],
++    initial?: import('./admission.ts').HostInitialAdmission,
+   ): UserMessage[] {
+-    if (inserted.length > 0) this.beforeInsert?.()
++    if (initial !== undefined && (target !== 'next-turn' || inserted.length !== 1 || deleteCount !== 0)) throw new Error('native initial target refused')
++    if (inserted.length > 0) this.beforeInsert?.(inserted, initial)
+     return this.mutate(target, start, deleteCount, inserted, true)
+   }
+ 
+diff --git a/packages/core/agent/src/index.ts b/packages/core/agent/src/index.ts
+index 076c372c98..42f5af747d 100644
+--- a/packages/core/agent/src/index.ts
++++ b/packages/core/agent/src/index.ts
+@@ -80,6 +80,8 @@ export type AgentSetup = (
+ export interface CreateAgentOptions {
+   /** The live agent/session identity. */
+   readonly sessionId: SessionId
++  readonly initialAdmission?: import('./admission.ts').HostInitialAdmission
++  readonly parentAgent?: Agent
+   /**
+    * Session creation metadata: validated absolute `cwd`, `parentSession`
+    * fork lineage, the `seedLength` seed boundary, the coarse `origin`
+@@ -254,6 +256,7 @@ interface FactorySlot {
+  * nested lineage that starts an owning-fiber unload is excluded from its own drain.
+  */
+ export { HostCutoff } from './admission.ts'
++export type { HostInitialAdmission } from './admission.ts'
+ import { HostCutoff } from './admission.ts'
+ 
+ export class AgentRegistry extends Service {
+@@ -268,7 +271,7 @@ export class AgentRegistry extends Service {
+ 
+   constructor(ctx: Context, config: { admissionClosed?: boolean } = {}) {
+     super(ctx, 'agents')
+-    ctx.provide('hostAdmission', new HostCutoff(config.admissionClosed === true, () => ctx.get('llm')?.backendCoverage()))
++    ctx.provide('hostAdmission', new HostCutoff(config.admissionClosed === true, () => ctx.get('llm')?.backendCoverage(), id => this.get(id)))
+     ctx.inject(['typert'], (typeCtx) => {
+       typeCtx.typert.lookups.register('agent', {
+         parameter: 'agent',
+diff --git a/packages/core/agent/src/runtime-types.ts b/packages/core/agent/src/runtime-types.ts
+index 7d713f8c77..7af49c29ce 100644
+--- a/packages/core/agent/src/runtime-types.ts
++++ b/packages/core/agent/src/runtime-types.ts
+@@ -121,7 +121,7 @@ export interface Agent {
+    * sole ordinary message of its own turn.
+    * @param message - identified prompt content and the source that supplied it.
+    */
+-  followup(message: UserMessage): void
++  followup(message: UserMessage, initial?: import('./admission.ts').HostInitialAdmission): void
+ 
+   /**
+    * Submit steering for the nearest step. An idle driver starts a turn;
+diff --git a/packages/subagent/subagent-in-process-driver/src/index.ts b/packages/subagent/subagent-in-process-driver/src/index.ts
+index fd1ebff2be..38b0190405 100644
+--- a/packages/subagent/subagent-in-process-driver/src/index.ts
++++ b/packages/subagent/subagent-in-process-driver/src/index.ts
+@@ -108,7 +108,8 @@ export async function startInProcessRun(
+   const parent = request.parent
+   const childDepth = resolveChildDepth(parent, request.maxDepth)
+ 
+-  const childId = SessionId(randomUUID())
++  const childId = request.initialAdmission?.sessionId ?? SessionId(randomUUID())
++  if (request.initialAdmission !== undefined) parent.ctx.hostAdmission.request(request.initialAdmission, request)
+   const seed = options.seed
+   const activationBoundary = seed?.length ?? 0
+ 
+@@ -131,6 +132,8 @@ export async function startInProcessRun(
+ 
+   const handle = await parent.ctx.agents.create({
+     sessionId: childId,
++    ...request.initialAdmission === undefined ? {} : { initialAdmission: request.initialAdmission },
++    parentAgent: parent,
+     meta: childSessionMeta(parent, childDepth, activationBoundary),
+     ...seed !== undefined ? { seed } : {},
+     agentOptions: resolveChildAgentOptions(parent, request.agentOptions, childDepth),
+@@ -144,6 +147,7 @@ export async function startInProcessRun(
+     childId,
+     activationBoundary,
+     structured,
++    request.initialAdmission,
+   )
+ }
+ 
+@@ -158,11 +162,14 @@ function drivePublishedRun(
+   childId: SessionId,
+   boundary: number,
+   structured: StructuredAttachment | undefined,
++  initial?: import('@deepseek-ai/dsh-agent').HostInitialAdmission,
+ ): SubagentRun {
+   const child = handle.agent
+   const flags = { cancelled: false }
++  let releaseInitialWait = (): void => {}
+   const onAbort = (): void => {
+     flags.cancelled = true
++    releaseInitialWait()
+     child.cancel({ kind: 'parent' })
+   }
+   signal.addEventListener('abort', onAbort, { once: true })
+@@ -174,7 +181,17 @@ function drivePublishedRun(
+   const result: Promise<SubagentResult> = (async () => {
+     try {
+       if (!flags.cancelled) {
+-        child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
++        if (initial === undefined) child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
++        else if (child.inbox.nextTurn.some(message => message.id === initial.messageId)) {
++          // CLOSED keeps the initial input durable but MUST NOT fabricate an idle
++          // result or force a wake. Actual claim, cancellation or owned disposal ends this wait.
++          await new Promise<void>(resolve => {
++            const stop = child.ctx.on('agent/inbox/claimed', ({ message }) => {
++              if (message.id === initial.messageId) releaseInitialWait()
++            })
++            releaseInitialWait = () => { stop(); resolve() }
++          })
++        }
+         await child.whenIdle()
+       }
+       return readResult(
+@@ -195,6 +212,7 @@ function drivePublishedRun(
+     async dispose(): Promise<void> {
+       signal.removeEventListener('abort', onAbort)
+       flags.cancelled = true
++      releaseInitialWait()
+       const settlements = await Promise.allSettled([handle.dispose(), result])
+       const disposal = settlements[0]
+       // The result channel owns run faults; disposal reports only failure to
+diff --git a/packages/subagent/subagent/src/index.ts b/packages/subagent/subagent/src/index.ts
+index 402e969c3c..112e4f24e4 100644
+--- a/packages/subagent/subagent/src/index.ts
++++ b/packages/subagent/subagent/src/index.ts
+@@ -38,7 +38,9 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
+ import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+ import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+-import type { SessionId } from '@deepseek-ai/dsh-session'
++import { SessionId } from '@deepseek-ai/dsh-session'
++import { randomUUID } from 'node:crypto'
++import { createUserMessage } from '@deepseek-ai/dsh-llm'
+ import type {
+   ContinuableCreateRequest,
+   ContinuableCreateSpec,
+@@ -469,8 +471,19 @@ export class SubagentRuntime extends Service {
+       provider: name,
+       ...request.label !== undefined ? { label: request.label } : {},
+     })
+-    const resolved: ResolvedSubagentStartRequest = { ...request, descriptor }
+-    const reservation = this.ctx.hostAdmission.reserve('delegate')
++    const reservation = this.ctx.hostAdmission.reserve('delegate', request.parent)
++    const initialMessage = createUserMessage({ content: structuredClone(request.prompt), source: { kind: 'user' } })
++    const childId = SessionId(randomUUID())
++    const { parent, signal, ...input } = request
++    const snapshot = structuredClone(input)
++    const freeze = (value: unknown): void => {
++      if (value !== null && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value) }
++    }
++    freeze(snapshot)
++    const resolved: ResolvedSubagentStartRequest = { ...snapshot, parent, signal, descriptor }
++    const initialAdmission = reservation.child!(childId, initialMessage, parent, signal, resolved)
++    Object.defineProperty(resolved, 'initialAdmission', { value: initialAdmission, enumerable: true })
++    Object.freeze(resolved)
+     // A provider rejection supplies no disposal/join proof; retain UNKNOWN.
+     const run = observeRun(this.emitLifecycle, name, request.parent, await provider.start(resolved))
+     return { ...run, dispose: async () => { await run.dispose(); reservation.release() } }
+diff --git a/packages/subagent/subagent/src/types.ts b/packages/subagent/subagent/src/types.ts
+index 17978550ab..7630832704 100644
+--- a/packages/subagent/subagent/src/types.ts
++++ b/packages/subagent/subagent/src/types.ts
+@@ -155,6 +155,7 @@ export interface SubagentStartRequest {
+ export interface ResolvedSubagentStartRequest extends SubagentStartRequest {
+   /** Detached descriptor a session-backed provider persists in the child log. */
+   readonly descriptor: SubagentDescriptorData
++  readonly initialAdmission?: import('@deepseek-ai/dsh-agent').HostInitialAdmission
+ }
+ 
+ /**

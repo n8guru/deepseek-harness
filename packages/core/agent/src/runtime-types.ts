@@ -121,7 +121,7 @@ export interface Agent {
    * sole ordinary message of its own turn.
    * @param message - identified prompt content and the source that supplied it.
    */
-  followup(message: UserMessage): void
+  followup(message: UserMessage, initial?: import('./admission.ts').HostInitialAdmission): void
 
   /**
    * Submit steering for the nearest step. An idle driver starts a turn;

@@ -38,7 +38,9 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock, MessageId } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { randomUUID } from 'node:crypto'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {
   ContinuableCreateRequest,
   ContinuableCreateSpec,
@@ -174,6 +176,7 @@ declare module '@deepseek-ai/cordis' {
 
 /** Named provider registry with one-shot runs, durable discovery, and continuable-child operations. */
 export class SubagentRuntime extends Service {
+  static inject = ['agents', 'hostAdmission']
   private providers = new Map<string, SubagentProvider>()
   private continuations: SubagentContinuationManager | undefined
   /** Deployment contributions composed into unpublished continuable children. */
@@ -192,6 +195,7 @@ export class SubagentRuntime extends Service {
 
   constructor(ctx: Context, config?: SubagentModelsSettings) {
     super(ctx, 'subagents')
+    ctx.hostAdmission.cover('delegate', () => false) // continuable materialization not yet instrumented
     this.readModels = installSubagentModels(ctx, { roles: config?.roles ?? {} })
     this.emitLifecycle = createLifecycleEmitter(this.ctx, parent => scopeTarget(this, parent))
     ctx.inject(['agents'], (childCtx: Context) => {
@@ -238,6 +242,7 @@ export class SubagentRuntime extends Service {
    * @throws when continuation services are unavailable or materialization fails.
    */
   async startContinuable(spec: ContinuableStartSpec): Promise<ContinuableStart> {
+    this.ctx.hostAdmission.assert()
     return this.requireContinuations().startContinuable(spec)
   }
 
@@ -262,6 +267,7 @@ export class SubagentRuntime extends Service {
     content: ContentBlock[],
     options: SubagentFollowupOptions,
   ): Promise<MessageId> {
+    this.ctx.hostAdmission.assert()
     return this.requireContinuations().followup(parent, childId, content, options)
   }
 
@@ -465,8 +471,22 @@ export class SubagentRuntime extends Service {
       provider: name,
       ...request.label !== undefined ? { label: request.label } : {},
     })
-    const resolved: ResolvedSubagentStartRequest = { ...request, descriptor }
-    return observeRun(this.emitLifecycle, name, request.parent, await provider.start(resolved))
+    const reservation = this.ctx.hostAdmission.reserve('delegate', request.parent)
+    const initialMessage = createUserMessage({ content: structuredClone(request.prompt), source: { kind: 'user' } })
+    const childId = SessionId(randomUUID())
+    const { parent, signal, ...input } = request
+    const snapshot = structuredClone(input)
+    const freeze = (value: unknown): void => {
+      if (value !== null && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value) }
+    }
+    freeze(snapshot)
+    const resolved: ResolvedSubagentStartRequest = { ...snapshot, parent, signal, descriptor }
+    const initialAdmission = reservation.child!(childId, initialMessage, parent, signal, resolved)
+    Object.defineProperty(resolved, 'initialAdmission', { value: initialAdmission, enumerable: true })
+    Object.freeze(resolved)
+    // A provider rejection supplies no disposal/join proof; retain UNKNOWN.
+    const run = observeRun(this.emitLifecycle, name, request.parent, await provider.start(resolved))
+    return { ...run, dispose: async () => { await run.dispose(); reservation.release() } }
   }
 
   /**

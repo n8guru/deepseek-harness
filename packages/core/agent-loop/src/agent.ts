@@ -88,6 +88,9 @@ export class ReactLoopAgent implements Agent {
       inserted: (message) => { this.dispatch.emit('agent/inbox/inserted', { message }) },
       discarded: (message) => { this.dispatch.emit('agent/inbox/discarded', { message }) },
       claimed: (message, turn) => { this.dispatch.emit('agent/inbox/claimed', { message, turn }) },
+    }, (messages, initial) => {
+      if (initial === undefined) loopCtx.hostAdmission.assert()
+      else loopCtx.hostAdmission.accept(initial, this, messages[0]!)
     })
     const lastTurn = session.events.findLast(event => event.type === 'turn/start')?.data.turn ?? 0
     this.phase = { kind: 'idle', lastTurn }
@@ -110,17 +113,18 @@ export class ReactLoopAgent implements Agent {
     }
   }
 
-  send(message: UserMessage, target: InboxTarget, wakeup: boolean): void {
+  send(message: UserMessage, target: InboxTarget, wakeup: boolean, initial?: import('@deepseek-ai/dsh-agent').HostInitialAdmission): void {
+    if (initial === undefined) this.ctx.hostAdmission.assert()
     // Waking input cannot join an aborted activity, so it starts the next turn.
     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
-    if (wakeup) this.wakeDriver(wakingAfterAbort)
+    this.inbox.splice(resolvedTarget, Infinity, 0, [message], initial)
+    if (wakeup && this.ctx.hostAdmission.open) this.wakeDriver(wakingAfterAbort)
   }
 
-  followup(input: UserMessage): void {
-    this.send(input, 'next-turn', true)
+  followup(input: UserMessage, initial?: import('@deepseek-ai/dsh-agent').HostInitialAdmission): void {
+    this.send(input, 'next-turn', true, initial)
   }
 
   steer(input: UserMessage): void {

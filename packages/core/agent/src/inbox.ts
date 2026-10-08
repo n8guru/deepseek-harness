@@ -28,6 +28,7 @@ export class Inbox {
   constructor(
     private readonly session: Session,
     private readonly notifications: InboxNotifications,
+    private readonly beforeInsert: ((messages: UserMessage[], initial?: import('./admission.ts').HostInitialAdmission) => void) | undefined = undefined,
   ) {
     for (const event of session.events.slice(session.header.seedLength ?? 0)) {
       if (event.type !== 'agent/inbox/spliced') continue
@@ -141,7 +142,10 @@ export class Inbox {
     start: number,
     deleteCount: number,
     inserted: UserMessage[],
+    initial?: import('./admission.ts').HostInitialAdmission,
   ): UserMessage[] {
+    if (initial !== undefined && (target !== 'next-turn' || inserted.length !== 1 || deleteCount !== 0)) throw new Error('native initial target refused')
+    if (inserted.length > 0) this.beforeInsert?.(inserted, initial)
     return this.mutate(target, start, deleteCount, inserted, true)
   }
 

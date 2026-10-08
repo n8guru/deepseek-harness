@@ -68,6 +68,8 @@ class FactoryOwnership {
     void job.then(forget, forget)
   }
 
+  get publicationsJoined(): boolean { return this.startupTasks.size === 0 }
+
   /** Join one public create/resume continuation; factory dispose awaits its settlement. */
   trackWrapper(job: Promise<unknown>): void {
     this.trackStartup(job.then(() => undefined, () => undefined))
@@ -294,7 +296,7 @@ function validateConfiguredAgents(agents: Config['agents']): void {
 
 /** Concrete agent factory and driver service. */
 export class AgentLoop extends Service implements AgentFactory {
-  static inject = ['agents', 'sessions', 'llm', 'tools', 'systemPrompt']
+  static inject = ['agents', 'hostAdmission', 'sessions', 'llm', 'tools', 'systemPrompt']
 
   /** Runtime schema for declarative agents. */
   static Config = z.object({
@@ -346,6 +348,8 @@ export class AgentLoop extends Service implements AgentFactory {
     validateConfiguredAgents(this.config.agents)
     this.ownership = new FactoryOwnership(ctx.fiber)
     this.runtime = { ctx }
+    ctx.hostAdmission.cover('publication', () => this.ownership.publicationsJoined)
+    if (this.config.agents.length > 0) ctx.hostAdmission.assert()
     ctx.effect(() => () => this.ownership.dispose(), 'agentLoop.transactions()')
     ctx.effect(() => ctx.agents.setFactory(this), 'agentLoop.setFactory()')
     ctx.systemPrompt.variable('provider', context => context.agent?.options.provider)
@@ -587,6 +591,7 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published running agent.
    */
   create(id: SessionId, options: AgentOptions = {}, meta: Pick<SessionHeader, 'cwd'> = {}): Agent {
+    this.runtime.ctx.hostAdmission.assert()
     using preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, { meta }))
     const prepared = this.prepare(this.ctx, id, options, preparation.session)
     try {
@@ -604,6 +609,28 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published handle.
    */
   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
+    if (options.initialAdmission !== undefined && options.meta?.parentSession !== options.parentAgent?.id) throw new Error('native initial parent refused')
+    const initial = options.initialAdmission === undefined ? undefined
+      : this.runtime.ctx.hostAdmission.initial(options.initialAdmission, options.sessionId, options.parentAgent, options.signal)
+    const reservation = initial === undefined ? this.runtime.ctx.hostAdmission.reserve('publication') : undefined
+    let handle: AgentHandle | undefined
+    try {
+      handle = await this.createAdmitted(ownerCtx, options)
+      if (initial !== undefined) {
+        initial.publish(handle.agent)
+        handle.agent.followup(initial.message, options.initialAdmission)
+        const owned = handle
+        return { ...owned, dispose: async () => { await owned.dispose(); initial.join() } }
+      }
+      return handle
+    } catch (error) {
+      // Missing/failed actual cleanup keeps publication UNKNOWN.
+      if (handle !== undefined) { await handle.dispose(); initial?.join() }
+      throw error
+    } finally { reservation?.release() }
+  }
+
+  private async createAdmitted(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
       ...options.seed === undefined ? {} : { seed: options.seed },
       ...options.meta === undefined ? {} : { meta: options.meta },
@@ -635,7 +662,9 @@ export class AgentLoop extends Service implements AgentFactory {
     const session = ownedPreparation.session
     const prepared = this.prepare(ownerCtx, id, agentOptions, session, signal)
     try {
-      const setupCommit = await raceAbort(setup?.(prepared.agent.ctx), prepared.signal, id)
+      const rawSetup = Promise.resolve(setup?.(prepared.agent.ctx))
+      this.ownership.trackWrapper(rawSetup)
+      const setupCommit = await raceAbort(rawSetup, prepared.signal, id)
       setupCommit?.commit()
       return prepared.publish(source)
     } catch (error: unknown) {
@@ -651,6 +680,12 @@ export class AgentLoop extends Service implements AgentFactory {
    * @returns the published handle.
    */
   async resume(ownerCtx: Context, options: ResumeAgentOptions): Promise<AgentHandle> {
+    const reservation = this.runtime.ctx.hostAdmission.reserve('publication')
+    try { return await this.resumeAdmitted(ownerCtx, options) }
+    finally { reservation.release() }
+  }
+
+  private async resumeAdmitted(ownerCtx: Context, options: ResumeAgentOptions): Promise<AgentHandle> {
     const persistence = this.runtime.ctx.get('sessionPersistence')
     if (persistence === undefined) {
       throw new Error('cannot resume: session persistence is not configured (load a dsh-session-persistence backend)')
@@ -682,7 +717,11 @@ export class AgentLoop extends Service implements AgentFactory {
       try {
         try {
           preparation = await raceAbortCall(
-            () => persistence.prepare(id, fused),
+            () => {
+              const rawPrepare = Promise.resolve(persistence.prepare(id, fused))
+              this.ownership.trackWrapper(rawPrepare)
+              return rawPrepare
+            },
             fused,
             id,
             (abandoned) => { abandoned[Symbol.dispose]() },

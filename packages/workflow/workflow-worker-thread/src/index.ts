@@ -110,7 +110,7 @@ function resolveMaxTotalAgents(requested: number | undefined, ceiling: number): 
  * the seam contract.
  */
 class WorkerThreadWorkflowEngine extends WorkflowEngine {
-  static inject = ['subagents']
+  static inject = ['subagents', 'agents', 'hostAdmission']
 
   static Config: z<Config> = z.object({
     provider: z.string().default('spawn'),
@@ -125,6 +125,7 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
+    ctx.hostAdmission.cover('workflow', () => false) // old worker dispose may force-settle; not authoritative join
     // schemastery (static Config) has already filled the defaulted fields;
     // the assertion records that resolution, not a hidden fallback.
     this.config = config as ResolvedConfig
@@ -169,6 +170,7 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
     // the now-inactive engine fiber and break the seam's holder-owned lifetime.
     const runCtx = this.ctx
     const subagents = runCtx.subagents
+    const reservation = runCtx.hostAdmission.reserve('workflow')
     const workerRun = new WorkerRun(
       runCtx,
       subagents,
@@ -198,7 +200,15 @@ class WorkerThreadWorkflowEngine extends WorkflowEngine {
       })
     })
 
-    return workerRun
+    return {
+      id: workerRun.id, meta: workerRun.meta, result: workerRun.result,
+      cancel: reason => workerRun.cancel(reason),
+      dispose: async () => {
+        await workerRun.dispose()
+        // Old dispose() may abandon pending providers after grace. No authoritative join.
+        void reservation
+      },
+    }
   }
 }
 

@@ -7,6 +7,8 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import { backendStatusJoined, type LlmBackendStatus } from './backend-settlement.ts'
+export type { LlmBackendStatus } from './backend-settlement.ts'
 import type {
   GenerateOptions,
   LlmConfigurableProvider,
@@ -178,6 +180,7 @@ export interface PreparedLlmCall {
  * DeepSeek and library-backed pi-ai adapters meet this contract through different internals.
  */
 export abstract class LlmAdapter {
+  backendStatus(): LlmBackendStatus | undefined { return undefined }
   /**
    * Describe one provider route owned by this adapter.
    * @param provider - a route passed to `registerAdapter()` for this instance.
@@ -283,6 +286,31 @@ export interface DirectoryRegistrationHandle {
  */
 export class LlmRuntime extends Service {
   private adapters = new Map<string, AdapterRegistration>()
+  private nextBackendGeneration = 0
+  private readonly backendRegistrations = new Set<AdapterRegistration>()
+  private readonly backendCallers = new Set<{ registration: AdapterRegistration }>()
+  private readonly backendIdentities = new WeakMap<LlmAdapter, Set<string>>()
+
+  backendCoverage() {
+    const participants = [...new Set([...this.backendRegistrations].map(row => row.adapter))].map(adapter => {
+      const registrations = [...this.backendRegistrations].filter(row => row.adapter === adapter)
+        .map(row => ({ provider: row.provider.id, generation: row.generation }))
+      let joined = false
+      try {
+        const status = structuredClone(adapter.backendStatus())
+        if (status !== undefined) {
+          const identities = new Set(status.turns.map(turn => JSON.stringify([turn.threadId, turn.turnId])))
+          const seen = this.backendIdentities.get(adapter) ?? new Set<string>()
+          joined = backendStatusJoined(status) && [...seen].every(id => identities.has(id))
+          for (const id of identities) seen.add(id)
+          this.backendIdentities.set(adapter, seen)
+        }
+      } catch { /* unsupported/malformed evidence stays UNKNOWN */ }
+      if ([...this.backendCallers].some(row => row.registration.adapter === adapter)) joined = false
+      return { registrations, state: joined ? 'JOINED' as const : 'UNKNOWN' as const }
+    })
+    return { state: participants.every(row => row.state === 'JOINED') ? 'JOINED' as const : 'UNKNOWN' as const, participants }
+  }
   private directory = new Map<string, LlmConfigurableProvider>()
   private discoveries = new Map<
     string,
@@ -387,6 +415,7 @@ export class LlmRuntime extends Service {
       const retryPolicy = adapter.providerRetryPolicy(provider)
         ?? resolveRetryPolicy(undefined, `llm: provider "${provider}" retryPolicy`)
       registrations.push({
+        generation: ++this.nextBackendGeneration,
         adapter,
         provider: { id: info.id, name: info.name },
         retryPolicy,
@@ -406,6 +435,7 @@ export class LlmRuntime extends Service {
     for (const provider of owned) this.adapters.delete(provider)
     owned.clear()
     for (const registration of registrations) {
+      this.backendRegistrations.add(registration)
       this.adapters.set(registration.provider.id, registration)
       owned.add(registration.provider.id)
     }
@@ -778,6 +808,9 @@ export class LlmRuntime extends Service {
    */
   async prepareCall(config: LlmCallConfig, signal?: AbortSignal): Promise<PreparedLlmCall> {
     const registration = this.registration(config.provider)
+    const caller = { registration }
+    this.backendCallers.add(caller)
+    try {
     const resolved = await this.resolveCallFor(registration, config, signal)
     const resolvedConfig = deepFreeze(structuredClone(resolved.config))
     const context = resolved.context === undefined
@@ -811,6 +844,7 @@ export class LlmRuntime extends Service {
         return this.streamWithRegistration(options, { registration, config: resolvedConfig })
       },
     })
+    } finally { this.backendCallers.delete(caller) }
   }
 
   private registration(provider: string): AdapterRegistration {
@@ -844,9 +878,15 @@ export class LlmRuntime extends Service {
     options: GenerateOptions,
     prepared?: { registration: AdapterRegistration; config: LlmCallConfig },
   ): AsyncGenerator<StreamChunk> {
+    let registration: AdapterRegistration
+    try { registration = prepared?.registration ?? this.registration(options.provider) }
+    catch (error) { yield adapterFailureChunk(error, options.signal); return }
+    const caller = { registration }
+    this.backendCallers.add(caller)
+    let nativeJoined = false
+    try {
     let iterator: AsyncIterator<StreamChunk>
     try {
-      const registration = prepared?.registration ?? this.registration(options.provider)
       const resolvedConfig = prepared === undefined
         ? (await this.resolveCallFor(registration, options, options.signal)).config
         : prepared.config
@@ -885,6 +925,7 @@ export class LlmRuntime extends Service {
         }
         if (item.done) {
           completed = true
+          nativeJoined = true
           return
         }
         // End the adapter-owned try before yielding: consumer/middleware
@@ -895,8 +936,10 @@ export class LlmRuntime extends Service {
       if (!completed) {
         const close = iterator.return?.bind(iterator)
         if (close) await close()
+        nativeJoined = true
       }
     }
+    } finally { if (nativeJoined) this.backendCallers.delete(caller) }
   }
 
   /**
@@ -939,6 +982,7 @@ function adapterFailureChunk(error: unknown, signal?: AbortSignal): StreamChunk 
 }
 
 interface AdapterRegistration {
+  readonly generation: number
   readonly adapter: LlmAdapter
   readonly provider: LlmProviderInfo
   readonly retryPolicy: ResolvedRetryPolicy

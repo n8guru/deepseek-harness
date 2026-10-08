@@ -108,7 +108,8 @@ export async function startInProcessRun(
   const parent = request.parent
   const childDepth = resolveChildDepth(parent, request.maxDepth)
 
-  const childId = SessionId(randomUUID())
+  const childId = request.initialAdmission?.sessionId ?? SessionId(randomUUID())
+  if (request.initialAdmission !== undefined) parent.ctx.hostAdmission.request(request.initialAdmission, request)
   const seed = options.seed
   const activationBoundary = seed?.length ?? 0
 
@@ -131,6 +132,8 @@ export async function startInProcessRun(
 
   const handle = await parent.ctx.agents.create({
     sessionId: childId,
+    ...request.initialAdmission === undefined ? {} : { initialAdmission: request.initialAdmission },
+    parentAgent: parent,
     meta: childSessionMeta(parent, childDepth, activationBoundary),
     ...seed !== undefined ? { seed } : {},
     agentOptions: resolveChildAgentOptions(parent, request.agentOptions, childDepth),
@@ -144,6 +147,7 @@ export async function startInProcessRun(
     childId,
     activationBoundary,
     structured,
+    request.initialAdmission,
   )
 }
 
@@ -158,11 +162,14 @@ function drivePublishedRun(
   childId: SessionId,
   boundary: number,
   structured: StructuredAttachment | undefined,
+  initial?: import('@deepseek-ai/dsh-agent').HostInitialAdmission,
 ): SubagentRun {
   const child = handle.agent
   const flags = { cancelled: false }
+  let releaseInitialWait = (): void => {}
   const onAbort = (): void => {
     flags.cancelled = true
+    releaseInitialWait()
     child.cancel({ kind: 'parent' })
   }
   signal.addEventListener('abort', onAbort, { once: true })
@@ -174,7 +181,17 @@ function drivePublishedRun(
   const result: Promise<SubagentResult> = (async () => {
     try {
       if (!flags.cancelled) {
-        child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
+        if (initial === undefined) child.followup(createUserMessage({ content: prompt, source: { kind: 'user' } }))
+        else if (child.inbox.nextTurn.some(message => message.id === initial.messageId)) {
+          // CLOSED keeps the initial input durable but MUST NOT fabricate an idle
+          // result or force a wake. Actual claim, cancellation or owned disposal ends this wait.
+          await new Promise<void>(resolve => {
+            const stop = child.ctx.on('agent/inbox/claimed', ({ message }) => {
+              if (message.id === initial.messageId) releaseInitialWait()
+            })
+            releaseInitialWait = () => { stop(); resolve() }
+          })
+        }
         await child.whenIdle()
       }
       return readResult(
@@ -195,6 +212,7 @@ function drivePublishedRun(
     async dispose(): Promise<void> {
       signal.removeEventListener('abort', onAbort)
       flags.cancelled = true
+      releaseInitialWait()
       const settlements = await Promise.allSettled([handle.dispose(), result])
       const disposal = settlements[0]
       // The result channel owns run faults; disposal reports only failure to
