@@ -121,10 +121,11 @@ export default class OldHostMaintenance extends Service {
    * other command. `close` closes the live cutoff BEFORE its durable append; a
    * failed append poisons the receiver and keeps the cutoff closed. `release`
    * records the durable released phase; the live cutoff stays CLOSED and held
-   * work is not resumed.
+   * work is not resumed. Released-run retries return the durable tombstone,
+   * including when a different run is active, without appending again.
    * @param owner - owner identity authenticated by the transport, never the body.
    * @param body - untrusted command body.
-   * @returns the active run (or null) and live cutoff status after the command.
+   * @returns the requested run (or null) and live cutoff status after the command.
    */
   async receive(owner: string, body: unknown): Promise<{ run: OldMaintenanceRun | null; cutoff: ReturnType<Context['hostAdmission']['status']> }> {
     if (!this.ready || this.stopping) throw new Error('old maintenance receiver not ready')
@@ -140,6 +141,11 @@ export default class OldHostMaintenance extends Service {
     if (this.failed) throw new Error('old maintenance receiver poisoned by a failed durable write')
     if (!identity(owner)) throw new Error('maintenance owner refused')
     const command = parseCommand(body)
+    // An acknowledged release may have lost its response. Its durable tombstone
+    // settles retries even after another run starts, without touching that run.
+    if (command.action === 'release' && this.retired.has(JSON.stringify([owner, command.runId]))) {
+      return { run: { owner, runId: command.runId, phase: 'released' as const }, cutoff: this.ctx.hostAdmission.status() }
+    }
     const active = this.state.active
     const same = active !== null && active.owner === owner && active.runId === command.runId
     if (active?.phase === 'closed' && !same) throw new Error('maintenance run owned by another owner or run')

@@ -43,6 +43,8 @@ if (process.argv[2] === '--child') {
       await assert.rejects(ctx.hostMaintenance.receive('other-owner', { runId: 'fixture-run', action: 'release' }), /another owner/)
       await assert.rejects(ctx.hostMaintenance.receive('fixture-owner', { runId: 'fixture-run', action: 'status', owner: 'forged' }), /refused/)
       await ctx.hostMaintenance.receive('fixture-owner', { runId: 'fixture-run', action: 'release' })
+      await ctx.hostMaintenance.receive('fixture-owner', { runId: 'fixture-run', action: 'release' })
+      assert.equal((await ctx.sessionPersistence.inspect(SessionId('old-host-maintenance-control'))).events.length, 2)
       assert.equal(ctx.hostAdmission.open, false)
     } else {
       assert.equal(phase, 'released-boot')

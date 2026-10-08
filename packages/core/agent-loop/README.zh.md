@@ -128,7 +128,7 @@ interface Config {
 
 ## 可选的旧源码维护接收器
 
-`@deepseek-ai/dsh-agent-loop/maintenance` Loader 入口提供 `ctx.hostMaintenance`，要求注入 `sessionPersistence` 和 `hostAdmission`。它将绑定 owner/run 的 close、status 和 release 命令串行处理，并记录到专用的 `old-host-maintenance-control` 会话。构造时暂停准入直到重放完成；重放失败则保留暂停。Close 在持久追加前生效，追加失败会使接收器停止接受命令。Release 被持久化，但不会重新打开当前 Host；已退役的 owner/run 标识不能再次关闭。销毁拒绝排队工作、等待进行中的写入，并保持准入暂停。
+`@deepseek-ai/dsh-agent-loop/maintenance` Loader 入口提供 `ctx.hostMaintenance`，要求注入 `sessionPersistence` 和 `hostAdmission`。它将绑定 owner/run 的 close、status 和 release 命令串行处理，并记录到专用的 `old-host-maintenance-control` 会话。构造时暂停准入直到重放完成；重放失败则保留暂停。Close 在持久追加前生效，追加失败会使接收器停止接受命令。Release 被持久化，但不会重新打开当前 Host；已退役的 owner/run 标识不能再次关闭。重复的 close 和 release 命令不追加额外修订；即使新 run 已启动，release 重试仍返回其持久化的退役记录。销毁拒绝排队工作、等待进行中的写入，并保持准入暂停。
 
 `receive(owner, body)` 是受信任的同进程入口，不是认证机制。它没有注册 HTTP 端点。传输层必须独立认证 owner；从消息体、Host、Origin 或服务存在性推断 owner 权限均不安全。现有 Connection 浏览器信任检查明确不认证调用者。
 

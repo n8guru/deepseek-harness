@@ -104,6 +104,37 @@ it('snapshots queued input and returned state; released identities remain retire
   } finally { await ctx.fiber.dispose() }
 })
 
+it('lost close/release replies are idempotent, including release retries after a newer run and restart', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'step73-old-maint-'))
+  roots.push(root)
+  let ctx = await boot(root)
+  const command = (action: string) => ({ runId: 'first', action })
+  try {
+    const append = vi.spyOn(ctx.sessionPersistence, 'append')
+    const closes = await Promise.all([0, 1].map(() => ctx.hostMaintenance.receive('owner', command('close'))))
+    expect(closes[0]).toEqual(closes[1])
+    expect(append).toHaveBeenCalledTimes(1)
+    const releases = await Promise.all([0, 1].map(() => ctx.hostMaintenance.receive('owner', command('release'))))
+    expect(releases[0]).toEqual(releases[1])
+    expect(append).toHaveBeenCalledTimes(2)
+    await ctx.hostMaintenance.receive('owner', { runId: 'second', action: 'close' })
+    expect((await ctx.hostMaintenance.receive('owner', command('release'))).run).toEqual({
+      owner: 'owner', runId: 'first', phase: 'released',
+    })
+    expect((await ctx.hostMaintenance.receive('owner', { runId: 'second', action: 'status' })).run?.phase).toBe('closed')
+    expect(append).toHaveBeenCalledTimes(3)
+    await expect(ctx.hostMaintenance.receive('forged-owner', command('release'))).rejects.toThrow('another owner')
+  } finally { await ctx.fiber.dispose() }
+  ctx = await boot(root)
+  try {
+    const append = vi.spyOn(ctx.sessionPersistence, 'append')
+    expect((await ctx.hostMaintenance.receive('owner', command('release'))).run?.phase).toBe('released')
+    expect(append).not.toHaveBeenCalled()
+    expect(ctx.hostAdmission.open).toBe(false)
+    expect((await ctx.hostMaintenance.receive('owner', { runId: 'second', action: 'status' })).run?.phase).toBe('closed')
+  } finally { await ctx.fiber.dispose() }
+})
+
 it('failed and pending replay both hold admission; commands cannot race replay', async () => {
   const root = mkdtempSync(join(tmpdir(), 'step73-old-maint-'))
   roots.push(root)
