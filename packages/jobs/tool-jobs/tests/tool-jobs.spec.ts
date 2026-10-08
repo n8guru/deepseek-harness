@@ -123,6 +123,7 @@ describe('tool-jobs setup', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(LocalJobRegistry)
     await expect(ctx.plugin(ToolTasks, { waitTimeoutMs: 100, maxWaitTimeoutMs: 50 }))
       .rejects.toThrow('waitTimeoutMs (100) exceeds maxWaitTimeoutMs (50)')
@@ -141,6 +142,7 @@ describe('tool-jobs setup', () => {
       const ctx = new Context()
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(LocalJobRegistry)
       try {
         await ctx.plugin(ToolTasks, { maxConsecutiveWakes })
@@ -169,6 +171,7 @@ describe('tool-jobs setup', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(LocalJobRegistry)
     ToolTasks.apply(ctx, {})
     expect(ctx.tools.get('job_output')).toBeDefined()
@@ -869,8 +872,8 @@ describe('completion notices', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('unexpected inject bug'))
   })
 
-  it('keeps using the exact owner after the agent registry is gone', async () => {
-    const { ctx, agentsFiber } = await setup()
+  it('keeps using the exact owner after the registry no longer lists it', async () => {
+    const { ctx } = await setup()
     const inject = vi.fn()
     const owner = fakeAgent(ctx, 'sess-1', { inject })
 
@@ -881,7 +884,9 @@ describe('completion notices', () => {
     const p2 = producer({ owner })
     ctx.jobs.start(p2.spec)
 
-    await agentsFiber.dispose()
+    // jobs-local now injects the agent registry (admission cutoff), so disposing the registry itself tears the
+    // job service down and waits for producers to settle; unregistering the owner is the reachable form.
+    detachAgent(owner)
     p1.settle({ status: 'completed' })
     p2.settle({ status: 'failed' })
     await tick()

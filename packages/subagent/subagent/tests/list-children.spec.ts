@@ -5,9 +5,10 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -148,11 +149,12 @@ const hostileProjectionDefinition: ProjectionDefinition<'subagentListHostileProb
 describe('SubagentRuntime.listChildren', () => {
   it('lists live children without persistence, query services, or the continuation runtime', async () => {
     const ctx = new Context()
-    await ctx.plugin(SessionStore)
+    // The runtime requires the live agent registry and Host admission; persistence is still absent.
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SubagentRuntime)
     expect(ctx.get('jobs')).toBeUndefined()
-    expect(ctx.get('agents')).toBeUndefined()
     expect(ctx.get('sessionPersistence')).toBeUndefined()
 
     const parentId = SessionId('live-only-parent')
@@ -183,6 +185,8 @@ describe('SubagentRuntime.listChildren', () => {
 
   it('fails loud when the session store is not mounted', async () => {
     const ctx = new Context()
+    // The agent registry (a runtime prerequisite) does not itself need the session store.
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SubagentRuntime)
     await expect(ctx.subagents.listChildren(SessionId('no-store-parent'))).rejects.toThrow(

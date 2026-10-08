@@ -13,6 +13,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import * as sdk from '../src/index.ts'
 import {
@@ -26,17 +29,36 @@ import {
 
 const fakeRuntime = fileURLToPath(new URL('../../../sdk/client/tests/fake-runtime.ts', import.meta.url))
 
-/** A parent Agent stub. The SDK backend reads exactly one thing off it: the session header's cwd (the workspace its child inherits). */
-const fakeParent = { id: 'parent', session: { header: { cwd: process.cwd() } } } as unknown as Agent
+/**
+ * The live parent Agent of the most recently mounted runtime. Native admission authenticates the exact live
+ * registry Agent, so a stub no longer qualifies. The SDK backend reads exactly one thing off it: the session
+ * header's cwd (the workspace its child inherits).
+ */
+let liveParent: Agent
+let parentSeq = 0
+
+/** Mount SubagentRuntime over the real agent registry and create its live parent (cwd defaults to the process cwd). */
+async function mountRuntime(ctx: Context): Promise<Agent> {
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  liveParent = addParent(ctx, { cwd: process.cwd() })
+  return liveParent
+}
+
+/** Create another live parent in `ctx` with the given session creation meta. */
+function addParent(ctx: Context, meta: { cwd?: string }): Agent {
+  return ctx.agentLoop.create(SessionId(`parent-${++parentSeq}`), {}, meta)
+}
 
 function request(text = 'p', signal = new AbortController().signal) {
-  return { label: text, prompt: [{ type: 'text' as const, text }], parent: fakeParent, signal }
+  return { label: text, prompt: [{ type: 'text' as const, text }], parent: liveParent, signal }
 }
 
 /** Mount the SDK backend pointed at the fake runtime, scripted by `fakeEnv`. */
 async function setup(fakeEnv: Record<string, string> = {}, config: Partial<sdk.Config> = {}) {
   const ctx = new Context()
-  await ctx.plugin(SubagentRuntime)
+  await mountRuntime(ctx)
   // The Config type models the post-validation shape, so the default registry
   // name is stated here; the Loader-composition fixture omits providerName and
   // exercises the schemastery default end to end.
@@ -93,9 +115,10 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     const result = await run.result
     expect(result.stopReason).toBe('completed')
     expect(text(result.output)).toBe('hello from sdk child')
-    // dispose is idempotent (one memoized teardown).
+    // dispose is idempotent; SubagentRuntime.start now wraps it (it also retires the delegate reservation),
+    // so repeat calls no longer return the identical promise.
     const disposal = run.dispose()
-    expect(run.dispose()).toBe(disposal)
+    await expect(run.dispose()).resolves.toBeUndefined()
     await disposal
 
     const nextRun = await ctx.subagents.start('dsh-sdk', request('again'))
@@ -361,7 +384,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
 
   it('registers under the configured provider name and unregisters on fiber dispose (HMR safety)', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     const fiber = await ctx.plugin(sdk, {
       providerName: 'sdk-hmr',
       command: process.execPath,
@@ -385,7 +408,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
 
   it('rejects non-positive timing bounds at load', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     const base = { providerName: 'sdk', command: 'true', args: [], provider: 'p', model: 'm', env: {} }
     await expect(ctx.plugin(sdk, { ...base, shutdownTimeoutMs: 0 })).rejects.toThrow('shutdownTimeoutMs must be a positive finite number')
     await expect(ctx.plugin(sdk, { ...base, disposeEofGraceMs: -1 })).rejects.toThrow('disposeEofGraceMs must be a positive finite number')
@@ -397,7 +420,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     'rejects invalid maxTokens %s at load',
     async (maxTokens) => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await expect(ctx.plugin(sdk, {
         providerName: 'sdk',
         command: 'true',
@@ -415,7 +438,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
     'defensively rejects invalid maxTokens %s when apply is called directly',
     async (maxTokens) => {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       expect(() => { sdk.apply(ctx, {
         providerName: 'sdk',
         command: 'true',
@@ -434,7 +457,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
 
   it('rejects an empty config cwd at load', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await expect(ctx.plugin(sdk, {
       providerName: 'sdk',
       command: 'true',
@@ -464,7 +487,7 @@ describe('dsh-subagent-dsh-sdk provider', () => {
 
   it('fails loud when neither config cwd nor parent session cwd exists', async () => {
     const ctx = await setup()
-    const parent = { id: 'parent', session: { header: {} } } as unknown as Agent
+    const parent = addParent(ctx, {})
     await expect(ctx.subagents.start('dsh-sdk', {
       label: 'p', prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal,
     }))

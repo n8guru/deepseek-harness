@@ -304,7 +304,9 @@ describe('config-driven session id', () => {
       const loop = await ctx.plugin(AgentLoop, {
         agents: [{ id: 'main', sessionId: SessionId('config-exact-dispose'), model: 'mock' }],
       })
-      await loop.dispose()
+      // Old-source contract: disposal joins the raw persistence.prepare promise, so it settles only once the
+      // backend does; the late outcome below is what lets it finish.
+      const disposing = loop.dispose()
       if (outcome === 'resolve') {
         preparing.resolve(SessionPreparation.create(
           ctx.sessions.prepare(SessionId('config-exact-dispose')),
@@ -313,7 +315,7 @@ describe('config-driven session id', () => {
       } else {
         preparing.reject(new Error('startup cancelled by teardown'))
       }
-      await Promise.resolve()
+      await disposing
       if (outcome === 'resolve') await expect.poll(() => released).toHaveBeenCalledOnce()
       expect(ctx.agents.get(SessionId('config-exact-dispose'))).toBeUndefined()
       expect(failures).toEqual([])

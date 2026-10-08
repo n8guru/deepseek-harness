@@ -545,15 +545,16 @@ describe('the session-persistence Agent Note: AgentLoop factory create/resume', 
     const resuming = ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
     await preparationStarted.promise
     const rejection = expect(promptly(resuming)).rejects.toThrow(/agent loop is not active/)
-    await promptly(loopFiber.dispose())
+    const unloading = loopFiber.dispose()
     await rejection
 
     expect(published).toEqual([])
     expect(ctx.agents.get(sessionId)).toBeUndefined()
     expect(ctx.sessions.get(sessionId)).toBeUndefined()
+    // Old-source contract: factory unload now joins the RAW persistence.prepare promise, so it settles
+    // only once the backend does (the caller was already released above by the abort).
     latePreparation.resolve(abandoned)
-    await Promise.resolve()
-    await Promise.resolve()
+    await promptly(unloading)
     expect(published).toEqual([])
     abandoned[Symbol.dispose]()
     await ctx.fiber.dispose()
@@ -860,6 +861,8 @@ describe('configured-start failure edges', () => {
 
     await expect(promptly(resuming)).rejects.toThrow(/creation aborted/)
     expect(ctx.agents.get(sessionId)).toBeUndefined()
+    // Factory teardown joins the raw prepare promise; let the backend settle before disposing.
+    gate.reject(new Error('backend settled late'))
     await ctx.fiber.dispose()
   })
 

@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type { SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
@@ -25,11 +28,30 @@ import { spawnSubprocess } from '@deepseek-ai/dsh-subprocess-local/src/spawn.ts'
 
 const mockServer = fileURLToPath(new URL('./mock-acp-server.ts', import.meta.url))
 
-/** A parent Agent stub. The ACP backend reads exactly one thing off it: the session header's cwd (the workspace its child inherits). */
-const fakeParent = { id: 'parent', session: { header: { cwd: process.cwd() } } } as unknown as Agent
+/**
+ * The live parent Agent of the most recently mounted runtime. Native admission authenticates the exact live
+ * registry Agent, so a stub no longer qualifies. The ACP backend reads exactly one thing off it: the session
+ * header's cwd (the workspace its child inherits).
+ */
+let liveParent: Agent
+let parentSeq = 0
+
+/** Mount SubagentRuntime over the real agent registry and create its live parent (cwd defaults to the process cwd). */
+async function mountRuntime(ctx: Context): Promise<Agent> {
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  liveParent = addParent(ctx, { cwd: process.cwd() })
+  return liveParent
+}
+
+/** Create another live parent in `ctx` with the given session creation meta. */
+function addParent(ctx: Context, meta: { cwd?: string }): Agent {
+  return ctx.agentLoop.create(SessionId(`parent-${++parentSeq}`), {}, meta)
+}
 
 function request(text = 'p', signal = new AbortController().signal) {
-  return { prompt: [{ type: 'text' as const, text }], parent: fakeParent, signal }
+  return { prompt: [{ type: 'text' as const, text }], parent: liveParent, signal }
 }
 
 interface SetupEnv {
@@ -43,7 +65,7 @@ interface SetupEnv {
  */
 async function setup(mockEnv: SetupEnv = {}, permission: 'allow' | 'reject' = 'reject') {
   const ctx = new Context()
-  await ctx.plugin(SubagentRuntime)
+  await mountRuntime(ctx)
   await ctx.plugin(LocalSubprocessRuntime)
   await ctx.plugin(acp, {
     providerName: 'acp',
@@ -132,7 +154,7 @@ describe('child env layering (through the subprocess seam)', () => {
     // config.env; the seam's scrub drops only the AMBIENT namesakes, so the
     // explicit entry merges after it and the child must see the value.
     const ctx = await setup({ MOCK_ECHO_ENV: 'DSH_ACP_TEST_FACT', DSH_ACP_TEST_FACT: 'managed' })
-    const parent = { id: 'parent', session: { header: { cwd: process.cwd() } } } as unknown as Agent
+    const parent = addParent(ctx, { cwd: process.cwd() })
     const run = await ctx.subagents.start('acp', {
       label: 'p', prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal,
     })
@@ -205,7 +227,7 @@ describe('cwd resolution', () => {
     const workdir = realpathSync(mkdtempSync(join(tmpdir(), 'acp-parent-cwd-')))
     try {
       const ctx = await setup({ MOCK_ECHO_CWD: '1' })
-      const parent = { id: 'parent', session: { header: { cwd: workdir } } } as unknown as Agent
+      const parent = addParent(ctx, { cwd: workdir })
       const run = await ctx.subagents.start('acp', { prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal })
       const result = await run.result
       await run.dispose()
@@ -222,11 +244,11 @@ describe('cwd resolution', () => {
     const sentinel = join(tmp, 'spawned')
     try {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await ctx.plugin(LocalSubprocessRuntime)
       // A command that would create the sentinel if the child were ever spawned.
       await ctx.plugin(acp, { providerName: 'acp', command: 'touch', args: [sentinel], permission: 'reject', env: {} })
-      const parent = { id: 'parent', session: { header: {} } } as unknown as Agent
+      const parent = addParent(ctx, {})
       await expect(ctx.subagents.start('acp', { prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal }))
         .rejects.toThrow('no working directory')
       // Resolution failed BEFORE the process boundary — nothing was launched.
@@ -241,7 +263,7 @@ describe('cwd resolution', () => {
     const parentDir = realpathSync(mkdtempSync(join(tmpdir(), 'acp-parent-cwd-')))
     try {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await ctx.plugin(LocalSubprocessRuntime)
       await ctx.plugin(acp, {
         providerName: 'acp',
@@ -251,7 +273,7 @@ describe('cwd resolution', () => {
         permission: 'reject',
         env: { MOCK_ECHO_CWD: '1' },
       })
-      const parent = { id: 'parent', session: { header: { cwd: parentDir } } } as unknown as Agent
+      const parent = addParent(ctx, { cwd: parentDir })
       const run = await ctx.subagents.start('acp', { prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal })
       const result = await run.result
       await run.dispose()
@@ -269,7 +291,7 @@ describe('cwd resolution', () => {
     const relative = 'packages/subagent/subagent-acp'
     const absolute = resolve(relative)
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     await ctx.plugin(acp, {
       providerName: 'acp',
@@ -289,7 +311,7 @@ describe('cwd resolution', () => {
     // `path.resolve('')` is the process cwd, so an empty string would silently
     // reintroduce the launch-directory fallback this resolution removed.
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     await expect(ctx.plugin(acp, {
       providerName: 'acp',
@@ -310,7 +332,7 @@ describe('cwd resolution', () => {
     chmodSync(tmp, 0o600)
     try {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await ctx.plugin(LocalSubprocessRuntime)
       await expect(ctx.plugin(acp, {
         providerName: 'acp',
@@ -329,7 +351,7 @@ describe('cwd resolution', () => {
 
   it('rejects a config cwd that is not an accessible directory at load', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     await expect(ctx.plugin(acp, {
       providerName: 'acp',
@@ -347,9 +369,14 @@ describe('cwd resolution', () => {
     // header, and resolving it against the server process cwd would silently
     // re-introduce the launch-directory dependency this resolution removes.
     const ctx = await setup({})
+    // A live session now refuses to be created with a relative cwd (SessionStore validates the header), so the
+    // malformed header is presented straight to the provider's own cwd resolution, below the admission seam.
     const parent = { id: 'parent', session: { header: { cwd: 'relative/workspace' } } } as unknown as Agent
-    await expect(ctx.subagents.start('acp', { prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal }))
-      .rejects.toThrow('must be an absolute path')
+    const provider = ctx.subagents.getProvider('acp')!
+    const start = async () => provider.start({
+      prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal,
+    } as unknown as Parameters<typeof provider.start>[0])
+    await expect(start()).rejects.toThrow('must be an absolute path')
   })
 
   it('rejects a parent session cwd that names a FILE, not a directory', async () => {
@@ -358,7 +385,7 @@ describe('cwd resolution', () => {
     writeFileSync(file, 'x')
     try {
       const ctx = await setup({})
-      const parent = { id: 'parent', session: { header: { cwd: file } } } as unknown as Agent
+      const parent = addParent(ctx, { cwd: file })
       await expect(ctx.subagents.start('acp', { prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal }))
         .rejects.toThrow('not an accessible directory')
     } finally {
@@ -371,10 +398,10 @@ describe('cwd resolution', () => {
     const sentinel = join(tmp, 'spawned')
     try {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await ctx.plugin(LocalSubprocessRuntime)
       await ctx.plugin(acp, { providerName: 'acp', command: 'touch', args: [sentinel], permission: 'reject', env: {} })
-      const parent = { id: 'parent', session: { header: { cwd: join(tmp, 'vanished') } } } as unknown as Agent
+      const parent = addParent(ctx, { cwd: join(tmp, 'vanished') })
       await expect(ctx.subagents.start('acp', { prompt: [{ type: 'text' as const, text: 'p' }], parent, signal: new AbortController().signal }))
         .rejects.toThrow('not an accessible directory')
       expect(existsSync(sentinel)).toBe(false)
@@ -393,7 +420,9 @@ describe('dsh-subagent-acp', () => {
     expect(result.stopReason).toBe('completed')
     expect(text(result.output)).toBe('hello from acp child')
     const disposal = run.dispose()
-    expect(run.dispose()).toBe(disposal)
+    // Idempotent, but SubagentRuntime.start now wraps dispose (it also retires the delegate reservation), so
+    // repeat calls no longer return the identical promise.
+    await expect(run.dispose()).resolves.toBeUndefined()
     await disposal
 
     const nextRun = await ctx.subagents.start('acp', request('do X again'))
@@ -694,7 +723,7 @@ describe('dsh-subagent-acp', () => {
     const ready = join(tmp, 'trap-armed')
     try {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await ctx.plugin(LocalSubprocessRuntime)
       await ctx.plugin(acp, {
         providerName: 'acp',
@@ -727,7 +756,7 @@ describe('dsh-subagent-acp', () => {
       { disposeGraceMs: MAX_TIMER_DELAY_MS + 1 },
     ]) {
       const ctx = new Context()
-      await ctx.plugin(SubagentRuntime)
+      await mountRuntime(ctx)
       await ctx.plugin(LocalSubprocessRuntime)
       await expect(ctx.plugin(acp, { providerName: 'acp', command: 'true', args: [], permission: 'reject', env: {}, ...bad }))
         .rejects.toThrow(new RegExp(`subagent-acp: dispose(?:Eof)?GraceMs must be a positive finite number no greater than ${MAX_TIMER_DELAY_MS}`))
@@ -737,7 +766,7 @@ describe('dsh-subagent-acp', () => {
 
   it('rejects a startup failure via the provider load path', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     await ctx.plugin(acp, {
       providerName: 'acp',
@@ -868,7 +897,7 @@ describe('dsh-subagent-acp', () => {
 
   it('unregisters the provider when its fiber is disposed (HMR safety)', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const fiber = await ctx.plugin(acp, { providerName: 'acp', command: 'x', args: [], permission: 'reject', env: {} })
     expect(ctx.subagents.list()).toEqual(['acp'])

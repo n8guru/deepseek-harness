@@ -5,9 +5,10 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { SubagentCapabilities, SubagentProvider, SubagentRun, SubagentStartRequest } from '@deepseek-ai/dsh-subagent'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
+import { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { WorkflowRunId, WorkflowEngine } from '@deepseek-ai/dsh-workflow'
 import type { WorkflowResult, WorkflowRun, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
@@ -76,8 +77,8 @@ interface SetupOptions {
 
 async function setup(options?: SetupOptions) {
   const ctx = new Context()
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime)
+  await mountAgentLoopTestDependencies(ctx) // mounts LlmRuntime, SessionStore, SystemPrompt, ToolRuntime, AgentRegistry
+  await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
   const provider = options?.provider === false ? undefined : options?.provider ?? new StubProvider()
   if (provider !== undefined) ctx.subagents.registerProvider(provider)
@@ -88,7 +89,9 @@ async function setup(options?: SetupOptions) {
   if (options?.config?.maxHandoffChars !== undefined) config.maxHandoffChars = options.config.maxHandoffChars
   if (options?.config?.maxResultChars !== undefined) config.maxResultChars = options.config.maxResultChars
   const fiber = await ctx.plugin(toolRalph, config)
-  const parent = { id: SessionId('caller'), options: {} } as unknown as Agent
+  // Real live parent: native admission authenticates the registry, not a bare {id} stand-in.
+  ctx.agentLoop.create(SessionId('caller'), {})
+  const parent = ctx.agents.get(SessionId('caller')) as Agent
   return { ctx, engine: ctx.workflowEngine as StubEngine, parent, fiber }
 }
 
@@ -151,8 +154,9 @@ describe('dsh-tool-ralph', () => {
       args: { objective: 'Finish the migration.', maxRounds: 4, maxHandoffChars: 9000 },
       subagentProvider: 'fresh',
       maxTotalAgents: 4,
-      parent,
     })
+    // Identity check: structurally diffing a live Agent (cordis context graph) never terminates.
+    expect(engine.requests[0]!.parent).toBe(parent)
     expect(engine.requests[0]!.script).toContain("status: 'budget-limited'")
     const result = await settleCompleted(engine, pending, {
       status: 'complete',

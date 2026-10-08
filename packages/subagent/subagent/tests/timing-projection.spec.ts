@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import SessionStore from '@deepseek-ai/dsh-session'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SubagentRuntime from '../src/index.ts'
@@ -19,7 +20,8 @@ function fold(events: SessionEvent[]) {
 describe('subagent timing projection', () => {
   it('registers with the optional session projection registry', async () => {
     const ctx = new Context()
-    await ctx.plugin(SessionStore)
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(SessionProjectionRegistry)
     const serviceFiber = await ctx.plugin(SubagentRuntime)
 

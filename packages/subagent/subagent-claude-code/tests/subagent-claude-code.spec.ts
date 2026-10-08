@@ -26,6 +26,9 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   SubprocessHandle,
   SubprocessOutcome,
@@ -77,16 +80,32 @@ vi.mock('@anthropic-ai/claude-agent-sdk', async importOriginal => ({
   query: queryMock,
 }))
 
-const fakeParent = {
-  id: 'parent',
-  session: { header: { cwd: process.cwd() } },
-} as unknown as Agent
+/**
+ * The live parent Agent of the most recently mounted runtime. Native admission authenticates the exact live
+ * registry Agent, so a stub no longer qualifies.
+ */
+let liveParent: Agent
+let parentSeq = 0
+
+/** Mount SubagentRuntime over the real agent registry and create its live parent (cwd defaults to the process cwd). */
+async function mountRuntime(ctx: Context): Promise<Agent> {
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  liveParent = addParent(ctx, { cwd: process.cwd() })
+  return liveParent
+}
+
+/** Create another live parent in `ctx` with the given session creation meta. */
+function addParent(ctx: Context, meta: { cwd?: string }): Agent {
+  return ctx.agentLoop.create(SessionId(`parent-${++parentSeq}`), {}, meta)
+}
 
 function request(
   prompt: ContentBlock[] = [{ type: 'text', text: 'do the task' }],
   signal = new AbortController().signal,
 ) {
-  return { prompt, parent: fakeParent, signal }
+  return { prompt, parent: liveParent, signal }
 }
 
 async function nextTask(): Promise<void> {
@@ -415,7 +434,7 @@ describe('task admission and package contracts', () => {
 
   it('registers the default descriptor, validates config, and unregisters on HMR', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const fiber = await ctx.plugin(claudeCode, {})
     expect(ctx.subagents.getProvider('claude-code')).toMatchObject({
@@ -446,7 +465,7 @@ describe('task admission and package contracts', () => {
 
   it('keeps named instances, runs, and HMR ownership isolated', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const safeChild = fakeChild()
     const bypassChild = fakeChild()
@@ -540,7 +559,7 @@ describe('task admission and package contracts', () => {
 
   it('rejects duplicate provider names without replacing the first instance', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const firstFiber = await ctx.plugin(claudeCode, {
       providerName: 'claude-duplicate',
@@ -574,7 +593,7 @@ describe('task admission and package contracts', () => {
 
   it('resolves the safe permission default when apply is called directly', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     claudeCode.apply(ctx, { env: {}, disposeGraceMs: 3_000 })
     expect(ctx.subagents.getProvider('claude-code')).toBeDefined()
@@ -583,7 +602,7 @@ describe('task admission and package contracts', () => {
 
   it('starts through the registered provider with its resolved config and diagnostics', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const child = fakeChild()
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
@@ -604,39 +623,43 @@ describe('task admission and package contracts', () => {
 
     await expect(ctx.subagents.start('claude-diagnostic', {
       ...request(),
-      parent: {
-        id: 'parent-without-cwd',
-        session: { header: {} },
-      } as unknown as Agent,
+      parent: addParent(ctx, {}),
     })).rejects.toThrow(
       'subagent-claude-code: no working directory for the child — delegate from a parent session that has one',
     )
     expect(queryMock).not.toHaveBeenCalled()
 
-    const invalidCwdParent = {
-      id: 'parent-with-invalid-cwd',
-      session: { header: { cwd: 'relative/SECRET_TOKEN' } },
-    } as unknown as Agent
+    // A live session cannot carry a relative cwd (SessionStore validates it); an absolute path that does not
+    // exist fails the same child-cwd resolution and still embeds the secret-bearing path in the cause.
+    const invalidCwdParent = addParent(ctx, { cwd: '/nonexistent/SECRET_TOKEN' })
     const invalidCwd = ctx.subagents.start('claude-diagnostic', {
       ...request(),
       parent: invalidCwdParent,
     })
     await expect(invalidCwd)
       .rejects.toThrow(expectedFailureDiagnostic('query-start', 'unknown'))
-    await expect(invalidCwd).rejects.not.toThrow('relative/SECRET_TOKEN')
+    await expect(invalidCwd).rejects.not.toThrow('/nonexistent/SECRET_TOKEN')
     expect(warn).toHaveBeenCalledWith(
       'subagent-claude-code "claude-diagnostic": child start failed: %o',
       expect.any(Error),
     )
     expect(errorCause(warn.mock.calls[0]?.[1] as unknown)?.message)
-      .toContain('relative/SECRET_TOKEN')
+      .toContain('/nonexistent/SECRET_TOKEN')
 
     const invalidCwdAbort = new AbortController()
     invalidCwdAbort.abort(new Error('cancel invalid cwd startup'))
+    // Native admission now rejects a pre-aborted signal with its own reason before any provider runs.
     await expect(ctx.subagents.start('claude-diagnostic', {
       ...request(undefined, invalidCwdAbort.signal),
       parent: invalidCwdParent,
-    })).rejects.toThrow('aborted before SDK startup')
+    })).rejects.toThrow('cancel invalid cwd startup')
+    // The provider's own abort-during-startup mapping is exercised at the provider seam.
+    const provider = ctx.subagents.getProvider('claude-diagnostic')!
+    const startAborted = async () => provider.start({
+      ...request(undefined, invalidCwdAbort.signal),
+      parent: invalidCwdParent,
+    } as unknown as Parameters<typeof provider.start>[0])
+    await expect(startAborted()).rejects.toThrow('aborted before SDK startup')
     expect(queryMock).not.toHaveBeenCalled()
     warn.mockClear()
 

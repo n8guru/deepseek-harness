@@ -10,6 +10,9 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import type {
   SubprocessHandle,
@@ -75,16 +78,32 @@ const CODEX_PLATFORM_PACKAGES = [
   '@openai/codex-win32-x64',
 ] as const
 
-const fakeParent = {
-  id: 'parent',
-  session: { header: { cwd: process.cwd() } },
-} as unknown as Agent
+/**
+ * The live parent Agent of the most recently mounted runtime. Native admission authenticates the exact live
+ * registry Agent, so a stub no longer qualifies.
+ */
+let liveParent: Agent
+let parentSeq = 0
+
+/** Mount SubagentRuntime over the real agent registry and create its live parent (cwd defaults to the process cwd). */
+async function mountRuntime(ctx: Context): Promise<Agent> {
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  liveParent = addParent(ctx, { cwd: process.cwd() })
+  return liveParent
+}
+
+/** Create another live parent in `ctx` with the given session creation meta. */
+function addParent(ctx: Context, meta: { cwd?: string }): Agent {
+  return ctx.agentLoop.create(SessionId(`parent-${++parentSeq}`), {}, meta)
+}
 
 function request(
   prompt: ContentBlock[] = [{ type: 'text', text: 'do the task' }],
   signal = new AbortController().signal,
 ) {
-  return { prompt, parent: fakeParent, signal }
+  return { prompt, parent: liveParent, signal }
 }
 
 async function nextTask(): Promise<void> {
@@ -429,7 +448,7 @@ describe('task admission and package contracts', () => {
 
   it('registers the default descriptor, validates config, and unregisters on HMR', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const fiber = await ctx.plugin(codex, {})
     const provider = ctx.subagents.getProvider('codex')!
@@ -458,7 +477,7 @@ describe('task admission and package contracts', () => {
 
   it('keeps named instances, runs, and HMR ownership isolated', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const safeChild = fakeChild()
     const bypassChild = fakeChild()
@@ -554,7 +573,7 @@ describe('task admission and package contracts', () => {
 
   it('rejects duplicate provider names without replacing the first instance', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const firstFiber = await ctx.plugin(codex, {
       providerName: 'codex-duplicate',
@@ -586,7 +605,7 @@ describe('task admission and package contracts', () => {
 
   it('resolves the safe permission default when apply is called directly', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     codex.apply(ctx, { env: {}, disposeGraceMs: 3_000 })
     expect(ctx.subagents.getProvider('codex')).toBeDefined()
@@ -631,17 +650,14 @@ describe('task admission and package contracts', () => {
 
   it('requires a parent session cwd without suggesting unsupported config', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
     await ctx.plugin(codex, {})
 
     await expect(ctx.subagents.start('codex', {
       prompt: [{ type: 'text', text: 'task' }],
-      parent: {
-        id: 'parent-without-cwd',
-        session: { header: {} },
-      } as unknown as Agent,
+      parent: addParent(ctx, {}),
       signal: new AbortController().signal,
     })).rejects.toThrow(
       'subagent-codex: no working directory for the child — delegate from a parent session that has one',
@@ -2152,7 +2168,7 @@ describe('run lifecycle and quiescence', () => {
 
   it('uses the registered provider config and logs flattened errors', async () => {
     const ctx = new Context()
-    await ctx.plugin(SubagentRuntime)
+    await mountRuntime(ctx)
     await ctx.plugin(LocalSubprocessRuntime)
     const child = fakeChild()
     const spawn = vi.spyOn(ctx.subprocess, 'spawn').mockReturnValue(child.handle)
@@ -2167,10 +2183,9 @@ describe('run lifecycle and quiescence', () => {
       disposeGraceMs: 25,
     })
 
-    const invalidCwdParent = {
-      id: 'parent-with-invalid-cwd',
-      session: { header: { cwd: 'relative/SECRET_TOKEN' } },
-    } as unknown as Agent
+    // A live session cannot carry a relative cwd (SessionStore validates it); an absolute path that does not
+    // exist fails the same child-cwd resolution and still embeds the secret-bearing path in the cause.
+    const invalidCwdParent = addParent(ctx, { cwd: '/nonexistent/SECRET_TOKEN' })
     const invalidCwdError: unknown = await ctx.subagents.start('codex-diagnostic', {
       prompt: [{ type: 'text', text: 'task' }],
       parent: invalidCwdParent,
@@ -2186,10 +2201,10 @@ describe('run lifecycle and quiescence', () => {
     expect(invalidCwdError.message).toContain(
       expectedFailureDiagnostic('initialize', 'unknown'),
     )
-    expect(invalidCwdError.message).not.toContain('relative/SECRET_TOKEN')
+    expect(invalidCwdError.message).not.toContain('/nonexistent/SECRET_TOKEN')
     expect(invalidCwdError.cause).toBeInstanceOf(Error)
     expect((invalidCwdError.cause as Error).message)
-      .toContain('relative/SECRET_TOKEN')
+      .toContain('/nonexistent/SECRET_TOKEN')
     expect(spawn).not.toHaveBeenCalled()
 
     const invalidCwdAbort = new AbortController()
@@ -2198,12 +2213,20 @@ describe('run lifecycle and quiescence', () => {
       prompt: [{ type: 'text', text: 'task' }],
       parent: invalidCwdParent,
       signal: invalidCwdAbort.signal,
-    })).rejects.toThrow('aborted before app-server startup')
+    })).rejects.toThrow('cancel invalid cwd startup')
+    // The provider's own abort-during-startup mapping is exercised at the provider seam.
+    const provider = ctx.subagents.getProvider('codex-diagnostic')!
+    const startAborted = async () => provider.start({
+      prompt: [{ type: 'text', text: 'task' }],
+      parent: invalidCwdParent,
+      signal: invalidCwdAbort.signal,
+    } as unknown as Parameters<typeof provider.start>[0])
+    await expect(startAborted()).rejects.toThrow('aborted before app-server startup')
     expect(spawn).not.toHaveBeenCalled()
 
     const starting = ctx.subagents.start('codex-diagnostic', {
       prompt: [{ type: 'text', text: 'task' }],
-      parent: fakeParent,
+      parent: liveParent,
       signal: new AbortController().signal,
     })
     const initialize = await child.peer.nextMethod('initialize')

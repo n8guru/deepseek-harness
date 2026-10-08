@@ -174,7 +174,9 @@ describe('dsh-subagent-spawn-in-process', () => {
     controller.abort()
     const { ctx, parent } = await setup([])
     await expect(start(ctx, 'spawn', { prompt: [{ type: 'text', text: 'p' }], parent, signal: controller.signal }))
-      .rejects.toThrow('aborted before child publication')
+      // SubagentRuntime.start now honours a pre-aborted signal before reserving native admission,
+      // so the caller sees the signal's own AbortError rather than the driver's publication message.
+      .rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('same-tick cancellation rejects start and prevents child publication', async () => {
@@ -441,7 +443,7 @@ describe('dsh-subagent-spawn-in-process', () => {
     })
   })
 
-  it('spawning from a DISPOSING parent fails loud with no orphaned child (INACTIVE_EFFECT teaching error)', async () => {
+  it('spawning from a DISPOSING parent fails loud with no orphaned child (native lineage refusal)', async () => {
     const { ctx } = await setup([])
     // A handle-owned parent we can dispose (config agents dispose with the loop fiber).
     const parentHandle = await ctx.agents.create({
@@ -455,10 +457,12 @@ describe('dsh-subagent-spawn-in-process', () => {
     ctx.on('session/created', () => void published.push('session/created'))
     ctx.on('agent/created', () => void published.push('agent/created'))
     ctx.on('agent/session-start', () => void published.push('agent/session-start'))
+    // Native admission authenticates the exact LIVE parent, so a disposed parent is refused at the
+    // lineage check (before any context is touched) rather than via the inactive-context teaching error.
     await expect(start(ctx, 'spawn', {
       prompt: [{ type: 'text', text: 'do X' }],
       parent: parentHandle.agent,
-    })).rejects.toThrow(/inactive context/)
+    })).rejects.toThrow(/native initial lineage refused/)
     expect(ctx.agents.list().length).toBe(before)
     expect(ctx.sessions.list()).toHaveLength(sessionsBefore)
     expect(published).toEqual([])

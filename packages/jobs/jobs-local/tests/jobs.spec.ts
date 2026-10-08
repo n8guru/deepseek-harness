@@ -117,6 +117,7 @@ describe('LocalJobRegistry.start', () => {
 
   it('refuses to register while no job controller serves the owner', async () => {
     const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(LocalJobRegistry)
     expect(() => ctx.jobs.start(producer().spec))
       .toThrow('background jobs unavailable: no job controller serves this agent (load @deepseek-ai/dsh-tool-jobs in its composition)')
@@ -170,6 +171,7 @@ describe('LocalJobRegistry.start', () => {
     'rejects invalid maxConcurrentJobsPerOwner config: %s',
     async (maxConcurrentJobsPerOwner) => {
       const ctx = new Context()
+      await ctx.plugin(AgentRegistry)
       await expect(ctx.plugin(LocalJobRegistry, { maxConcurrentJobsPerOwner }))
         .rejects.toThrow()
     },
@@ -593,16 +595,16 @@ describe('LocalJobRegistry owner isolation', () => {
     expect(ctx.jobs.list().map(t => t.id)).toEqual([openTask])
   })
 
-  it('rejects an owned registration when no agent registry is mounted', async () => {
+  it('does not mount without the agent registry (agents and hostAdmission are required injects)', async () => {
+    // The admission cutoff made `agents` + `hostAdmission` hard injects, so the "owned registration with no
+    // agent registry" state is unreachable: the service simply never mounts.
     const ctx = new Context()
-    await ctx.plugin(LocalJobRegistry)
-    ctx.jobs.attachController('test-controller')
-    expect(() => ctx.jobs.start(producer({ owner: stubAgent(ctx, 'a') }).spec))
-      .toThrow('background job ownership requires the agent registry')
-    // The failed registration mutated nothing: no stored job, counter untouched.
-    expect(ctx.jobs.list()).toEqual([])
-    expect(ctx.jobs.start(producer().spec)).toBe('bash-1')
+    const fiber = ctx.plugin(LocalJobRegistry)
+    await Promise.resolve()
+    expect((ctx as unknown as { jobs?: unknown }).jobs).toBeUndefined()
+    await fiber.dispose()
   })
+
 
   it('a failed owner-cleanup attach leaves the registry unchanged and does not poison the owner', async () => {
     const ctx = await harness()
@@ -972,6 +974,7 @@ describe('LocalJobRegistry disposal', () => {
 
   it('detaching the last controller re-arms the register fence', async () => {
     const ctx = new Context()
+    await ctx.plugin(AgentRegistry)
     await ctx.plugin(LocalJobRegistry)
     const detachA1 = ctx.jobs.attachController('a')
     const detachA2 = ctx.jobs.attachController('a') // duplicate name counts independently

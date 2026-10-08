@@ -6,7 +6,6 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineContentToolFixture, type PostToolDecision } from '@deepseek-ai/dsh-tools'
 import AgentRegistry, { type Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import { ReactLoopAgent } from '../src/agent.ts'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import * as SessionInvariant from '@deepseek-ai/dsh-session/invariant'
 import * as AgentInvariant from '@deepseek-ai/dsh-agent/invariant'
@@ -531,10 +530,13 @@ describe('turn numbering continues across seeded sessions', () => {
     await ctx2.plugin(AgentLoop, { agents: [] })
     ctx2.llm.registerAdapter(['mock'], second)
 
-    const seeded = ctx2.sessions.create(SessionId('forked'), { seed: [...agent.session.events] })
-    const forked = new ReactLoopAgent(
-      ctx2, SessionId('forked-agent'), { provider: 'mock', model: 'mock' }, seeded,
-    )
+    // Publish through the factory so the agent runs under the injected AgentLoop context
+    // (a bare ReactLoopAgent on the root context cannot resolve hostAdmission).
+    const { agent: forked } = await ctx2.agentLoop.createAgent(ctx2, {
+      sessionId: SessionId('forked'),
+      seed: [...agent.session.events],
+      agentOptions: { provider: 'mock', model: 'mock' },
+    })
 
     const turns: number[] = []
     ctx2.on('session/event', (_s, event) => { if (event.type === 'turn/start') turns.push(event.data.turn) })

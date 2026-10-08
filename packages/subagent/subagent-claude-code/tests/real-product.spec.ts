@@ -21,6 +21,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import type {
   SubprocessHandle,
   SubprocessOutcome,
@@ -191,6 +194,9 @@ interface RealRuntime {
 async function realRuntime(): Promise<RealRuntime> {
   const ctx = new Context()
   contexts.push(ctx)
+  // Native admission authenticates the live registry, so the runtime mounts over the real agent loop.
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
   await ctx.plugin(LocalSubprocessRuntime)
   const handles: SubprocessHandle[] = []
@@ -220,10 +226,7 @@ async function realHarness(
     ...permissionMode === undefined ? {} : { permissionMode },
     disposeGraceMs: 3_000,
   })
-  const parent = {
-    id: 'real-parent',
-    session: { header: { cwd: instance.workspace } },
-  } as unknown as Agent
+  const parent = ctx.agentLoop.create(SessionId('real-parent'), {}, { cwd: instance.workspace })
   return {
     harness: {
       ctx,
@@ -397,14 +400,8 @@ describe('real Claude Agent SDK 0.3.220 and its distributed Claude Code 2.1.220 
       permissionMode: 'bypassPermissions',
       disposeGraceMs: 3_000,
     })
-    const safeParent = {
-      id: 'safe-parent',
-      session: { header: { cwd: safeInstance.workspace } },
-    } as unknown as Agent
-    const bypassParent = {
-      id: 'bypass-parent',
-      session: { header: { cwd: bypassInstance.workspace } },
-    } as unknown as Agent
+    const safeParent = ctx.agentLoop.create(SessionId('safe-parent'), {}, { cwd: safeInstance.workspace })
+    const bypassParent = ctx.agentLoop.create(SessionId('bypass-parent'), {}, { cwd: bypassInstance.workspace })
     const safeController = new AbortController()
 
     const [safeRun, bypassRun] = await Promise.all([

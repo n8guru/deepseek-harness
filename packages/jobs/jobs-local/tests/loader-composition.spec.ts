@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 
 let root: string | undefined
@@ -32,6 +33,7 @@ describe('jobs-local through a real Loader composition', () => {
     context = new Context()
     context.baseUrl = pathToFileURL(root).href + '/'
     await context.plugin(Loader)
+    await context.plugin(AgentRegistry)
     context.loader.builtins.include = Include
     context.loader.internal = {
       version: 'v2',

@@ -12,6 +12,8 @@ import type {
 } from '@deepseek-ai/dsh-workflow'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as toolWorkflow from '../src/index.ts'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -418,8 +420,8 @@ describe('dsh-tool-workflow', () => {
       // The tool and loop await run.result before cleanup, so cancellation must settle a script
       // parked on an unowned promise. Exercise that guarantee through the real registry and worker.
       const ctx = new Context()
-      await ctx.plugin(SystemPrompt)
-      await ctx.plugin(ToolRuntime)
+      await mountAgentLoopTestDependencies(ctx)
+      await ctx.plugin(AgentLoop, { agents: [] })
       await ctx.plugin(SubagentRuntime)
       ctx.subagents.registerProvider({
         name: 'spawn',
@@ -429,8 +431,9 @@ describe('dsh-tool-workflow', () => {
       })
       await ctx.plugin(WorkerThreadWorkflowEngine, { disposeGraceMs: 30 })
       await ctx.plugin(toolWorkflow, {})
-      const session = Session.create(SessionId('caller'))
-      const parent = { id: session.id, options: {}, session } as unknown as Agent
+      // Real live parent: native admission authenticates the live registry.
+      ctx.agentLoop.create(SessionId('caller'), {})
+      const parent = ctx.agents.get(SessionId('caller')) as Agent
       const controller = new AbortController()
       const pending = execute(ctx, {
         script: 'await new Promise(() => {})\nreturn 1',

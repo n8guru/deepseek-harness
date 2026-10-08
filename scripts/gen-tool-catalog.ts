@@ -414,6 +414,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     requires: ['ctx.tools', 'ctx.workflowEngine', 'ctx.subagents', 'ctx.systemPrompt', 'a calling Agent (exec.agent parents every fresh round)'],
     writes: ['tool/call', 'tool/result', 'workflow and child session events during execution'],
     async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(SubagentRuntime)
       registerCatalogSubagentProvider(ctx, 'mock')
       await ctx.plugin(VmWorkflowEngine, { provider: 'mock' })
@@ -460,6 +461,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     writes: ['tool/call', 'tool/result', 'child session events through the chosen provider'],
     shippedNames: ['subagent', 'subagent_fork'],
     async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(SubagentRuntime)
       registerCatalogSubagentProvider(ctx, 'mock')
       await ctx.plugin(ToolSubagent, { provider: 'mock' })
@@ -478,9 +480,9 @@ const TOOL_PACKAGES: ToolPackage[] = [
     requires: ['ctx.tools', 'ctx.subagents', 'ctx.agents and ctx.sessionProjections (list_agents only)'],
     writes: ['tool/call', 'tool/result', 'child session events through ctx.subagents'],
     async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(SubagentRuntime)
       await ctx.plugin(LocalJobRegistry)
-      await ctx.plugin(AgentRegistry)
       await ctx.plugin(SessionStore)
       await ctx.plugin(SessionProjectionRegistry)
       await ctx.plugin(ToolSubagentControl)
@@ -517,6 +519,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
     requires: ['ctx.tools', 'ctx.jobs', 'ctx.systemPrompt'],
     writes: ['tool/call', 'tool/result', 'user/message via agent.inject() for background completion notices'],
     async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(LocalJobRegistry)
       await ctx.plugin(ToolTasks)
     },
@@ -583,6 +586,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       // The tool injects `workflows`; boot the vm engine over a scripted
       // subagent provider to satisfy it. The schema does not depend on which
       // provider backs the engine.
+      await ctx.plugin(AgentRegistry)
       await ctx.plugin(SubagentRuntime)
       registerCatalogSubagentProvider(ctx, 'mock')
       await ctx.plugin(VmWorkflowEngine, { provider: 'mock' })

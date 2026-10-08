@@ -438,13 +438,16 @@ describe('agent scope lifecycle', () => {
     })
     await setupStarted.promise
 
-    await loopFiber.dispose()
+    // Old-source contract: unload joins the RAW setup promise, so it completes only after setup settles.
+    // The caller is still released by the abort and both ids are freed before that.
+    const unloading = loopFiber.dispose()
     await expect(creating).rejects.toThrow(/agent loop is not active/)
     expect(published).toEqual([])
     expect(ctx.agents.get(SessionId('factory-setup-race-s'))).toBeUndefined()
     expect(ctx.sessions.get(SessionId('factory-setup-race-s'))).toBeUndefined()
 
     gate.resolve(undefined)
+    await unloading
     await ctx.fiber.dispose()
   })
 

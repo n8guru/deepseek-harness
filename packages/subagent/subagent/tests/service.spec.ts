@@ -1,6 +1,8 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { type Agent } from '@deepseek-ai/dsh-agent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { carrierKeyOf } from '@deepseek-ai/dsh-scope'
@@ -20,8 +22,14 @@ import SubagentRuntime, {
 } from '@deepseek-ai/dsh-subagent'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 
+/** The context of the test in flight: native admission authenticates parents against its live registry. */
+let activeCtx: Context | undefined
+
+/** A real live parent Agent from the active test's registry (admission rejects fabricated parents). */
 function fakeParent(id = 'parent-1'): Agent {
-  return { id: SessionId(id) } as unknown as Agent
+  if (activeCtx === undefined) throw new Error('fixture parent requires service() first')
+  const existing = activeCtx.agents.get(SessionId(id))
+  return existing ?? activeCtx.agentLoop.create(SessionId(id), {})
 }
 
 const ALL_CAPS: SubagentCapabilities = { outputSchema: true, depthLimit: true, toolFilter: true, persona: true }
@@ -64,7 +72,10 @@ class StubProvider implements SubagentProvider {
 
 async function service(): Promise<{ ctx: Context; subagents: SubagentRuntime }> {
   const ctx = new Context()
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
+  activeCtx = ctx
   return { ctx, subagents: ctx.subagents }
 }
 
@@ -113,52 +124,57 @@ describe('SubagentRuntime', () => {
     const request = baseRequest()
     await subagents.start('one-shot', request)
 
-    expect(provider.lastRequest).toEqual({
-      ...request,
-      descriptor: {
-        version: SUBAGENT_DESCRIPTOR_VERSION,
-        mode: 'one-shot',
-        provider: 'one-shot',
-      },
+    // Native admission hands the provider a frozen snapshot (not the caller's object) carrying the
+    // admitted initial-publication grant; the live parent and signal pass through by identity.
+    const received = provider.lastRequest
+    expect(received?.descriptor).toEqual({
+      version: SUBAGENT_DESCRIPTOR_VERSION,
+      mode: 'one-shot',
+      provider: 'one-shot',
     })
-    expect(provider.lastRequest).not.toBe(request)
+    expect(received?.prompt).toEqual(request.prompt)
+    expect(received?.parent).toBe(request.parent)
+    expect(received?.signal).toBe(request.signal)
+    expect(received?.initialAdmission).toBeDefined()
+    expect(received).not.toBe(request)
     expectTypeOf<Parameters<SubagentRuntime['start']>[1]>().toExtend<SubagentStartRequest>()
     expect('resume' in subagents).toBe(false)
     expect('resume' in provider).toBe(false)
   })
 
-  it('does not expose manager teardown and treats public drains as no-ops when no manager was bound', async () => {
+  it('does not expose manager teardown and treats public drains as no-ops when nothing was materialized', async () => {
     const { subagents } = await service()
-    // Without `ctx.agents` no manager exists, so nothing was ever materialized.
+    // No continuable child was ever materialized, so there is nothing to drain.
     expect('drainContinuable' in subagents).toBe(false)
     await expect(subagents.drainContinuableDescendants([])).resolves.toBeUndefined()
     await expect(subagents.drainContinuableChildren(fakeParent(), [SessionId('child')])).resolves.toBeUndefined()
   })
 
-  it('treats interrupt as an accepted no-op when no manager was bound', async () => {
+  it('treats interrupt as an accepted no-op when no Activation exists', async () => {
     const { subagents } = await service()
-    // Without a continuation manager no live Activation can exist, so there is
-    // nothing to stop and nothing to authorize against.
+    // With no live Activation there is nothing to stop and nothing to authorize against.
     expect(() => { subagents.interrupt(SessionId('child'), {
       kind: 'user',
       parentSessionId: SessionId('parent-1'),
     }) }).not.toThrow()
   })
 
-  it('rejects continuable operations when their runtime services are absent', async () => {
+  it('rejects continuable operations when session persistence is absent', async () => {
+    // The runtime now requires `agents`, so a manager always exists once mounted; the
+    // remaining absent dependency is the persistence backend.
     const { subagents } = await service()
     await expect(subagents.startContinuable({
       provider: 'unused',
       label: 'unused child',
       request: baseRequest(),
       signal: new AbortController().signal,
-    })).rejects.toMatchObject({ code: 'CONTINUATION_UNAVAILABLE' })
+    })).rejects.toMatchObject({ code: 'PERSISTENCE_UNAVAILABLE' })
     await expect(subagents.followup(
       fakeParent(),
       SessionId('child'),
       [{ type: 'text', text: 'hello' }],
       { source: { kind: 'user' }, signal: new AbortController().signal },
-    )).rejects.toMatchObject({ code: 'CONTINUATION_UNAVAILABLE' })
+    )).rejects.toMatchObject({ code: 'PERSISTENCE_UNAVAILABLE' })
   })
 
   it.each([
