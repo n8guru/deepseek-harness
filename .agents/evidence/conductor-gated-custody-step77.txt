@@ -1,0 +1,86 @@
+conductor-relay1919970 step77 — task143099 attempt1
+SOURCE CHECKPOINT ONLY; NOT COMPLETE; NOT INDEPENDENTLY VERIFIED
+Branch agents/forge/conductor-activity-snapshot
+Base f861b0825a3fbfff175286ebadc78c696d36a535 (reviewed step76).
+Native repository https://github.com/n8guru/deepseek-harness.git
+Single writer lease dsh-native-focus-admission, holder task:143099:attempt:1.
+No install, service restart, runtime activation, hold release or live delivery.
+No structured Forage deploy pin. No old-source/notifier obligation changed.
+
+IMPLEMENTED DELTA
+Existing NotificationInbox optionally stages bounded ordered activity-gated custody.
+One required-on-read agent/notification/activity-gated event retains original
+message identities, order, admission origin/sequence, target and versioned
+hostEpoch/bindingEpoch/activityRevision/controlRevision before ordinary splices.
+The standard native inbox remains the only pending queue. Marked splices without
+custody refuse; unknown/missing/ignorable custody refuses. Pending notification
+source messages without receipts also refuse, rather than becoming foreground.
+Projection cache version 3 validates both marker/binding halves.
+
+Staging returns provisional identity evidence, never an accepted or delivered ACK.
+Successful participating Session flush remains necessary for durable custody.
+Fresh-process replay reconstructs an interrupted insertion suffix with original IDs;
+duplicate and terminal receipts remain evidence only, not delivery authorization.
+Immutable Session append snapshots prevent synchronous observers mutating callers'
+original items from changing pending identity/order/binding after the required event.
+Forked receipts retain holds and cannot be readmitted under parent identity.
+Native ungated admission and existing HTTP prevalidation reject gated collisions.
+HTTP activityGated=409 and activity eligible:false remain unchanged.
+Check, Focus clear and Stop resume never release a gated receipt.
+Admission pre/postflush and final model-entry authorization remain steps78/79;
+assembled qualification remains80. Nothing here completes70 or unblocks71.
+
+PRODUCER CHECKS (not independent review)
+Final matrix:
+pnpm exec vitest run packages/core/agent-loop/tests packages/core/agent/tests
+ packages/client/connection/tests packages/session/session-persistence-jsonl/tests
+ packages/session/session-projection/tests
+74 passed files,1 skipped;1527 passed tests,3 skipped;exit0.
+Skips retain unavailable adapter coverage, not evidence of that adapter passing.
+Real JSONL fixtures use distinct Node processes and isolated temporary roots:
+ordered replay; crash after custody before any splice; torn final splice;
+unknown version/event, missing binding/custody/receipt, ignorable custody;
+real FileHandle.sync uncertainty and participant failure after bytes persist;
+terminal evidence-only replay; zero model requests. Corruption subprocess
+assertions other than missing-receipt currently accept any nonzero process error;
+a follow-up should tighten these to exact refusal diagnostics.
+Host/client noEmit passed before the final documentation-only changes.
+Final normal precommit/prepush outcomes are recorded in the task reporting pin.
+Parent synchronous mutation probe: PARENT_REENTRANT_MUTATION_HELD.
+Pre-edit baseline: native54files745passed/2skip; JSONL+projection19files765passed/
+1skip; full doc-sync29passed14failed. Final doc-sync31passed12failed (exit1):
+inherited maintenance doc graph/type equivalence, catalogs, export JSDoc,
+persistence history/format references, concrete terms/references and translation
+pairing. Persistence inventory is fresh; full doc-sync is not claimed green.
+
+BLOCKING CANONICAL COMPATIBILITY ACKNOWLEDGEMENT
+verify-persistence-changes --json returns exit1 finalized-format-changed:
+existing Connection MessageSourceMap.notification requires Session format5+
+relative to accepted format4 in inbox splice, user/message, developer/message,
+and title-LLM-request roots. This predates the delta, but blocks recording THIS
+new event's canonical acknowledgment. Our event is root-added, splice field is
+additive; generated inventory also contains inherited Focus/maintenance deltas.
+Catalog/schema generated normally; accepted history remains untouched.
+
+Attempted the standard record command: refused on the above breaking roots.
+Parent investigated @persistenceAttribution as a metadata-only alternative.
+Its mechanical classification permits recording, but its semantic promise
+(no reader validation/replay dependency) is FALSE for the new orphan-receipt
+fail-closed validation using source.kind. Parent removed that annotation and
+removed the newly generated, uncommitted acknowledgment. No false qualification,
+history rewrite, format bump or verifier/hook bypass survives in this checkpoint.
+Final verify-persistence-changes again reports finalized-format-changed.
+Draft ignored .artifacts prose is NOT a canonical acknowledgment or authority.
+
+PROPOSED CONTINUATION (needs_split / compatibility scope)
+1. Reconcile native notification Session-format compatibility.
+   Acceptance: explicit supported format migration/reader policy for notification
+   sources, fixtures for accepted old logs and incompatible readers, canonical
+   persistence history check green without false attribution or history rewrites.
+2. Finish step77 custody acceptance from this exact checkpoint.
+   Acceptance: canonical bilingual acknowledgment and current inventory agree,
+   precise corruption refusal assertions, final native tests/typechecks pass;
+   independent cross-provider reviewer result before done_verified.
+These are proposals, not newly authorized work. Resume only after ledger owner
+records the compatibility continuation scope and preserves the source-only holds.
+EXECUTED_MODEL: gpt-6-astra

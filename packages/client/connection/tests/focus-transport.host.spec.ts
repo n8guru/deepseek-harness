@@ -104,6 +104,27 @@ it('authenticates an actual caller, durably retries its identity and never accep
       await agent.whenIdle()
       expect(adapter.requests).toHaveLength(2)
     } finally { flush.mockRestore() }
+    const gatedInbox = agent.inbox.notifications!
+    gatedInbox.stageActivityGated!('next-step', [{
+      admission: { origin: 'test:caller', sequence: 'gated-collision', activityGated: true },
+      message: createUserMessage({
+        source: { kind: 'notification', origin: 'test:caller', form: 'notice', summary: 'Authenticated background notification' },
+        content: [{ type: 'text', text: 'gated custody' }],
+      }),
+    }], { version: 1, hostEpoch: 'original-host', bindingEpoch: 'original-binding', activityRevision: 1, controlRevision: 1 })
+    expect(await ctx.sessions.flush(agent.session)).toBe(true)
+    const beforeCollision = agent.session.seq
+    for (const items of [
+      [{ sequence: 'gated-collision', text: 'gated custody' }],
+      [{ sequence: 'new-before-collision', text: 'must not insert' }, { sequence: 'gated-collision', text: 'gated custody' }],
+    ]) {
+      const collision = await post('/api/notifications.admit', { sessionId: agent.id, items }, { authorization: `Bearer ${bearer}` })
+      expect(collision.status).toBe(409)
+      expect(await collision.text()).toBe('gated receipt requires gated handling')
+      expect(agent.session.seq).toBe(beforeCollision)
+    }
+    expect(gatedInbox.receipt('test:caller', 'new-before-collision')).toBeUndefined()
+    expect(adapter.requests).toHaveLength(2)
     const admissionCuts: ReturnType<OperatorActivity['snapshot']>[] = []
     ctx.on('host-admission/changed', () => { admissionCuts.push(activity.snapshot(agent.id)) })
     const activity = new OperatorActivity(ctx, 300000)

@@ -24,7 +24,8 @@
 | `SessionEventEnvelope` | envelope | `5776e5553ff2dfe3f5bc202dbb1e7c9f93e35a531aebb7764c23b2b6153b2ccc` | [`union (3 variants)`](#persistence-type-sha256-5776e5553ff2dfe3f5bc202dbb1e7c9f93e35a531aebb7764c23b2b6153b2ccc) |
 | `event:agent-preset/selected` | event | `a10c17474eaf2ddab7095a099e0fe3d046fc18e56c3e344fc8894c05ff9ef97b` | [`{ type: "agent-preset/selected" }`](#persistence-type-sha256-a10c17474eaf2ddab7095a099e0fe3d046fc18e56c3e344fc8894c05ff9ef97b) |
 | `event:agent/focus` | event | `e9a6e30a6bca43619027652b2632403aa690c4c21387c129240a8b153bce3c61` | [`{ type: "agent/focus" }`](#persistence-type-sha256-e9a6e30a6bca43619027652b2632403aa690c4c21387c129240a8b153bce3c61) |
-| `event:agent/inbox/spliced` | event | `13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da` | [`{ type: "agent/inbox/spliced" }`](#persistence-type-sha256-13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da) |
+| `event:agent/inbox/spliced` | event | `a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc` | [`{ type: "agent/inbox/spliced" }`](#persistence-type-sha256-a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc) |
+| `event:agent/notification/activity-gated` | event | `82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577` | [`{ type: "agent/notification/activity-gated" }`](#persistence-type-sha256-82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577) |
 | `event:agent/notification/terminal` | event | `a12538d22ae5c7fa6c3f991b6c43b3029aa006c963187c562e011dd17f88f492` | [`{ type: "agent/notification/terminal" }`](#persistence-type-sha256-a12538d22ae5c7fa6c3f991b6c43b3029aa006c963187c562e011dd17f88f492) |
 | `event:approval/asked` | event | `3bfeb47b58606f4661904bc723da612782214c463d01e6d61cd6d6193d7374e1` | [`{ type: "approval/asked" }`](#persistence-type-sha256-3bfeb47b58606f4661904bc723da612782214c463d01e6d61cd6d6193d7374e1) |
 | `event:approval/decided` | event | `bb1ab3d08f49a9f3b265f844cd78d5c49813062a7b34b54904b426f85d0ff6e3` | [`{ type: "approval/decided" }`](#persistence-type-sha256-bb1ab3d08f49a9f3b265f844cd78d5c49813062a7b34b54904b426f85d0ff6e3) |
@@ -176,7 +177,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'agent/focus': { enabled: boolean; check?: { id: string; messageIds: string[] } }
 ```
 
-来源：[`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:232`](../packages/core/agent/src/types.ts)
 
 <a id="agentinboxspliced--log-only"></a>
 
@@ -198,7 +199,18 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/core/agent/src/types.ts:154`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:242`](../packages/core/agent/src/types.ts)
+
+<a id="agentnotificationactivity-gated--log-only"></a>
+
+#### `agent/notification/activity-gated` — log-only
+
+```ts persistence-catalog
+/** Ordered held receipts and their original activity/control binding; never ignorable. */
+'agent/notification/activity-gated': GatedNotificationBatch
+```
+
+来源：[`packages/core/agent/src/types.ts:234`](../packages/core/agent/src/types.ts)
 
 <a id="agentnotificationterminal--log-only"></a>
 
@@ -209,7 +221,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'agent/notification/terminal': { messageIds: string[]; reason: 'rejected' | 'discarded' | 'disposed' }
 ```
 
-来源：[`packages/core/agent/src/types.ts:148`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:236`](../packages/core/agent/src/types.ts)
 
 ### `agent-preset/*`
 
@@ -645,7 +657,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'host/maintenance': MaintenanceState
 ```
 
-来源：[`packages/core/agent-loop/src/maintenance.ts:62`](../packages/core/agent-loop/src/maintenance.ts)
+来源：[`packages/core/agent-loop/src/maintenance.ts:74`](../packages/core/agent-loop/src/maintenance.ts)
 
 <a id="hostmaintenance-successor--log-only"></a>
 
@@ -656,7 +668,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'host/maintenance-successor': { owner: string; runId: string; batonDigest: string; messageId: string; launch: MaintenanceLaunchConfig }
 ```
 
-来源：[`packages/core/agent-loop/src/maintenance.ts:64`](../packages/core/agent-loop/src/maintenance.ts)
+来源：[`packages/core/agent-loop/src/maintenance.ts:76`](../packages/core/agent-loop/src/maintenance.ts)
 
 ### `image/*`
 
@@ -1417,6 +1429,14 @@ SHA-256: `8b1689d839c62dc8ad86c0a433fe17ea173bccefd7f8d0253dda3e20e5ca12a3`
 SHA-256: `829a2fb3be6efd4ba36aef8ed2d381a4c6fb2a0aaf50c823a6f3f8290786b809`
 
 `"agent/inbox/spliced"`
+
+<a id="persistence-type-sha256-7def199f93e217edab5f38c9fe65a642bddf97fe7e0fa936d4e7ba983622b8d7"></a>
+
+### `"agent/notification/activity-gated"`
+
+SHA-256: `7def199f93e217edab5f38c9fe65a642bddf97fe7e0fa936d4e7ba983622b8d7`
+
+`"agent/notification/activity-gated"`
 
 <a id="persistence-type-sha256-17fdebe5b55b474e970e2e6fa20f7260cb3a87a38df16c8a57b02ec0cbf7b5b3"></a>
 
@@ -3545,6 +3565,51 @@ SHA-256: `5808e36c95355f0e745201b5db1b6bcec4ebf5adb75d3e82d7d59cc89635ab80`
 | `stop` | 未声明 | 无 | [`{ kind: "stop" }`](#persistence-type-sha256-1d76406cbb2ddadb0dbbb51e9d8bc6cf678fed455cf8eb512f36f7c86d37a62f) |
 | `tool-calls` | 未声明 | 无 | [`{ kind: "tool-calls" }`](#persistence-type-sha256-287211846beea1eccb5f9acee00d20388a38fcb2e95858fa2332d6f58529379a) |
 
+<a id="persistence-type-sha256-2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7"></a>
+
+<a id="persistence-type-gatednotificationbatch"></a>
+
+<a id="persistence-type-packagescoreagentsrctypestsgatednotificationbatch"></a>
+
+### `GatedNotificationBatch`
+
+SHA-256: `2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7`
+
+来源：[`packages/core/agent/src/types.ts:120`](../packages/core/agent/src/types.ts)
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `guard` | 必需 | [`NotificationActivityGuard`](#persistence-type-sha256-64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5) |
+| `items` | 必需 | [`GatedNotificationItem[]`](#persistence-type-sha256-e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4) |
+| `sessionId` | 必需 | `string` |
+| `target` | 必需 | [`InboxTarget`](#persistence-type-sha256-96f4a9c81fc0f940ef71528a8cc66731ae4cf1f40d79680c5fe3c39f96d7723c) |
+| `version` | 必需 | `1` |
+
+<a id="persistence-type-sha256-926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5"></a>
+
+<a id="persistence-type-gatednotificationitem"></a>
+
+<a id="persistence-type-packagescoreagentsrctypestsgatednotificationitem"></a>
+
+### `GatedNotificationItem`
+
+SHA-256: `926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5`
+
+来源：[`packages/core/agent/src/types.ts:114`](../packages/core/agent/src/types.ts)
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `admission` | 必需 | [`{ activityGated, origin, sequence, urgency? }`](#persistence-type-sha256-5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c) |
+| `message` | 必需 | [`UserMessage`](#persistence-type-sha256-56126598719328b05bb7edd05ed0063cb6ab30626ee177c5c2f37621540cc719) |
+
+<a id="persistence-type-sha256-e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4"></a>
+
+### `GatedNotificationItem[]`
+
+SHA-256: `e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4`
+
+[`GatedNotificationItem`](#persistence-type-sha256-926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5) 的数组。
+
 <a id="persistence-type-sha256-84ac8c1a66ffc697262e181f42e851259eae14038c113ca329fb4700ccdb1f7c"></a>
 
 <a id="persistence-type-goalblockreason"></a>
@@ -4056,7 +4121,7 @@ SHA-256: `6f72ece8f317cd080c4f20a93f1bf709965f5b81ac4669528f5a023191cfcf20`
 
 SHA-256: `b88044a96d2252142388a5bed2754febb72935bc6cfdfb1a8e45213f01a84fdb`
 
-来源：[`packages/core/agent-loop/src/maintenance.ts:35`](../packages/core/agent-loop/src/maintenance.ts)
+来源：[`packages/core/agent-loop/src/maintenance.ts:36`](../packages/core/agent-loop/src/maintenance.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -4076,7 +4141,7 @@ SHA-256: `b88044a96d2252142388a5bed2754febb72935bc6cfdfb1a8e45213f01a84fdb`
 
 SHA-256: `c74fa41db595a071924ce2147f703ed71274947e09f6d73b327f95dd27352a7e`
 
-来源：[`packages/core/agent-loop/src/maintenance.ts:52`](../packages/core/agent-loop/src/maintenance.ts)
+来源：[`packages/core/agent-loop/src/maintenance.ts:56`](../packages/core/agent-loop/src/maintenance.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -4355,7 +4420,27 @@ SHA-256: `f09e5e7acf5ff5ccd193ff2eeec015fa2ff7c29d98bc465f8c3302058d47e29b`
 | `provider` | 必需 | `string` |
 | `reasoningEffort` | 可选 | `string` |
 
-<a id="persistence-type-sha256-897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e"></a>
+<a id="persistence-type-sha256-64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5"></a>
+
+<a id="persistence-type-notificationactivityguard"></a>
+
+<a id="persistence-type-packagescoreagentsrctypestsnotificationactivityguard"></a>
+
+### `NotificationActivityGuard`
+
+SHA-256: `64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5`
+
+来源：[`packages/core/agent/src/types.ts:105`](../packages/core/agent/src/types.ts)
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `activityRevision` | 必需 | `number` |
+| `bindingEpoch` | 必需 | `string` |
+| `controlRevision` | 必需 | `number` |
+| `hostEpoch` | 必需 | `string` |
+| `version` | 必需 | `1` |
+
+<a id="persistence-type-sha256-bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274"></a>
 
 <a id="persistence-type-notificationadmission"></a>
 
@@ -4363,12 +4448,13 @@ SHA-256: `f09e5e7acf5ff5ccd193ff2eeec015fa2ff7c29d98bc465f8c3302058d47e29b`
 
 ### `NotificationAdmission`
 
-SHA-256: `897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e`
+SHA-256: `bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274`
 
-来源：[`packages/core/agent/src/types.ts:61`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:96`](../packages/core/agent/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
+| `activityGated` | 可选 | `true` |
 | `origin` | 必需 | `string` |
 | `sequence` | 必需 | `string` |
 | `urgency` | 可选 | [`{ kind, reason }`](#persistence-type-sha256-d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c) |
@@ -5860,6 +5946,19 @@ SHA-256: `20a57544bbf204dacd1ae6beb2ab29444365c3c869f2afdf489dcdcbc3d9c8c5`
 |---|---|---|
 | `active` | 必需 | `boolean` |
 
+<a id="persistence-type-sha256-5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c"></a>
+
+### `{ activityGated, origin, sequence, urgency? }`
+
+SHA-256: `5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c`
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `activityGated` | 必需 | `true` |
+| `origin` | 必需 | `string` |
+| `sequence` | 必需 | `string` |
+| `urgency` | 可选 | [`{ kind, reason }`](#persistence-type-sha256-d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c) |
+
 <a id="persistence-type-sha256-6e52dd55a1d48954ed5464ec46fe34d9eb65f709baabc9561e7a279910b0c406"></a>
 
 ### `{ agentPreset }`
@@ -5946,7 +6045,7 @@ SHA-256: `bea0f73871e7b0a4ca0ecc0ba1d55cbc0b547419c7f7513fce5e33d50dbfc53d`
 
 SHA-256: `7760b51ec33c51f27b73f9425151021d503906c950db994662894a514c6275cb`
 
-来源：[`packages/core/agent-loop/src/maintenance.ts:64`](../packages/core/agent-loop/src/maintenance.ts)
+来源：[`packages/core/agent-loop/src/maintenance.ts:76`](../packages/core/agent-loop/src/maintenance.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -6021,7 +6120,7 @@ SHA-256: `df843efd87c78cf8de98f8e0d0216956cd568d0d0e56a22c853663e274aa1a18`
 
 SHA-256: `537eb1d3c79fdabe339e868131f499d4cdabb712ba3de39d1ede0ce67f69ce13`
 
-来源：[`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:232`](../packages/core/agent/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -6483,7 +6582,7 @@ SHA-256: `0f46153645c297846a3fad3911636659ca4717a5e7d71c9f50bffacd312115ef`
 
 SHA-256: `eec7e0bbb8e7b560c0bedf30c080ee9bf323d9e77e3998296b60b51a34080981`
 
-来源：[`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:232`](../packages/core/agent/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -6557,18 +6656,18 @@ SHA-256: `17d1afb770d9941936130996da00dc86782cfef731d8d6526162c301256a4ac3`
 |---|---|---|
 | `inherited` | 可选 | `true` |
 
-<a id="persistence-type-sha256-d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e"></a>
+<a id="persistence-type-sha256-d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749"></a>
 
 ### `{ inserted, notification?, outcome?, removedCount?, … }`
 
-SHA-256: `d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e`
+SHA-256: `d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749`
 
-来源：[`packages/core/agent/src/types.ts:154`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:242`](../packages/core/agent/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
 | `inserted` | 必需 | [`UserMessage[]`](#persistence-type-sha256-a130119474e3e11cd83ee87e7f11b4337e774079ecbd2031975a2478f470d8cb) |
-| `notification` | 可选 | [`NotificationAdmission`](#persistence-type-sha256-897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e) |
+| `notification` | 可选 | [`NotificationAdmission`](#persistence-type-sha256-bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274) |
 | `outcome` | 可选 | `"canceled"` |
 | `removedCount` | 可选 | `number` |
 | `start` | 必需 | `number` |
@@ -6597,7 +6696,7 @@ SHA-256: `1ccb56061942f5ccb0d30c9e4f2883b9d115ff906560029de637b61d3cde896d`
 
 SHA-256: `d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c`
 
-来源：[`packages/core/agent/src/types.ts:64`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:99`](../packages/core/agent/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -8046,7 +8145,7 @@ SHA-256: `0bcfaf5566d271028429ac7b562cb59053c9d78b8ae14708c35fac835108d1b1`
 
 SHA-256: `e2414d0b86cb14d138f1f4a7246453bd9baa09211a59f6c4f4bef19fcc6b843e`
 
-来源：[`packages/core/agent/src/types.ts:148`](../packages/core/agent/src/types.ts)
+来源：[`packages/core/agent/src/types.ts:236`](../packages/core/agent/src/types.ts)
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
@@ -8254,21 +8353,37 @@ SHA-256: `e9a6e30a6bca43619027652b2632403aa690c4c21387c129240a8b153bce3c61`
 | `time` | 必需 | `number` |
 | `type` | 必需 | `"agent/focus"` |
 
-<a id="persistence-type-sha256-13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da"></a>
+<a id="persistence-type-sha256-a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc"></a>
 
 <a id="persistence-type-eventagentinboxspliced"></a>
 
 ### `{ type: "agent/inbox/spliced" }`
 
-SHA-256: `13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da`
+SHA-256: `a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc`
 
 | 属性 | 存在性 | 类型 |
 |---|---|---|
-| `data` | 必需 | [`{ inserted, notification?, outcome?, removedCount?, … }`](#persistence-type-sha256-d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e) |
+| `data` | 必需 | [`{ inserted, notification?, outcome?, removedCount?, … }`](#persistence-type-sha256-d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749) |
 | `ignorable` | 可选 | `true` |
 | `seq` | 必需 | `number` |
 | `time` | 必需 | `number` |
 | `type` | 必需 | `"agent/inbox/spliced"` |
+
+<a id="persistence-type-sha256-82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577"></a>
+
+<a id="persistence-type-eventagentnotificationactivity-gated"></a>
+
+### `{ type: "agent/notification/activity-gated" }`
+
+SHA-256: `82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577`
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `data` | 必需 | [`GatedNotificationBatch`](#persistence-type-sha256-2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7) |
+| `ignorable` | 可选 | `true` |
+| `seq` | 必需 | `number` |
+| `time` | 必需 | `number` |
+| `type` | 必需 | `"agent/notification/activity-gated"` |
 
 <a id="persistence-type-sha256-a12538d22ae5c7fa6c3f991b6c43b3029aa006c963187c562e011dd17f88f492"></a>
 

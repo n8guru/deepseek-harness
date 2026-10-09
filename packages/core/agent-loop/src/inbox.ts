@@ -17,9 +17,12 @@ import type {
   InboxTarget,
   InboxWireState,
   NotificationAdmission,
+  NotificationActivityGuard,
+  GatedNotificationItem,
   NotificationState,
 } from '@deepseek-ai/dsh-agent'
 import { z } from 'zod'
+import { gatedNotificationBatchSchema } from './notifications.ts'
 
 /** Wire validation for pending agent input reconstructed from durable inbox splices. */
 export const inboxProjectionSchema = z.object({
@@ -97,6 +100,17 @@ export class ReactLoopInbox implements InboxContract {
   private notificationState(): NotificationState {
     const state = this.projections.stateOf(this.session, 'notifications')
     if (state === undefined) throw new Error('notification projection unavailable')
+    for (const receipt of state.receipts) {
+      if ((receipt.admission.activityGated === true) !== (receipt.activityGate !== undefined)
+        || (receipt.activityGate !== undefined && receipt.activityGate.sessionId !== this.session.id && !this.session.header.isSeeded)) throw new Error('invalid gated notification state')
+    }
+    for (const message of [...this.nextStep, ...this.nextTurn]) {
+      // Connection declares this extension; durable readers need not load its compiler face.
+      const sourceKind: string = message.source.kind
+      if (sourceKind === 'notification' && !state.receipts.some(r => r.message.id === message.id)) {
+        throw new Error('pending notification lacks its receipt')
+      }
+    }
     return state
   }
 
@@ -145,12 +159,19 @@ export class ReactLoopInbox implements InboxContract {
 
   isHeld(message: UserMessage): boolean {
     const state = this.notificationState()
-    return state.enabled && this.admissionFor(message.id) !== undefined
-      && !state.released.includes(message.id)
+    const receipt = this.admissionFor(message.id)
+    // Persistence-only capability: Check and Focus clearing cannot authorize gated delivery.
+    if (receipt?.activityGate !== undefined) return true
+    return state.enabled && receipt !== undefined && !state.released.includes(message.id)
   }
 
   receipt(origin: string, sequence: string): UserMessage | undefined {
     return this.notificationState().receipts.find(r => r.admission.origin === origin && r.admission.sequence === sequence)?.message
+  }
+
+  isActivityGatedReceipt(origin: string, sequence: string): boolean {
+    return this.notificationState().receipts.some(r =>
+      r.admission.origin === origin && r.admission.sequence === sequence && r.activityGate !== undefined)
   }
 
   isPendingReceipt(origin: string, sequence: string): boolean {
@@ -160,6 +181,9 @@ export class ReactLoopInbox implements InboxContract {
 
   admit(target: InboxTarget, message: UserMessage, admission: NotificationAdmission): boolean {
     if (!this.accepting) throw new Error('native inbox admission disposed')
+    if (admission.activityGated !== undefined || this.isActivityGatedReceipt(admission.origin, admission.sequence)) {
+      throw new Error('gated notifications require ordered custody staging')
+    }
     if (this.receipt(admission.origin, admission.sequence) !== undefined) return false
     this.admission()?.assert()
     this.mutate(target, Infinity, 0, [message], true, admission)
@@ -172,18 +196,60 @@ export class ReactLoopInbox implements InboxContract {
     if (owner?.forSession === undefined) throw new Error('native maintenance receipt capability unsupported')
     owner.forSession(permit, this.session.id).assert()
     owner.assertReceipt?.(permit, message)
+    if (admission.activityGated !== undefined || this.isActivityGatedReceipt(admission.origin, admission.sequence)) {
+      throw new Error('gated notifications require ordered custody staging')
+    }
     if (this.receipt(admission.origin, admission.sequence) !== undefined) return false
     this.mutate(target, Infinity, 0, [message], true, admission)
     return true
   }
 
+  stageActivityGated(
+    target: InboxTarget, items: GatedNotificationItem[], guard: NotificationActivityGuard,
+  ): readonly { sequence: string; messageId: MessageId; duplicate: boolean }[] {
+    if (!this.accepting) throw new Error('native inbox admission disposed')
+    const batch = { version: 1 as const, sessionId: this.session.id, target, guard, items }
+    gatedNotificationBatchSchema.parse(batch)
+    const state = this.notificationState()
+    const sequences = new Set<string>()
+    const ids = new Set<string>()
+    const fresh: GatedNotificationItem[] = []
+    const receipts = items.map((item) => {
+      const { message, admission } = item
+      const key = JSON.stringify([admission.origin, admission.sequence])
+      if (sequences.has(key) || ids.has(message.id)) throw new Error('duplicate gated batch identity')
+      sequences.add(key)
+      ids.add(message.id)
+      const prior = state.receipts.find(r => r.admission.origin === admission.origin && r.admission.sequence === admission.sequence)
+      if (prior !== undefined) {
+        if (prior.activityGate?.sessionId !== this.session.id || prior.target !== target
+          || JSON.stringify(prior.admission) !== JSON.stringify(admission)
+          || JSON.stringify(prior.message.content) !== JSON.stringify(message.content)
+          || JSON.stringify(prior.message.source) !== JSON.stringify(message.source)) throw new Error('gated receipt conflict')
+        return { sequence: admission.sequence, messageId: prior.message.id, duplicate: true }
+      }
+      if (state.receipts.some(r => r.message.id === message.id) || this.locate(message.id) !== undefined) throw new Error('gated message identity conflict')
+      fresh.push(item)
+      return { sequence: admission.sequence, messageId: message.id, duplicate: false }
+    })
+    if (fresh.length === 0) return receipts
+    this.admission()?.assert()
+    // One required event owns the complete ordered selection even if insertion is interrupted.
+    const event = this.session.append('agent/notification/activity-gated', { ...batch, items: fresh })
+    for (const { message, admission } of event.data.items) this.mutate(target, Infinity, 0, [message], true, admission)
+    return receipts
+  }
+
   /** Restore admissions canceled before model-visible entry; committed messages never replay. */
   recoverUnentered(): void {
     const state = this.notificationState()
-    for (const { target, message } of state.receipts) {
+    for (const { target, message, admission, activityGate } of state.receipts) {
+      if (activityGate !== undefined && activityGate.sessionId !== this.session.id) continue
       if (!state.entered.includes(message.id)
         && !state.terminal.some(item => item.messageId === message.id)
-        && this.locate(message.id) === undefined) this.mutate(target, Infinity, 0, [message], false)
+        && this.locate(message.id) === undefined) {
+        this.mutate(target, Infinity, 0, [message], false, activityGate === undefined ? undefined : admission)
+      }
     }
   }
 
@@ -195,7 +261,7 @@ export class ReactLoopInbox implements InboxContract {
       .some(m => m.id === id && this.isHeld(m)))) return previous.messageIds
     const messageIds = previous === undefined
       ? [...this.nextStep, ...this.nextTurn]
-        .filter(m => this.isHeld(m) && this.admissionFor(m.id) !== undefined).slice(0, 10).map(m => m.id)
+        .filter(m => this.isHeld(m) && this.admissionFor(m.id)?.activityGate === undefined).slice(0, 10).map(m => m.id)
       : [...previous.messageIds]
     this.session.append('agent/focus', { enabled: this.focus.enabled, check: { id, messageIds } })
     return messageIds

@@ -22,7 +22,8 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `SessionEventEnvelope` | envelope | `5776e5553ff2dfe3f5bc202dbb1e7c9f93e35a531aebb7764c23b2b6153b2ccc` | [`union (3 variants)`](#persistence-type-sha256-5776e5553ff2dfe3f5bc202dbb1e7c9f93e35a531aebb7764c23b2b6153b2ccc) |
 | `event:agent-preset/selected` | event | `a10c17474eaf2ddab7095a099e0fe3d046fc18e56c3e344fc8894c05ff9ef97b` | [`{ type: "agent-preset/selected" }`](#persistence-type-sha256-a10c17474eaf2ddab7095a099e0fe3d046fc18e56c3e344fc8894c05ff9ef97b) |
 | `event:agent/focus` | event | `e9a6e30a6bca43619027652b2632403aa690c4c21387c129240a8b153bce3c61` | [`{ type: "agent/focus" }`](#persistence-type-sha256-e9a6e30a6bca43619027652b2632403aa690c4c21387c129240a8b153bce3c61) |
-| `event:agent/inbox/spliced` | event | `13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da` | [`{ type: "agent/inbox/spliced" }`](#persistence-type-sha256-13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da) |
+| `event:agent/inbox/spliced` | event | `a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc` | [`{ type: "agent/inbox/spliced" }`](#persistence-type-sha256-a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc) |
+| `event:agent/notification/activity-gated` | event | `82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577` | [`{ type: "agent/notification/activity-gated" }`](#persistence-type-sha256-82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577) |
 | `event:agent/notification/terminal` | event | `a12538d22ae5c7fa6c3f991b6c43b3029aa006c963187c562e011dd17f88f492` | [`{ type: "agent/notification/terminal" }`](#persistence-type-sha256-a12538d22ae5c7fa6c3f991b6c43b3029aa006c963187c562e011dd17f88f492) |
 | `event:approval/asked` | event | `3bfeb47b58606f4661904bc723da612782214c463d01e6d61cd6d6193d7374e1` | [`{ type: "approval/asked" }`](#persistence-type-sha256-3bfeb47b58606f4661904bc723da612782214c463d01e6d61cd6d6193d7374e1) |
 | `event:approval/decided` | event | `bb1ab3d08f49a9f3b265f844cd78d5c49813062a7b34b54904b426f85d0ff6e3` | [`{ type: "approval/decided" }`](#persistence-type-sha256-bb1ab3d08f49a9f3b265f844cd78d5c49813062a7b34b54904b426f85d0ff6e3) |
@@ -174,7 +175,7 @@ Sources: [`packages/core/session/src/types.ts:431`](../packages/core/session/src
 'agent/focus': { enabled: boolean; check?: { id: string; messageIds: string[] } }
 ```
 
-Source: [`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/types.ts)
+Source: [`packages/core/agent/src/types.ts:232`](../packages/core/agent/src/types.ts)
 
 <a id="agentinboxspliced--log-only"></a>
 
@@ -196,7 +197,18 @@ Source: [`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/type
 }
 ```
 
-Source: [`packages/core/agent/src/types.ts:154`](../packages/core/agent/src/types.ts)
+Source: [`packages/core/agent/src/types.ts:242`](../packages/core/agent/src/types.ts)
+
+<a id="agentnotificationactivity-gated--log-only"></a>
+
+#### `agent/notification/activity-gated` — log-only
+
+```ts persistence-catalog
+/** Ordered held receipts and their original activity/control binding; never ignorable. */
+'agent/notification/activity-gated': GatedNotificationBatch
+```
+
+Source: [`packages/core/agent/src/types.ts:234`](../packages/core/agent/src/types.ts)
 
 <a id="agentnotificationterminal--log-only"></a>
 
@@ -207,7 +219,7 @@ Source: [`packages/core/agent/src/types.ts:154`](../packages/core/agent/src/type
 'agent/notification/terminal': { messageIds: string[]; reason: 'rejected' | 'discarded' | 'disposed' }
 ```
 
-Source: [`packages/core/agent/src/types.ts:148`](../packages/core/agent/src/types.ts)
+Source: [`packages/core/agent/src/types.ts:236`](../packages/core/agent/src/types.ts)
 
 ### `agent-preset/*`
 
@@ -643,7 +655,7 @@ Source: [`packages/hooks/hook-protocol/src/types.ts:31`](../packages/hooks/hook-
 'host/maintenance': MaintenanceState
 ```
 
-Source: [`packages/core/agent-loop/src/maintenance.ts:62`](../packages/core/agent-loop/src/maintenance.ts)
+Source: [`packages/core/agent-loop/src/maintenance.ts:74`](../packages/core/agent-loop/src/maintenance.ts)
 
 <a id="hostmaintenance-successor--log-only"></a>
 
@@ -654,7 +666,7 @@ Source: [`packages/core/agent-loop/src/maintenance.ts:62`](../packages/core/agen
 'host/maintenance-successor': { owner: string; runId: string; batonDigest: string; messageId: string; launch: MaintenanceLaunchConfig }
 ```
 
-Source: [`packages/core/agent-loop/src/maintenance.ts:64`](../packages/core/agent-loop/src/maintenance.ts)
+Source: [`packages/core/agent-loop/src/maintenance.ts:76`](../packages/core/agent-loop/src/maintenance.ts)
 
 ### `image/*`
 
@@ -1415,6 +1427,14 @@ SHA-256: `8b1689d839c62dc8ad86c0a433fe17ea173bccefd7f8d0253dda3e20e5ca12a3`
 SHA-256: `829a2fb3be6efd4ba36aef8ed2d381a4c6fb2a0aaf50c823a6f3f8290786b809`
 
 `"agent/inbox/spliced"`
+
+<a id="persistence-type-sha256-7def199f93e217edab5f38c9fe65a642bddf97fe7e0fa936d4e7ba983622b8d7"></a>
+
+### `"agent/notification/activity-gated"`
+
+SHA-256: `7def199f93e217edab5f38c9fe65a642bddf97fe7e0fa936d4e7ba983622b8d7`
+
+`"agent/notification/activity-gated"`
 
 <a id="persistence-type-sha256-17fdebe5b55b474e970e2e6fa20f7260cb3a87a38df16c8a57b02ec0cbf7b5b3"></a>
 
@@ -3543,6 +3563,51 @@ Sources: [`packages/llm/llm/src/types.ts:165`](../packages/llm/llm/src/types.ts)
 | `stop` | not declared | none | [`{ kind: "stop" }`](#persistence-type-sha256-1d76406cbb2ddadb0dbbb51e9d8bc6cf678fed455cf8eb512f36f7c86d37a62f) |
 | `tool-calls` | not declared | none | [`{ kind: "tool-calls" }`](#persistence-type-sha256-287211846beea1eccb5f9acee00d20388a38fcb2e95858fa2332d6f58529379a) |
 
+<a id="persistence-type-sha256-2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7"></a>
+
+<a id="persistence-type-gatednotificationbatch"></a>
+
+<a id="persistence-type-packagescoreagentsrctypestsgatednotificationbatch"></a>
+
+### `GatedNotificationBatch`
+
+SHA-256: `2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7`
+
+Sources: [`packages/core/agent/src/types.ts:120`](../packages/core/agent/src/types.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `guard` | required | [`NotificationActivityGuard`](#persistence-type-sha256-64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5) |
+| `items` | required | [`GatedNotificationItem[]`](#persistence-type-sha256-e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4) |
+| `sessionId` | required | `string` |
+| `target` | required | [`InboxTarget`](#persistence-type-sha256-96f4a9c81fc0f940ef71528a8cc66731ae4cf1f40d79680c5fe3c39f96d7723c) |
+| `version` | required | `1` |
+
+<a id="persistence-type-sha256-926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5"></a>
+
+<a id="persistence-type-gatednotificationitem"></a>
+
+<a id="persistence-type-packagescoreagentsrctypestsgatednotificationitem"></a>
+
+### `GatedNotificationItem`
+
+SHA-256: `926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5`
+
+Sources: [`packages/core/agent/src/types.ts:114`](../packages/core/agent/src/types.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `admission` | required | [`{ activityGated, origin, sequence, urgency? }`](#persistence-type-sha256-5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c) |
+| `message` | required | [`UserMessage`](#persistence-type-sha256-56126598719328b05bb7edd05ed0063cb6ab30626ee177c5c2f37621540cc719) |
+
+<a id="persistence-type-sha256-e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4"></a>
+
+### `GatedNotificationItem[]`
+
+SHA-256: `e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4`
+
+Array of [`GatedNotificationItem`](#persistence-type-sha256-926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5).
+
 <a id="persistence-type-sha256-84ac8c1a66ffc697262e181f42e851259eae14038c113ca329fb4700ccdb1f7c"></a>
 
 <a id="persistence-type-goalblockreason"></a>
@@ -4054,7 +4119,7 @@ Sources: [`packages/llm/llm-retry/src/types.ts:43`](../packages/llm/llm-retry/sr
 
 SHA-256: `b88044a96d2252142388a5bed2754febb72935bc6cfdfb1a8e45213f01a84fdb`
 
-Sources: [`packages/core/agent-loop/src/maintenance.ts:35`](../packages/core/agent-loop/src/maintenance.ts)
+Sources: [`packages/core/agent-loop/src/maintenance.ts:36`](../packages/core/agent-loop/src/maintenance.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4074,7 +4139,7 @@ Sources: [`packages/core/agent-loop/src/maintenance.ts:35`](../packages/core/age
 
 SHA-256: `c74fa41db595a071924ce2147f703ed71274947e09f6d73b327f95dd27352a7e`
 
-Sources: [`packages/core/agent-loop/src/maintenance.ts:52`](../packages/core/agent-loop/src/maintenance.ts)
+Sources: [`packages/core/agent-loop/src/maintenance.ts:56`](../packages/core/agent-loop/src/maintenance.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4353,7 +4418,27 @@ Sources: [`packages/api/session-controller/src/types.ts:100`](../packages/api/se
 | `provider` | required | `string` |
 | `reasoningEffort` | optional | `string` |
 
-<a id="persistence-type-sha256-897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e"></a>
+<a id="persistence-type-sha256-64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5"></a>
+
+<a id="persistence-type-notificationactivityguard"></a>
+
+<a id="persistence-type-packagescoreagentsrctypestsnotificationactivityguard"></a>
+
+### `NotificationActivityGuard`
+
+SHA-256: `64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5`
+
+Sources: [`packages/core/agent/src/types.ts:105`](../packages/core/agent/src/types.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `activityRevision` | required | `number` |
+| `bindingEpoch` | required | `string` |
+| `controlRevision` | required | `number` |
+| `hostEpoch` | required | `string` |
+| `version` | required | `1` |
+
+<a id="persistence-type-sha256-bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274"></a>
 
 <a id="persistence-type-notificationadmission"></a>
 
@@ -4361,12 +4446,13 @@ Sources: [`packages/api/session-controller/src/types.ts:100`](../packages/api/se
 
 ### `NotificationAdmission`
 
-SHA-256: `897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e`
+SHA-256: `bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274`
 
-Sources: [`packages/core/agent/src/types.ts:61`](../packages/core/agent/src/types.ts)
+Sources: [`packages/core/agent/src/types.ts:96`](../packages/core/agent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
+| `activityGated` | optional | `true` |
 | `origin` | required | `string` |
 | `sequence` | required | `string` |
 | `urgency` | optional | [`{ kind, reason }`](#persistence-type-sha256-d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c) |
@@ -5858,6 +5944,19 @@ Sources: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/
 |---|---|---|
 | `active` | required | `boolean` |
 
+<a id="persistence-type-sha256-5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c"></a>
+
+### `{ activityGated, origin, sequence, urgency? }`
+
+SHA-256: `5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c`
+
+| Property | Presence | Type |
+|---|---|---|
+| `activityGated` | required | `true` |
+| `origin` | required | `string` |
+| `sequence` | required | `string` |
+| `urgency` | optional | [`{ kind, reason }`](#persistence-type-sha256-d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c) |
+
 <a id="persistence-type-sha256-6e52dd55a1d48954ed5464ec46fe34d9eb65f709baabc9561e7a279910b0c406"></a>
 
 ### `{ agentPreset }`
@@ -5944,7 +6043,7 @@ SHA-256: `bea0f73871e7b0a4ca0ecc0ba1d55cbc0b547419c7f7513fce5e33d50dbfc53d`
 
 SHA-256: `7760b51ec33c51f27b73f9425151021d503906c950db994662894a514c6275cb`
 
-Sources: [`packages/core/agent-loop/src/maintenance.ts:64`](../packages/core/agent-loop/src/maintenance.ts)
+Sources: [`packages/core/agent-loop/src/maintenance.ts:76`](../packages/core/agent-loop/src/maintenance.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -6019,7 +6118,7 @@ Array of [`{ capturedFormatVersion?, capturedThroughSeq, compacted, inputIndex, 
 
 SHA-256: `537eb1d3c79fdabe339e868131f499d4cdabb712ba3de39d1ede0ce67f69ce13`
 
-Sources: [`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/types.ts)
+Sources: [`packages/core/agent/src/types.ts:232`](../packages/core/agent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -6481,7 +6580,7 @@ Sources: [`packages/attachment/attachment/src/types.ts:28`](../packages/attachme
 
 SHA-256: `eec7e0bbb8e7b560c0bedf30c080ee9bf323d9e77e3998296b60b51a34080981`
 
-Sources: [`packages/core/agent/src/types.ts:146`](../packages/core/agent/src/types.ts)
+Sources: [`packages/core/agent/src/types.ts:232`](../packages/core/agent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -6555,18 +6654,18 @@ Sources: [`packages/core/session/src/types.ts:427`](../packages/core/session/src
 |---|---|---|
 | `inherited` | optional | `true` |
 
-<a id="persistence-type-sha256-d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e"></a>
+<a id="persistence-type-sha256-d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749"></a>
 
 ### `{ inserted, notification?, outcome?, removedCount?, … }`
 
-SHA-256: `d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e`
+SHA-256: `d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749`
 
-Sources: [`packages/core/agent/src/types.ts:154`](../packages/core/agent/src/types.ts)
+Sources: [`packages/core/agent/src/types.ts:242`](../packages/core/agent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
 | `inserted` | required | [`UserMessage[]`](#persistence-type-sha256-a130119474e3e11cd83ee87e7f11b4337e774079ecbd2031975a2478f470d8cb) |
-| `notification` | optional | [`NotificationAdmission`](#persistence-type-sha256-897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e) |
+| `notification` | optional | [`NotificationAdmission`](#persistence-type-sha256-bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274) |
 | `outcome` | optional | `"canceled"` |
 | `removedCount` | optional | `number` |
 | `start` | required | `number` |
@@ -6595,7 +6694,7 @@ Sources: [`packages/core/session/src/types.ts:341`](../packages/core/session/src
 
 SHA-256: `d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c`
 
-Sources: [`packages/core/agent/src/types.ts:64`](../packages/core/agent/src/types.ts)
+Sources: [`packages/core/agent/src/types.ts:99`](../packages/core/agent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -8044,7 +8143,7 @@ Sources: [`packages/experimental/agent-team/src/types.ts:238`](../packages/exper
 
 SHA-256: `e2414d0b86cb14d138f1f4a7246453bd9baa09211a59f6c4f4bef19fcc6b843e`
 
-Sources: [`packages/core/agent/src/types.ts:148`](../packages/core/agent/src/types.ts)
+Sources: [`packages/core/agent/src/types.ts:236`](../packages/core/agent/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -8252,21 +8351,37 @@ SHA-256: `e9a6e30a6bca43619027652b2632403aa690c4c21387c129240a8b153bce3c61`
 | `time` | required | `number` |
 | `type` | required | `"agent/focus"` |
 
-<a id="persistence-type-sha256-13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da"></a>
+<a id="persistence-type-sha256-a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc"></a>
 
 <a id="persistence-type-eventagentinboxspliced"></a>
 
 ### `{ type: "agent/inbox/spliced" }`
 
-SHA-256: `13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da`
+SHA-256: `a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`{ inserted, notification?, outcome?, removedCount?, … }`](#persistence-type-sha256-d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e) |
+| `data` | required | [`{ inserted, notification?, outcome?, removedCount?, … }`](#persistence-type-sha256-d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"agent/inbox/spliced"` |
+
+<a id="persistence-type-sha256-82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577"></a>
+
+<a id="persistence-type-eventagentnotificationactivity-gated"></a>
+
+### `{ type: "agent/notification/activity-gated" }`
+
+SHA-256: `82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577`
+
+| Property | Presence | Type |
+|---|---|---|
+| `data` | required | [`GatedNotificationBatch`](#persistence-type-sha256-2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7) |
+| `ignorable` | optional | `true` |
+| `seq` | required | `number` |
+| `time` | required | `number` |
+| `type` | required | `"agent/notification/activity-gated"` |
 
 <a id="persistence-type-sha256-a12538d22ae5c7fa6c3f991b6c43b3029aa006c963187c562e011dd17f88f492"></a>
 

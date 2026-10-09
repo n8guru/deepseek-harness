@@ -92,6 +92,8 @@ await handle.agent.whenIdle()
 
 `Inbox` 暴露待处理的 `nextTurn` 与 `nextStep` 消息，并通过 `append`、`prepend`、`replace`、`remove`、`clear` 与 `splice` 变更它们。普通删除和 `clear()` 都是持久取消。在步骤边界，循环的内部实现会通过纯删除 splice 领取待处理输入。实时通知刻意采用逐消息的最小载荷：`agent/inbox/inserted { message }`、`agent/inbox/claimed { message, turn }` 与 `agent/inbox/discarded { message }`。
 
+`NotificationInbox.stageActivityGated()` 是可选的持久化暂存能力，而非释放权限。其有序回执标识必须经过有参与者的 Session flush 成功后，才可确认持久托管；仅有回执绝不意味着已进入模型或已投递。[原生所有者](../agent-loop/README.zh.md#use-this-package) 定义暂停回放与重启行为。
+
 ### 源码地图
 
 | 文件 | 职责 |

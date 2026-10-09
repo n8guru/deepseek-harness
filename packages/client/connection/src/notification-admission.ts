@@ -155,6 +155,7 @@ export async function admitNotifications(ctx: Context, request: Request, produce
   for (const { item, message } of messages) {
     if (sequences.has(item.sequence)) return new Response('duplicate sequence in batch', { status: 400 })
     sequences.add(item.sequence)
+    if (inbox.isActivityGatedReceipt?.(producer.origin, item.sequence)) return new Response('gated receipt requires gated handling', { status: 409 })
     const previous = inbox.receipt(producer.origin, item.sequence)
     if (previous !== undefined && JSON.stringify(previous.content) !== JSON.stringify(message.content)) return new Response('notification sequence content conflict', { status: 409 })
   }

@@ -74,6 +74,8 @@ const handle = await ctx.agents.create({
 
 Host 维护在实时开放状态变化时同步发布 `host-admission/changed`，包括挂起或被拒绝的 close、持久化失败、初始化和释放资源。release 会先更新票据 epoch，再发布开放事件。
 
+活动约束暂存先记录一条读取时必须理解的 `agent/notification/activity-gated` 事件，其中包含最多十条有序回执及其原始 Host、浏览器 epoch 和控制修订号，再通过普通 splice 插入待处理消息。`stageActivityGated()` 返回内存中的回执标识，而非已接纳或已投递 ACK：调用方必须等到有持久化参与者的 Session flush 成功后，才能确认持久托管。精确重放按请求顺序返回原始标识，不变更状态或唤醒；载荷冲突在插入前拒绝。恢复保留活动约束标记，包括插入中断的情况，且绝不将记录的 epoch 恢复为实时权限。来源为 notification 的待处理输入若缺少回执，会拒绝执行，而非变成前台工作。即使清除 Focus 或执行 Check，受约束回执仍保持暂停；fork 继承的回执仅作为暂停证据，不恢复为可执行工作。
+
 ### 一个步骤做什么
 
 每个步骤都会发送会话的派生历史——最新的非空 `system/message` 节点是有效提示词，渲染提示词为空时则没有系统消息——及其可见工具 schema；模型的工具调用经过受守卫的工具流水线，每个被接纳的事实都会在下一步据此派生之前追加到会话日志。并行安全调用最多可重叠 `maxParallelToolCalls` 个；独占调用单独运行并构成排序屏障。取消是协作式的：`agent.cancel()` 中止当前活动，并在未设置 `keepInbox` 时清除待处理工作；被取消的流会终结已送达用户的文本。

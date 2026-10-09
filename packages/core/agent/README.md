@@ -92,6 +92,8 @@ The package is built on one separation: the public `Agent` surface and registry 
 
 `Inbox` exposes pending `nextTurn` and `nextStep` messages and mutates them through `append`, `prepend`, `replace`, `remove`, `clear`, and `splice`. Ordinary removals and `clear()` are durable cancellations. At a step boundary, the loop's internal implementation claims pending input through pure deletion splices. Live notifications are deliberately per-message and minimal: `agent/inbox/inserted { message }`, `agent/inbox/claimed { message, turn }`, and `agent/inbox/discarded { message }`.
 
+`NotificationInbox.stageActivityGated()` is an optional persistence-staging capability, not release authority. Its ordered receipt identities require a successful participating Session flush before custody acknowledgement; receipts alone never mean model entry or delivery. [The native owner](../agent-loop/README.md#use-this-package) defines held replay and restart behavior.
+
 ### Source map
 
 | File | Role |

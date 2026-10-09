@@ -97,6 +97,32 @@ export interface NotificationAdmission {
   origin: string
   sequence: string
   urgency?: { kind: 'safety' | 'security' | 'deadline'; reason: string } | undefined
+  /** Requires the preceding required-on-read gated receipt batch; never an opt-out. */
+  activityGated?: true | undefined
+}
+
+/** Recorded activity/control observation, not permission to deliver after a restart or await. */
+export interface NotificationActivityGuard {
+  version: 1
+  hostEpoch: string
+  bindingEpoch: string
+  activityRevision: number
+  controlRevision: number
+}
+
+/** One ordered receipt staged in the existing notification projection. */
+export interface GatedNotificationItem {
+  message: UserMessage
+  admission: NotificationAdmission & { activityGated: true }
+}
+
+/** Required-on-read custody metadata; pending input still uses ordinary inbox splices. */
+export interface GatedNotificationBatch {
+  version: 1
+  sessionId: SessionId
+  target: InboxTarget
+  guard: NotificationActivityGuard
+  items: GatedNotificationItem[]
 }
 
 /** Driver-owned durable notification controls; unsupported drivers fail closed at ingress. */
@@ -108,10 +134,26 @@ export interface NotificationInbox {
   resumeOperator?(): void
   readonly hasForeground: boolean
   admit(target: InboxTarget, message: UserMessage, admission: NotificationAdmission): boolean
+  /**
+   * Stage held receipts only; this operation never authorizes release or wakes work.
+   * @param target - existing inbox list receiving the ordered selection.
+   * @param items - one to ten identified messages and authenticated producer admissions.
+   * @param guard - original activity/control observation retained as historical metadata.
+   * @returns in-memory identities in request order, not a custody or delivery ACK.
+   * Caller must obtain a successful participating Session flush before acknowledging custody.
+   */
+  stageActivityGated?(target: InboxTarget, items: GatedNotificationItem[], guard: NotificationActivityGuard): readonly { sequence: string; messageId: UserMessage['id']; duplicate: boolean }[]
   /** Native inbox lifecycle admission, false synchronously when disposed. */
   readonly accepting?: boolean
   /** Native-only opaque session-bound maintenance receipt capability; never a transport field. */
   admitMaintenance?(permit: HostAdmissionTicket, target: InboxTarget, message: UserMessage, admission: NotificationAdmission): boolean
+  /**
+   * Identify custody that an ungated caller must not acknowledge or re-admit.
+   * @param origin - authenticated producer namespace.
+   * @param sequence - producer receipt identity.
+   * @returns whether the retained receipt requires activity-gated handling.
+   */
+  isActivityGatedReceipt?(origin: string, sequence: string): boolean
   receipt(origin: string, sequence: string): UserMessage | undefined
   isPendingReceipt(origin: string, sequence: string): boolean
   isHeld(message: UserMessage): boolean
@@ -123,7 +165,12 @@ export interface NotificationInbox {
 export interface NotificationState {
   inheritedEventCount: number
   enabled: boolean
-  receipts: readonly { target: InboxTarget; message: UserMessage; admission: NotificationAdmission }[]
+  receipts: readonly {
+    target: InboxTarget
+    message: UserMessage
+    admission: NotificationAdmission
+    activityGate?: { sessionId: SessionId; guard: NotificationActivityGuard } | undefined
+  }[]
   entered: readonly string[]
   terminal: readonly { messageId: string; reason: 'rejected' | 'discarded' | 'disposed' }[]
   released: readonly string[]
@@ -183,6 +230,8 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Operator Focus setting and idempotent bounded Check snapshot. */
     'agent/focus': { enabled: boolean; check?: { id: string; messageIds: string[] } }
+    /** Ordered held receipts and their original activity/control binding; never ignorable. */
+    'agent/notification/activity-gated': GatedNotificationBatch
     /** Explicit terminal disposition retains producer evidence but forbids execution replay. */
     'agent/notification/terminal': { messageIds: string[]; reason: 'rejected' | 'discarded' | 'disposed' }
     /**

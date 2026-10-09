@@ -505,7 +505,7 @@
       "kind": "event",
       "event": "agent/inbox/spliced",
       "surface": false,
-      "digest": "13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da",
+      "digest": "a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc",
       "schema": {
         "root": 0,
         "nodes": [
@@ -920,15 +920,14 @@
             "kind": "union",
             "types": [
               34,
-              37,
+              39,
               42,
-              44,
-              45,
               47,
               49,
-              51,
-              59,
-              61,
+              50,
+              52,
+              54,
+              55,
               63,
               65,
               67,
@@ -943,9 +942,7 @@
               85,
               87,
               89,
-              90,
               91,
-              92,
               93,
               94,
               95,
@@ -1008,47 +1005,104 @@
               152,
               153,
               154,
+              155,
               156,
+              157,
               158,
-              161,
+              160,
               162,
-              163,
-              164,
               165,
               166,
               167,
+              168,
               169,
               170,
               171,
-              172,
+              173,
               174,
               175,
               176,
-              177,
               178,
+              179,
               180,
               181,
               182,
               184,
-              192,
-              195,
-              197,
-              198,
-              200,
-              202
+              185,
+              186,
+              188,
+              196,
+              199,
+              201,
+              202,
+              204
             ]
           },
           {
             "kind": "object",
             "properties": [
               {
-                "name": "form",
+                "name": "entries",
                 "type": 35,
                 "optional": false
               },
               {
+                "name": "form",
+                "type": 37,
+                "optional": false
+              },
+              {
                 "name": "kind",
-                "type": 36,
+                "type": 38,
+                "optional": false
+              },
+              {
+                "name": "update",
+                "type": 25,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 36
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "description",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "name",
+                "type": 8,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "catalog"
+          },
+          {
+            "kind": "literal",
+            "value": "skill-catalog"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 40,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 41,
                 "optional": false
               },
               {
@@ -1072,12 +1126,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
@@ -1087,7 +1141,7 @@
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1103,7 +1157,7 @@
           },
           {
             "kind": "array",
-            "element": 41
+            "element": 46
           },
           {
             "kind": "object",
@@ -1126,12 +1180,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
@@ -1156,12 +1210,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
@@ -1177,12 +1231,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
@@ -1202,12 +1256,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
@@ -1227,12 +1281,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
@@ -1244,30 +1298,26 @@
             "indices": []
           },
           {
-            "kind": "literal",
-            "value": "catalog"
-          },
-          {
             "kind": "object",
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 52,
+                "type": 56,
                 "optional": false
               },
               {
                 "name": "references",
-                "type": 53,
+                "type": 57,
                 "optional": false
               },
               {
                 "name": "version",
-                "type": 58,
+                "type": 62,
                 "optional": false
               }
             ],
@@ -1279,7 +1329,7 @@
           },
           {
             "kind": "array",
-            "element": 54
+            "element": 58
           },
           {
             "kind": "object",
@@ -1291,12 +1341,12 @@
               },
               {
                 "name": "capturedThroughSeq",
-                "type": 55,
+                "type": 59,
                 "optional": false
               },
               {
                 "name": "compacted",
-                "type": 57,
+                "type": 61,
                 "optional": false
               },
               {
@@ -1336,7 +1386,7 @@
               },
               {
                 "name": "truncated",
-                "type": 57,
+                "type": 61,
                 "optional": false
               }
             ],
@@ -1346,7 +1396,7 @@
             "kind": "union",
             "types": [
               18,
-              56
+              60
             ]
           },
           {
@@ -1366,17 +1416,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 60,
+                "type": 64,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1391,17 +1441,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 62,
+                "type": 66,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1416,17 +1466,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 64,
+                "type": 68,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1441,17 +1491,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 66,
+                "type": 70,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1466,17 +1516,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 68,
+                "type": 72,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1491,17 +1541,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 70,
+                "type": 74,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1516,17 +1566,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 72,
+                "type": 76,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1541,17 +1591,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 74,
+                "type": 78,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1566,17 +1616,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 76,
+                "type": 80,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1591,17 +1641,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 78,
+                "type": 82,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1616,17 +1666,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 80,
+                "type": 84,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1641,17 +1691,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 82,
+                "type": 86,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1666,17 +1716,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 38,
+                "type": 43,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 84,
+                "type": 88,
                 "optional": false
               },
               {
                 "name": "sections",
-                "type": 40,
+                "type": 45,
                 "optional": false
               }
             ],
@@ -1691,12 +1741,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 86,
+                "type": 90,
                 "optional": false
               },
               {
@@ -1721,12 +1771,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 88,
+                "type": 92,
                 "optional": false
               },
               {
@@ -1746,49 +1796,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
-                "optional": false
-              },
-              {
-                "name": "kind",
-                "type": 60,
-                "optional": false
-              },
-              {
-                "name": "summary",
-                "type": 8,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "form",
-                "type": 43,
-                "optional": false
-              },
-              {
-                "name": "kind",
-                "type": 62,
-                "optional": false
-              },
-              {
-                "name": "summary",
-                "type": 8,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1809,7 +1817,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1830,7 +1838,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1851,7 +1859,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1872,7 +1880,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1893,7 +1901,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1914,7 +1922,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1935,7 +1943,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1956,7 +1964,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1977,7 +1985,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -1998,7 +2006,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
@@ -2019,12 +2027,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 48,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 60,
+                "type": 86,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 8,
                 "optional": false
               }
             ],
@@ -2035,12 +2048,17 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 48,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 62,
+                "type": 88,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 8,
                 "optional": false
               }
             ],
@@ -2051,7 +2069,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2067,7 +2085,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2083,7 +2101,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2099,7 +2117,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2115,7 +2133,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2131,7 +2149,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2147,7 +2165,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2163,7 +2181,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2179,7 +2197,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2195,7 +2213,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2211,7 +2229,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
@@ -2227,12 +2245,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 40,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 60,
+                "type": 86,
                 "optional": false
               }
             ],
@@ -2243,12 +2261,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 40,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 62,
+                "type": 88,
                 "optional": false
               }
             ],
@@ -2259,7 +2277,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2275,7 +2293,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2291,7 +2309,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2307,7 +2325,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2323,7 +2341,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2339,7 +2357,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2355,7 +2373,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2371,7 +2389,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2387,7 +2405,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2403,7 +2421,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2419,7 +2437,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 46,
+                "type": 51,
                 "optional": false
               },
               {
@@ -2435,12 +2453,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 51,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 60,
+                "type": 86,
                 "optional": false
               }
             ],
@@ -2451,12 +2469,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 51,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 62,
+                "type": 88,
                 "optional": false
               }
             ],
@@ -2467,7 +2485,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2483,7 +2501,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2499,7 +2517,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2515,7 +2533,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2531,7 +2549,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2547,7 +2565,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2563,7 +2581,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2579,7 +2597,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2595,7 +2613,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2611,7 +2629,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2627,7 +2645,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 48,
+                "type": 53,
                 "optional": false
               },
               {
@@ -2643,12 +2661,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 53,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 60,
+                "type": 86,
                 "optional": false
               }
             ],
@@ -2659,12 +2677,12 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 53,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 62,
+                "type": 88,
                 "optional": false
               }
             ],
@@ -2675,7 +2693,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2691,7 +2709,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2707,7 +2725,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2723,7 +2741,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2739,7 +2757,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2755,7 +2773,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2771,7 +2789,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2787,7 +2805,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2803,7 +2821,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2819,7 +2837,7 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
@@ -2835,12 +2853,44 @@
             "properties": [
               {
                 "name": "form",
-                "type": 50,
+                "type": 37,
                 "optional": false
               },
               {
                 "name": "kind",
                 "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 37,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 37,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
                 "optional": false
               }
             ],
@@ -2856,7 +2906,7 @@
               },
               {
                 "name": "kind",
-                "type": 155,
+                "type": 159,
                 "optional": false
               },
               {
@@ -2881,7 +2931,7 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 157,
+                "type": 161,
                 "optional": false
               },
               {
@@ -2916,7 +2966,7 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 159,
+                "type": 163,
                 "optional": false
               },
               {
@@ -2931,7 +2981,7 @@
               },
               {
                 "name": "replayState",
-                "type": 160,
+                "type": 164,
                 "optional": true
               }
             ],
@@ -2950,34 +3000,12 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 39,
+                "type": 44,
                 "optional": false
               },
               {
                 "name": "origin",
                 "type": 8,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "kind",
-                "type": 60,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "kind",
-                "type": 62,
                 "optional": false
               }
             ],
@@ -3021,21 +3049,6 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 168,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "literal",
-            "value": "ptc-mode"
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "kind",
                 "type": 70,
                 "optional": false
               }
@@ -3058,18 +3071,7 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 74,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "kind",
-                "type": 173,
+                "type": 172,
                 "optional": false
               }
             ],
@@ -3077,7 +3079,18 @@
           },
           {
             "kind": "literal",
-            "value": "system-prompt"
+            "value": "ptc-mode"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              }
+            ],
+            "indices": []
           },
           {
             "kind": "object",
@@ -3106,6 +3119,21 @@
             "properties": [
               {
                 "name": "kind",
+                "type": 177,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "system-prompt"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
                 "type": 80,
                 "optional": false
               }
@@ -3128,7 +3156,29 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 179,
+                "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 183,
                 "optional": false
               }
             ],
@@ -3154,7 +3204,7 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 84,
+                "type": 88,
                 "optional": false
               }
             ],
@@ -3165,7 +3215,7 @@
             "properties": [
               {
                 "name": "kind",
-                "type": 183,
+                "type": 187,
                 "optional": false
               }
             ],
@@ -3190,17 +3240,17 @@
               },
               {
                 "name": "changes",
-                "type": 185,
+                "type": 189,
                 "optional": false
               },
               {
                 "name": "form",
-                "type": 35,
+                "type": 40,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 191,
+                "type": 195,
                 "optional": false
               }
             ],
@@ -3208,14 +3258,14 @@
           },
           {
             "kind": "array",
-            "element": 186
+            "element": 190
           },
           {
             "kind": "object",
             "properties": [
               {
                 "name": "action",
-                "type": 187,
+                "type": 191,
                 "optional": false
               },
               {
@@ -3239,9 +3289,9 @@
           {
             "kind": "union",
             "types": [
-              188,
-              189,
-              190
+              192,
+              193,
+              194
             ]
           },
           {
@@ -3270,12 +3320,12 @@
               },
               {
                 "name": "kind",
-                "type": 193,
+                "type": 197,
                 "optional": false
               },
               {
                 "name": "outcome",
-                "type": 194,
+                "type": 198,
                 "optional": false
               }
             ],
@@ -3299,7 +3349,7 @@
               },
               {
                 "name": "kind",
-                "type": 196,
+                "type": 200,
                 "optional": false
               }
             ],
@@ -3340,7 +3390,7 @@
               },
               {
                 "name": "kind",
-                "type": 199,
+                "type": 203,
                 "optional": false
               },
               {
@@ -3365,12 +3415,12 @@
               },
               {
                 "name": "form",
-                "type": 43,
+                "type": 48,
                 "optional": false
               },
               {
                 "name": "kind",
-                "type": 201,
+                "type": 205,
                 "optional": false
               },
               {
@@ -3404,55 +3454,10 @@
             "kind": "object",
             "properties": [
               {
-                "name": "entries",
-                "type": 203,
-                "optional": false
-              },
-              {
-                "name": "form",
-                "type": 50,
-                "optional": false
-              },
-              {
-                "name": "kind",
-                "type": 205,
-                "optional": false
-              },
-              {
-                "name": "update",
+                "name": "activityGated",
                 "type": 25,
                 "optional": true
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "array",
-            "element": 204
-          },
-          {
-            "kind": "object",
-            "properties": [
-              {
-                "name": "description",
-                "type": 8,
-                "optional": false
               },
-              {
-                "name": "name",
-                "type": 8,
-                "optional": false
-              }
-            ],
-            "indices": []
-          },
-          {
-            "kind": "literal",
-            "value": "skill-catalog"
-          },
-          {
-            "kind": "object",
-            "properties": [
               {
                 "name": "origin",
                 "type": 8,
@@ -3529,6 +3534,3082 @@
           {
             "kind": "literal",
             "value": "agent/inbox/spliced"
+          }
+        ]
+      }
+    },
+    {
+      "key": "event:agent/notification/activity-gated",
+      "kind": "event",
+      "event": "agent/notification/activity-gated",
+      "surface": false,
+      "digest": "82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 217,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "guard",
+                "type": 2,
+                "optional": false
+              },
+              {
+                "name": "items",
+                "type": 6,
+                "optional": false
+              },
+              {
+                "name": "sessionId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "target",
+                "type": 214,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "activityRevision",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "bindingEpoch",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "controlRevision",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "hostEpoch",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": 1
+          },
+          {
+            "kind": "array",
+            "element": 7
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "admission",
+                "type": 8,
+                "optional": false
+              },
+              {
+                "name": "message",
+                "type": 15,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "activityGated",
+                "type": 9,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "sequence",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "urgency",
+                "type": 10,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 11,
+                "optional": false
+              },
+              {
+                "name": "reason",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              12,
+              13,
+              14
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "deadline"
+          },
+          {
+            "kind": "literal",
+            "value": "safety"
+          },
+          {
+            "kind": "literal",
+            "value": "security"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "content",
+                "type": 16,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "role",
+                "type": 41,
+                "optional": false
+              },
+              {
+                "name": "source",
+                "type": 42,
+                "optional": false,
+                "compatibility": {
+                  "version": 1,
+                  "policy": "session-source-attribution",
+                  "binding": "session.user-message.source",
+                  "discriminator": "kind",
+                  "unknownKinds": "preserve",
+                  "attributionKinds": [
+                    "tmux-context",
+                    "user-question-reply"
+                  ]
+                }
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 17
+          },
+          {
+            "kind": "union",
+            "types": [
+              18,
+              20,
+              23,
+              25,
+              27,
+              36,
+              39
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "text",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 19,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "text"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "tool",
+                "type": 21,
+                "optional": true
+              },
+              {
+                "name": "toolName",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 22,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "never"
+          },
+          {
+            "kind": "literal",
+            "value": "tool-addition"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "toolName",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 24,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tool-removal"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "arguments",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "id",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "name",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 26,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tool-call"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attachment",
+                "type": 28,
+                "optional": false
+              },
+              {
+                "name": "offloaded",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "type",
+                "type": 35,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attachmentId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "bytes",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "height",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "mediaType",
+                "type": 29,
+                "optional": false
+              },
+              {
+                "name": "name",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "originalDimensions",
+                "type": 34,
+                "optional": true
+              },
+              {
+                "name": "width",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              30,
+              31,
+              32,
+              33
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "image/gif"
+          },
+          {
+            "kind": "literal",
+            "value": "image/jpeg"
+          },
+          {
+            "kind": "literal",
+            "value": "image/png"
+          },
+          {
+            "kind": "literal",
+            "value": "image/webp"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "height",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "width",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "image"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attachment",
+                "type": 37,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 38,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "attachmentId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "bytes",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "name",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "file"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "text",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 40,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "reasoning"
+          },
+          {
+            "kind": "literal",
+            "value": "user"
+          },
+          {
+            "kind": "union",
+            "types": [
+              43,
+              46,
+              51,
+              54,
+              59,
+              60,
+              61,
+              63,
+              65,
+              66,
+              73,
+              75,
+              77,
+              79,
+              81,
+              83,
+              85,
+              87,
+              89,
+              91,
+              93,
+              95,
+              97,
+              99,
+              101,
+              103,
+              104,
+              105,
+              106,
+              107,
+              108,
+              109,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117,
+              118,
+              119,
+              120,
+              121,
+              122,
+              123,
+              124,
+              125,
+              126,
+              127,
+              128,
+              129,
+              130,
+              131,
+              132,
+              133,
+              134,
+              135,
+              136,
+              137,
+              138,
+              139,
+              140,
+              141,
+              142,
+              143,
+              144,
+              145,
+              146,
+              147,
+              148,
+              149,
+              150,
+              151,
+              152,
+              153,
+              154,
+              155,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164,
+              165,
+              166,
+              167,
+              168,
+              170,
+              172,
+              175,
+              176,
+              177,
+              178,
+              179,
+              180,
+              182,
+              183,
+              184,
+              185,
+              187,
+              188,
+              189,
+              190,
+              191,
+              193,
+              194,
+              195,
+              197,
+              198,
+              206,
+              209,
+              211,
+              212
+            ]
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "deliveryId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 45,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "ruleId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "source",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "notice"
+          },
+          {
+            "kind": "literal",
+            "value": "webhook"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "entries",
+                "type": 47,
+                "optional": false
+              },
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 50,
+                "optional": false
+              },
+              {
+                "name": "update",
+                "type": 9,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 48
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "description",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "name",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "catalog"
+          },
+          {
+            "kind": "literal",
+            "value": "skill-catalog"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 53,
+                "optional": false
+              },
+              {
+                "name": "name",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "instructions"
+          },
+          {
+            "kind": "literal",
+            "value": "skill-invocation"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "snapshot"
+          },
+          {
+            "kind": "literal",
+            "value": "notification"
+          },
+          {
+            "kind": "array",
+            "element": 58
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "name",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "text",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "recall"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "relay"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 67,
+                "optional": false
+              },
+              {
+                "name": "references",
+                "type": 68,
+                "optional": false
+              },
+              {
+                "name": "version",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "session-reference"
+          },
+          {
+            "kind": "array",
+            "element": 69
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "capturedFormatVersion",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "capturedThroughSeq",
+                "type": 70,
+                "optional": false
+              },
+              {
+                "name": "compacted",
+                "type": 72,
+                "optional": false
+              },
+              {
+                "name": "inputIndex",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "label",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "omittedBytes",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "omittedMessages",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "originalMessages",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "retainedMessages",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "sessionId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "truncated",
+                "type": 72,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              3,
+              71
+            ]
+          },
+          {
+            "kind": "primitive",
+            "type": "null"
+          },
+          {
+            "kind": "primitive",
+            "type": "boolean"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "hooks-claude-code"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "hooks-codex"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "model-selection"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "plan-mode"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "repeat-tool-reminder"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "runtime-context"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "schedule"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "time-context"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tmux-context"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tool-goal"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tool-jobs"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "user-approval"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 55,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              },
+              {
+                "name": "sections",
+                "type": 57,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "dsh-session-title-llm"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 100,
+                "optional": false
+              },
+              {
+                "name": "senderSessionId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "subagent-settled"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 102,
+                "optional": false
+              },
+              {
+                "name": "senderSessionId",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "agent-message"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 44,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              },
+              {
+                "name": "summary",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 62,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 64,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "form",
+                "type": 49,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "goalId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 169,
+                "optional": false
+              },
+              {
+                "name": "revision",
+                "type": 3,
+                "optional": false
+              },
+              {
+                "name": "round",
+                "type": 3,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "goal"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 171,
+                "optional": false
+              },
+              {
+                "name": "messageId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "senderId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "senderName",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "teamId",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "team-message"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 173,
+                "optional": false
+              },
+              {
+                "name": "model",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "provider",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "replayState",
+                "type": 174,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "model"
+          },
+          {
+            "kind": "opaque",
+            "reason": "unknown"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 56,
+                "optional": false
+              },
+              {
+                "name": "origin",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 74,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 76,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 78,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 80,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 181,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "ptc-mode"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 82,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 84,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 86,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 186,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "system-prompt"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 88,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 90,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 92,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 94,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 192,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tool-registry"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 41,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 96,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 196,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "cordis-host-runner"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "kind",
+                "type": 98,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "baseline",
+                "type": 9,
+                "optional": true
+              },
+              {
+                "name": "baselineIdentity",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "changes",
+                "type": 199,
+                "optional": false
+              },
+              {
+                "name": "form",
+                "type": 52,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 205,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "array",
+            "element": 200
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "action",
+                "type": 201,
+                "optional": false
+              },
+              {
+                "name": "digest",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "path",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "scope",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "union",
+            "types": [
+              202,
+              203,
+              204
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "remove"
+          },
+          {
+            "kind": "literal",
+            "value": "replace"
+          },
+          {
+            "kind": "literal",
+            "value": "set"
+          },
+          {
+            "kind": "literal",
+            "value": "agent-instructions"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "callId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 207,
+                "optional": false
+              },
+              {
+                "name": "outcome",
+                "type": 208,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "user-question-reply"
+          },
+          {
+            "kind": "literal",
+            "value": "answered"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "callId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 210,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "tool"
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "clientTimeZone",
+                "type": 4,
+                "optional": true
+              },
+              {
+                "name": "kind",
+                "type": 41,
+                "optional": false
+              },
+              {
+                "name": "rpcId",
+                "type": 4,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "compactionId",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "kind",
+                "type": 213,
+                "optional": false
+              },
+              {
+                "name": "sourceCommandId",
+                "type": 4,
+                "optional": true
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "literal",
+            "value": "compact-checkpoint"
+          },
+          {
+            "kind": "union",
+            "types": [
+              215,
+              216
+            ]
+          },
+          {
+            "kind": "literal",
+            "value": "next-step"
+          },
+          {
+            "kind": "literal",
+            "value": "next-turn"
+          },
+          {
+            "kind": "literal",
+            "value": "agent/notification/activity-gated"
           }
         ]
       }
@@ -23506,11 +26587,6 @@
       "sources": []
     },
     {
-      "digest": "13845127e255c26eff0c8f94df50afbce44d2f0f9fb75f2c0f2cd1d5bdaa36da",
-      "names": [],
-      "sources": []
-    },
-    {
       "digest": "13d3d180f977bf78081d487ffa0ecb75857349bcab29a5a3fb48189fca2a6176",
       "names": [],
       "sources": []
@@ -23973,6 +27049,15 @@
       ],
       "sources": [
         "packages/attachment/attachment/src/types.ts:8"
+      ]
+    },
+    {
+      "digest": "2f3898f237e7f656113ee87dfd74cb87c13f127fdd89edc7556dd578530b34a7",
+      "names": [
+        "packages/core/agent/src/types.ts#GatedNotificationBatch"
+      ],
+      "sources": [
+        "packages/core/agent/src/types.ts:120"
       ]
     },
     {
@@ -24555,7 +27640,7 @@
       "digest": "537eb1d3c79fdabe339e868131f499d4cdabb712ba3de39d1ede0ce67f69ce13",
       "names": [],
       "sources": [
-        "packages/core/agent/src/types.ts:146"
+        "packages/core/agent/src/types.ts:232"
       ]
     },
     {
@@ -24687,6 +27772,11 @@
       "sources": []
     },
     {
+      "digest": "5c3336cf841bddc03cf5cbbf7d965a62f8a62cbf3572634f9e632ec3a3712f2c",
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "5c45bf4c544a7211dcd8ba6ba7e5f1bc39b49e7a9df9d5cbdc8e87c22771b37b",
       "names": [],
       "sources": []
@@ -24793,6 +27883,15 @@
       ],
       "sources": [
         "packages/subagent/subagent/src/descriptor.ts:72"
+      ]
+    },
+    {
+      "digest": "64b279d05e61d9a9efb89270338ed3e3064bb2e85692203449449d0c89650ab5",
+      "names": [
+        "packages/core/agent/src/types.ts#NotificationActivityGuard"
+      ],
+      "sources": [
+        "packages/core/agent/src/types.ts:105"
       ]
     },
     {
@@ -25064,7 +28163,7 @@
       "digest": "7760b51ec33c51f27b73f9425151021d503906c950db994662894a514c6275cb",
       "names": [],
       "sources": [
-        "packages/core/agent-loop/src/maintenance.ts:64"
+        "packages/core/agent-loop/src/maintenance.ts:76"
       ]
     },
     {
@@ -25146,6 +28245,11 @@
       "sources": [
         "packages/llm/llm/src/types.ts:148"
       ]
+    },
+    {
+      "digest": "7def199f93e217edab5f38c9fe65a642bddf97fe7e0fa936d4e7ba983622b8d7",
+      "names": [],
+      "sources": []
     },
     {
       "digest": "7df62978a2b7de8540e714152297743e0a622209a46a5ac9513fc0fad73ca23b",
@@ -25235,6 +28339,11 @@
     },
     {
       "digest": "829a2fb3be6efd4ba36aef8ed2d381a4c6fb2a0aaf50c823a6f3f8290786b809",
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "82a12e9eecb81c117e18b252c13c33996f362e545b1541e799a7327e05b2a577",
       "names": [],
       "sources": []
     },
@@ -25350,15 +28459,6 @@
       "names": [],
       "sources": [
         "packages/llm/llm/src/types.ts:456"
-      ]
-    },
-    {
-      "digest": "897e6e4cc72f4beb5e5fd5b91d89bf24b4e39bb2db633ee27e549196d3d21d7e",
-      "names": [
-        "packages/core/agent/src/types.ts#NotificationAdmission"
-      ],
-      "sources": [
-        "packages/core/agent/src/types.ts:61"
       ]
     },
     {
@@ -25483,6 +28583,15 @@
       "digest": "904bf499d98be4a3a5f836fcac533b6c4899569b018071e6604e1d32657d00fd",
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "926d2669d05a8e9b8ccc56b28639da4090f51a83204ea431a625d688d985a9f5",
+      "names": [
+        "packages/core/agent/src/types.ts#GatedNotificationItem"
+      ],
+      "sources": [
+        "packages/core/agent/src/types.ts:114"
+      ]
     },
     {
       "digest": "930a6567a10bb62ddd157bd8abdf4b182810c8c3b49d91309b3b009a5fed9731",
@@ -25848,6 +28957,11 @@
       "sources": []
     },
     {
+      "digest": "a8d1bdd464cceb119a0df3203644b7b16aa0577eedfaafbc9ef63bb1792e28fc",
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "a9059a81430b320792bbb7c2ee1f8f6c77ff71e40ee44c18aec72e157c522694",
       "names": [],
       "sources": []
@@ -26202,7 +29316,7 @@
         "packages/core/agent-loop/src/maintenance.ts#MaintenanceLaunchConfig"
       ],
       "sources": [
-        "packages/core/agent-loop/src/maintenance.ts:35"
+        "packages/core/agent-loop/src/maintenance.ts:36"
       ]
     },
     {
@@ -26273,6 +29387,15 @@
       "digest": "bc422f42170258bb46b32dc41b7aeb55d2143790d96f97fbe6ba12a97dfb6293",
       "names": [],
       "sources": []
+    },
+    {
+      "digest": "bc9be2c0f8de80d71926f7e688439c2dea0d611ef9c658b190f276611d1ce274",
+      "names": [
+        "packages/core/agent/src/types.ts#NotificationAdmission"
+      ],
+      "sources": [
+        "packages/core/agent/src/types.ts:96"
+      ]
     },
     {
       "digest": "bcf0caf62d964b2fcf5404bd5c909cfa9a21c3f3c96e6b7e36d9e33565223825",
@@ -26399,7 +29522,7 @@
         "packages/core/agent-loop/src/maintenance.ts#MaintenanceState"
       ],
       "sources": [
-        "packages/core/agent-loop/src/maintenance.ts:52"
+        "packages/core/agent-loop/src/maintenance.ts:56"
       ]
     },
     {
@@ -26491,6 +29614,13 @@
       "sources": []
     },
     {
+      "digest": "d2e390460313259170eeb0da8f9c05edce7467d7a1f21afa0af3f411c65d9749",
+      "names": [],
+      "sources": [
+        "packages/core/agent/src/types.ts:242"
+      ]
+    },
+    {
       "digest": "d4b739491689cc6bb13d07ffac1a32239875abda364c0d5edd8f74faf5e9c00d",
       "names": [],
       "sources": [
@@ -26526,20 +29656,13 @@
       "digest": "d8e01916702f039ba46047c812dd2d2ea25ecfea964a5d796c13f8319346323c",
       "names": [],
       "sources": [
-        "packages/core/agent/src/types.ts:64"
+        "packages/core/agent/src/types.ts:99"
       ]
     },
     {
       "digest": "d9196086e41e4dd5c2ce87f5c25529c8112a1731d258cf0728747d41a9ee3241",
       "names": [],
       "sources": []
-    },
-    {
-      "digest": "d994d8fd319e8497b3686192f73f4cf1250e92eef07cf42d9a45954c09ffdb9e",
-      "names": [],
-      "sources": [
-        "packages/core/agent/src/types.ts:154"
-      ]
     },
     {
       "digest": "d9c462b9f62fdd3efc76a44b9524dc8781f6b91cd9c7e584b17d971defafebab",
@@ -26665,7 +29788,7 @@
       "digest": "e2414d0b86cb14d138f1f4a7246453bd9baa09211a59f6c4f4bef19fcc6b843e",
       "names": [],
       "sources": [
-        "packages/core/agent/src/types.ts:148"
+        "packages/core/agent/src/types.ts:236"
       ]
     },
     {
@@ -26757,6 +29880,11 @@
     },
     {
       "digest": "e60cfd6908993ed9eddec5bbf97ece648cc3c363d61f6e4825a81fb5a43c36f6",
+      "names": [],
+      "sources": []
+    },
+    {
+      "digest": "e6290b4ad9320dac28d01b567939c327ac947a7674dba249ee2305558d0685d4",
       "names": [],
       "sources": []
     },
@@ -26861,7 +29989,7 @@
       "digest": "eec7e0bbb8e7b560c0bedf30c080ee9bf323d9e77e3998296b60b51a34080981",
       "names": [],
       "sources": [
-        "packages/core/agent/src/types.ts:146"
+        "packages/core/agent/src/types.ts:232"
       ]
     },
     {

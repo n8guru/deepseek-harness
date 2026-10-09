@@ -48,6 +48,8 @@ cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-sessi
 
 仅 socket 可用的 `session.operatorActivity` 流接受针对现有会话的严格版本 1 打开请求，并返回不透明的绑定 epoch。帧只携带严格递增的序号和交互类别，不携带草稿或调用方时间戳。Connection 在处理帧和读取时重新验证升级请求的 cookie 与 socket 新鲜度。打开流、Pong 和程序化提示不会记录交互。离开、流取消或传输过期只会使对应绑定失效；新 socket 不能借用旧 epoch。`activityIdleThresholdMs` 默认为 300000，允许 1000 到 3600000 的整数。活动年龄由单调时钟决定；墙钟回退会使观测失效，直到接受新的帧。
 
+不受活动约束的准入会在变更或 ACK 之前拒绝任何包含已保留为受约束托管的 origin/sequence 的批次。改变生产者授权不能降低已有回执的约束。
+
 具有显式 `activityRead: true` 授权的生产者可向 `/api/notifications.admit` POST `{version:1, action:"activity", sessionId}`。此分支要求原有 bearer 与精确会话授权，浏览器 cookie 不提供认证。读取返回 `Cache-Control: no-store`，不创建、唤醒或修改会话输入。`activityRead` 与 `activityGated` 均默认为 false。配置 `activityGated: true` 的生产者提交通知会收到 409，因为原生受活动约束的释放尚不受支持；请求字段不能绕过该限制。
 
 活动快照同步读取原生 Stop/Focus 控制、GoalService 阶段与实时激活状态、Host 准入以及前台占用。服务缺失或控制不受支持时保持 unknown。`controlRevision` 对原生计数器、已提交的会话序号与所有者 epoch 向量建立版本边界，不依赖布尔值采样或观察者回调。所有者先递增再通知观察者，因此重入读取和离开再返回原状态都会使旧快照失效。受浏览器认证保护的 `/api/session.focus` 的 `resume` 动作显式清除原生 Stop 锁存，但不唤醒轮次、不改变其他暂停状态，也不记录活动。包括 `submit` 在内的活动帧仅供诊断，绝不清除控制；通用 `session.prompt` 不携带恢复权限。

@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
+import { agentEvents, type Agent, type GatedNotificationItem, type NotificationActivityGuard } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, freezeMessage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
@@ -83,6 +83,138 @@ async function reconstructPersistedInbox(
 }
 
 describe('ReactLoopInbox', () => {
+  const guard: NotificationActivityGuard = {
+    version: 1, hostEpoch: 'host-one', bindingEpoch: 'binding-one', activityRevision: 2, controlRevision: 3,
+  }
+  const gated = (sequence: string): GatedNotificationItem => ({
+    admission: { origin: 'test', sequence, activityGated: true },
+    message: createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: sequence }] }),
+  })
+
+  it('stages held custody, rejects all conflicts before mutation and replays exact request order without wake', async () => {
+    const { inbox, session, ctx } = await inboxAgent('gated-order')
+    const inserted: UserMessage[] = []
+    ctx.on('agent/inbox/inserted', ({ message }) => void inserted.push(message))
+    const first = gated('one')
+    const second = gated('two')
+    const result = inbox.stageActivityGated('next-step', [second, first], guard)
+    expect(result.map(r => r.messageId)).toEqual([second.message.id, first.message.id])
+    expect(await ctx.sessions.flush(session)).toBe(false)
+    const seq = session.seq
+    expect(inbox.stageActivityGated('next-step', [gated('one'), gated('two')], { ...guard, hostEpoch: 'expired' }))
+      .toEqual([{ sequence: 'one', messageId: first.message.id, duplicate: true }, { sequence: 'two', messageId: second.message.id, duplicate: true }])
+    expect(session.seq).toBe(seq)
+    expect(inserted).toEqual([second.message, first.message])
+    const conflict = gated('one')
+    conflict.message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'changed' }] })
+    expect(() => inbox.stageActivityGated('next-step', [gated('new'), conflict], guard)).toThrow('conflict')
+    expect(session.seq).toBe(seq)
+    expect(() => inbox.admit('next-step', first.message, first.admission)).toThrow('ordered custody')
+    expect(() => inbox.admit('next-step', first.message, { origin: 'test', sequence: 'one' })).toThrow('ordered custody')
+    expect(() => inbox.stageActivityGated('next-step', [first, first], guard)).toThrow('duplicate')
+    expect(() => inbox.stageActivityGated('next-step', Array.from({ length: 11 }, (_, i) => gated(String(i))), guard)).toThrow()
+    expect(session.seq).toBe(seq)
+    inbox.setFocus(false)
+    inbox.resumeOperator()
+    expect(inbox.check('manual')).toEqual([])
+    expect(inbox.claim('next-turn', 1)).toEqual([])
+    expect(inbox.hasPending).toBe(false)
+    expect(inbox.isPendingReceipt('test', 'one')).toBe(false)
+    expect(inbox.nextStep).toEqual([second.message, first.message])
+  })
+
+  it('inserts the frozen custody snapshot despite caller mutation and reentrant observers', async () => {
+    const { inbox, session, ctx } = await inboxAgent('gated-reentrant')
+    const first = gated('first')
+    const second = gated('second')
+    const mutableMessage = { ...first.message }
+    first.message = mutableMessage
+    const items = [first, second]
+    const mutableGuard = { ...guard }
+    const original = structuredClone(items)
+    const expectedIds = original.map(item => item.message.id)
+    let reentrantReceipts: ReturnType<ReactLoopInbox['stageActivityGated']> | undefined
+    const observerClaims: UserMessage[][] = []
+    let observed = 0
+    ctx.on('session/event', (subject, event) => {
+      if (subject !== session) return
+      if (event.type === 'agent/notification/activity-gated') {
+        observed++
+        mutableMessage.id = gated('changed-id').message.id
+        mutableMessage.content = [{ type: 'text', text: 'changed after custody commit' }]
+        first.admission.origin = 'changed-origin'
+        first.admission.sequence = 'changed-sequence'
+        mutableGuard.hostEpoch = 'changed-host'
+        mutableGuard.controlRevision = 99
+        items.reverse()
+        reentrantReceipts = inbox.stageActivityGated('next-step', structuredClone(event.data.items), { ...event.data.guard })
+      }
+      if (event.type === 'agent/notification/activity-gated' || event.type === 'agent/inbox/spliced') {
+        observerClaims.push(inbox.claim('next-turn', 1))
+      }
+    })
+    const receipts = inbox.stageActivityGated('next-step', items, mutableGuard)
+    expect(observed).toBe(1)
+    expect(receipts.map(r => r.messageId)).toEqual(expectedIds)
+    expect(receipts.map(r => r.sequence)).toEqual(['first', 'second'])
+    expect(reentrantReceipts).toEqual(receipts.map(r => ({ ...r, duplicate: true })))
+    expect(observerClaims).toEqual([[], [], []])
+    expect(inbox.nextStep).toEqual(original.map(item => item.message))
+    expect(inbox.nextStep.every(message => inbox.isHeld(message))).toBe(true)
+    const stored = ctx.sessionProjections.stateOf(session, 'notifications')!
+    expect(stored.receipts.map(r => r.activityGate?.guard)).toEqual([guard, guard])
+    expect(stored.receipts.map(r => r.admission)).toEqual(original.map(item => item.admission))
+    expect(session.snapshotEvents().map(event => event.type)).toEqual([
+      'agent/notification/activity-gated', 'agent/inbox/spliced', 'agent/inbox/spliced',
+    ])
+  })
+
+  it('rejects partial cached activity tuples and missing marker/binding halves', async () => {
+    const { inbox, session, ctx } = await inboxAgent('gated-cache')
+    inbox.stageActivityGated('next-step', [gated('cached')], guard)
+    const state = ctx.sessionProjections.stateOf(session, 'notifications')!
+    const receipt = state.receipts[0]!
+    expect(notificationProjectionDefinition.stateSchema.safeParse(state).success).toBe(true)
+    for (const field of ['version', 'hostEpoch', 'bindingEpoch', 'activityRevision', 'controlRevision']) {
+      const partial = Object.fromEntries(Object.entries(guard).filter(([key]) => key !== field))
+      const candidate = { ...state, receipts: [{ ...receipt, activityGate: { sessionId: session.id, guard: partial } }] }
+      expect(notificationProjectionDefinition.stateSchema.safeParse(candidate).success).toBe(false)
+    }
+    expect(notificationProjectionDefinition.stateSchema.safeParse({
+      ...state, receipts: [{ ...receipt, activityGate: undefined }],
+    }).success).toBe(false)
+    expect(notificationProjectionDefinition.stateSchema.safeParse({
+      ...state, receipts: [{ ...receipt, admission: { origin: 'test', sequence: 'cached' } }],
+    }).success).toBe(false)
+  })
+
+  it('retains a forked gate only as held evidence and never imports live epoch authority', async () => {
+    const { inbox, session, ctx } = await inboxAgent('gated-parent')
+    const item = gated('parent')
+    inbox.stageActivityGated('next-step', [item], guard)
+    const child = ctx.sessions.fork(session, undefined, SessionId('gated-child'))
+    const childAgent = stubAgent('gated-child', { ctx, session: child })
+    const childInbox = new ReactLoopInbox(ctx.sessionProjections, child, agentEvents(ctx, childAgent))
+    childInbox.recoverUnentered()
+    expect(childInbox.isHeld(item.message)).toBe(true)
+    expect(childInbox.claim('next-turn', 1)).toEqual([])
+    expect(() => childInbox.stageActivityGated('next-step', [item], guard)).toThrow('conflict')
+  })
+
+  it('keeps terminal receipts as evidence, not delivered messages or executable replay', async () => {
+    const { inbox, session } = await inboxAgent('gated-terminal')
+    const item = gated('terminal')
+    inbox.stageActivityGated('next-step', [item], guard)
+    inbox.clear(true)
+    const seq = session.seq
+    expect(inbox.stageActivityGated('next-step', [item], guard)[0]?.duplicate).toBe(true)
+    expect(session.seq).toBe(seq)
+    inbox.recoverUnentered()
+    expect(inbox.nextStep).toEqual([])
+    expect(session.snapshotEvents().some(e => e.type === 'user/message')).toBe(false)
+    expect(inbox.receipt('test', 'terminal')).toEqual(item.message)
+  })
+
   it('invalidates an empty resumed Stop state without weakening a known Stop', async () => {
     const { session, inbox } = await inboxAgent('empty-stop')
     expect(session.seq).toBe(0)
