@@ -86,6 +86,15 @@ export interface HostAdmission {
 declare module '@deepseek-ai/cordis' {
   interface Context {
     hostAdmission?: HostAdmission
+    /** Live authenticated activity owner; absence holds gated input. Never persisted. */
+    notificationActivity?: {
+      /**
+       * Read eligibility and owner revisions; the driver owns idle selection and log-sequence fences.
+       * @param agent - exact live Agent, including a selected background turn.
+       * @returns current revision, or undefined when activity or native controls hold entry.
+       */
+      inspect(agent: Agent): string | undefined
+    }
     /** Native receiver mounted explicitly; transport supplies an authenticated owner. */
     maintenanceReceiver?: { receive(authenticatedOwner: string, command: unknown): Promise<unknown> }
   }

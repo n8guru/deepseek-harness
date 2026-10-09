@@ -180,7 +180,7 @@ export async function admitNotifications(ctx: Context, request: Request, produce
   request.signal.throwIfAborted()
   if (guard !== undefined) {
     const accepting = () => inbox.accepting === true
-    if (inbox.stageActivityGated === undefined || inbox.isActivityGatedReceipt === undefined || !accepting()) return new Response('native activity-gated custody unavailable', { status: 409 })
+    if (inbox.stageActivityGated === undefined || inbox.isActivityGatedReceipt === undefined || agent.releaseActivityGated === undefined || !accepting()) return new Response('native activity-gated custody unavailable', { status: 409 })
     try {
       const snapshot = ctx.get('connection')?.operatorActivity.snapshot(sessionId)
       if (snapshot === undefined || ctx.get('agents')?.get(agent.id) !== agent) return new Response('operator activity unavailable', { status: 409 })
@@ -191,22 +191,32 @@ export async function admitNotifications(ctx: Context, request: Request, produce
       if (!replay && (snapshot.sessionId !== sessionId || snapshot.hostEpoch !== guard.hostEpoch
         || snapshot.binding?.bindingEpoch !== guard.bindingEpoch
         || snapshot.activityRevision !== guard.activityRevision || snapshot.controlRevision !== guard.controlRevision
-        || snapshot.holdReasons.length !== 0)) return new Response('stale or held activity guard', { status: 409 })
+        || snapshot.holdReasons.length !== 0 || ctx.get('notificationActivity')?.inspect(agent) === undefined)) return new Response('stale or held activity guard', { status: 409 })
+      const admissionRevision = ctx.get('notificationActivity')?.inspect(agent)
       const receipts = inbox.stageActivityGated('next-step', messages.map(({ item, message }) => ({
         message,
         admission: { origin: producer.origin, sequence: item.sequence,
           ...item.urgency === undefined ? {} : { urgency: item.urgency }, activityGated: true },
       })), guard)
+      const stagedRevision = ctx.get('notificationActivity')?.inspect(agent)
+      const stagedSeq = agent.session.seq
       if (!await ctx.get('sessions')?.flush(agent.session)) return new Response('notification durability unavailable', { status: 503 })
       request.signal.throwIfAborted()
       if (!authorized()) return new Response('notification grant changed', { status: 403 })
       if (ctx.get('agents')?.get(agent.id) !== agent || agent.inbox.notifications !== inbox || !accepting()) return new Response('notification owner changed', { status: 409 })
       const current = ctx.get('connection')?.operatorActivity.snapshot(sessionId)
       if (current === undefined) return new Response('operator activity unavailable', { status: 409 })
-      // Recompute binding/age/holds and revisions after persistence. Our own
-      // insertion advances Session.seq/controlRevision too: neither matching
-      // nor changed tuples authorize release until native step-79 enforcement.
-      return Response.json({ accepted: true, delivery: 'held', origin: producer.origin, receipts, focus: inbox.focus, activity: current },
+      // Insertion advances Session.seq itself. Compare against the post-insertion
+      // cut, never reuse the producer's pre-insertion tuple as release authority.
+      const eligible = !replay && stagedRevision !== undefined && stagedRevision === admissionRevision && stagedSeq === agent.session.seq
+        && ctx.get('notificationActivity')?.inspect(agent) === stagedRevision
+        && await agent.releaseActivityGated?.() === true
+      request.signal.throwIfAborted()
+      if (!authorized()) return new Response('notification grant changed', { status: 403 })
+      if (ctx.get('agents')?.get(agent.id) !== agent || agent.inbox.notifications !== inbox || !accepting()) return new Response('notification owner changed', { status: 409 })
+      const activity = ctx.get('connection')?.operatorActivity.snapshot(sessionId)
+      if (activity === undefined) return new Response('operator activity unavailable', { status: 409 })
+      return Response.json({ accepted: true, delivery: eligible && activity.eligible ? 'eligible' : 'held', origin: producer.origin, receipts, focus: inbox.focus, activity },
         { headers: { 'cache-control': 'no-store' } })
     } catch {
       // Retained receipts remain retryable; failed staging/flush is never ACKed.
@@ -257,12 +267,15 @@ export async function controlFocus(ctx: Context, request: Request): Promise<Resp
     if (input.enabled !== undefined || input.checkId !== undefined) return new Response('invalid resume control', { status: 400 })
     if (inbox.resumeOperator === undefined) return new Response('native Stop control unavailable', { status: 409 })
     inbox.resumeOperator()
+    await agent.releaseActivityGated?.()
     return Response.json(inbox.controls)
   }
   if (input.action === 'set') {
     if (input.enabled === undefined) return new Response('enabled required', { status: 400 })
     inbox.setFocus(input.enabled)
     if (!await ctx.get('sessions')?.flush(agent.session)) return new Response('Focus durability unavailable', { status: 503 })
+    request.signal.throwIfAborted()
+    if (!input.enabled) await agent.releaseActivityGated?.()
     return Response.json(inbox.focus)
   }
   const checkId = input.checkId

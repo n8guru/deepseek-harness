@@ -9,6 +9,7 @@ import LlmRuntime, {
   isQuotaExceededError,
   LlmAdapter,
   LlmError,
+  markAgentLoopRequest,
   ProviderRequestId,
   ReasoningEffortId,
   resolveRetryPolicy,
@@ -601,6 +602,43 @@ describe('LlmRuntime', () => {
         throw consumerFailure
       }
     })()).rejects.toBe(consumerFailure)
+  })
+
+  it('closes an iterator held during construction without entering it', async () => {
+    let allowed = true
+    let entries = 0
+    let closes = 0
+    const adapter = new class extends LlmAdapter {
+      stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
+        return {
+          [Symbol.asyncIterator](): AsyncIterator<StreamChunk> {
+            allowed = false
+            return {
+              next: () => {
+                entries += 1
+                return Promise.resolve({ done: false, value: SCRIPT[0]! })
+              },
+              return: () => {
+                closes += 1
+                return Promise.resolve({ done: true, value: undefined })
+              },
+            }
+          },
+        }
+      }
+    }()
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['test'], adapter)
+    const request = markAgentLoopRequest({
+      provider: 'test', model: 'test', messages: [],
+    }, () => {
+      if (!allowed) throw new LlmError('activity held', 'ACTIVITY_HELD')
+    })
+    const chunks = await collect(ctx.llm.stream(request))
+    expect(chunks).toMatchObject([{ type: 'finish', reason: { kind: 'error', failure: { code: 'ACTIVITY_HELD' } } }])
+    expect(entries).toBe(0)
+    expect(closes).toBe(1)
   })
 
   it('awaits adapter cleanup on downstream close and leaves cleanup failure thrown', async () => {

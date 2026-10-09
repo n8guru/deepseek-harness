@@ -132,7 +132,9 @@ export class ReactLoopAgent implements Agent {
     this.dispatch = agentEvents(loopCtx, this)
     this.scope = createScope(loopCtx, this)
     this.ctx = this.scope.ctx
-    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch, () => (this.maintenanceAdmission ?? this.loopCtx.get('hostAdmission')))
+    this.inbox = new ReactLoopInbox(this.ctx.sessionProjections, session, this.dispatch,
+      () => (this.maintenanceAdmission ?? this.loopCtx.get('hostAdmission')),
+      () => this.loopCtx.get('notificationActivity')?.inspect(this))
     /* v8 ignore next -- the loop registers its own turnBoundary unit, so the key is always present */
     const lastTurn = this.loopCtx.sessionProjections.stateOf(session, 'turnBoundary')?.lastTurn ?? 0
     this.phase = { kind: 'idle', lastTurn }
@@ -151,7 +153,7 @@ export class ReactLoopAgent implements Agent {
     this.phase = next
     const status = this.status
     if (status !== previousStatus) {
-      this.inbox.advanceControlRevision()
+      this.inbox.advanceControlRevision(true)
       this.dispatch.emit('agent/status', { status })
     }
   }
@@ -177,6 +179,29 @@ export class ReactLoopAgent implements Agent {
   wakeInbox(): void {
     if ((this.maintenanceAdmission ?? this.loopCtx.get('hostAdmission'))?.open === false) return
     if (this.inbox.hasPending) this.wakeDriver()
+  }
+
+  async releaseActivityGated(): Promise<boolean> {
+    if (this.phase.kind !== 'idle') return false
+    const ids = this.inbox.selectActivityGated()
+    if (ids.length === 0) return false
+    return this.runMaintenance(async (signal) => {
+      const revision = this.loopCtx.get('notificationActivity')?.inspect(this)
+      const seq = this.session.seq
+      if (revision === undefined) return false
+      try {
+        if (!await this.loopCtx.sessions.flush(this.session)) return false
+        if (signal.aborted || this.session.seq !== seq
+          || this.loopCtx.get('notificationActivity')?.inspect(this) !== revision) return false
+        this.inbox.armActivitySelection(ids)
+        this.wakeInbox()
+        return true
+      } catch (_error) {
+        // No accepted release on failed persistence; the original custody remains.
+        this.inbox.clearActivitySelection()
+        return false
+      }
+    })
   }
 
   followup(input: UserMessage, initialAdmission?: HostInitialAdmission): void {
@@ -220,6 +245,7 @@ export class ReactLoopAgent implements Agent {
         this.setPhase({ kind: 'idle', lastTurn: maintenance.lastTurn })
         const cause = abortedCancelCause(maintenance.abort.signal)
         if (cause?.kind !== 'disposed' && maintenance.wakeRequested && this.inbox.hasPending) this.wakeDriver()
+        if (this.phase.kind !== 'running') this.inbox.clearActivitySelection()
         done.resolve()
       }
     })()
@@ -272,17 +298,20 @@ export class ReactLoopAgent implements Agent {
   }
 
   private async kick(): Promise<void> {
+    let activityHeld = false
     try {
       while (await this.turn()) {}
-    } catch (_error) {
+    } catch (error) {
+      activityHeld = error instanceof LlmError && error.code === 'ACTIVITY_HELD'
       // Reported failures and cancellation are contained at the driver boundary.
     } finally {
       /* v8 ignore next -- kick owns a running phase until this driver boundary */
       if (this.phase.kind === 'running') {
+        this.inbox.clearActivitySelection()
         this.inbox.recoverUnentered()
         const { turn, wakeRequested } = this.phase
         this.setPhase({ kind: 'idle', lastTurn: turn })
-        if (wakeRequested && this.inbox.hasPending) this.wakeDriver()
+        if ((wakeRequested || activityHeld && this.inbox.hasForeground) && this.inbox.hasPending) this.wakeDriver()
       }
     }
   }
@@ -291,19 +320,28 @@ export class ReactLoopAgent implements Agent {
     /* v8 ignore next -- private callers establish the running phase before proposing a step */
     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
+    const claimRevision = this.loopCtx.get('notificationActivity')?.inspect(this)
     const claimed = this.inbox.claim(target, position.turn)
+    if (position.step === 1 && this.inbox.hasUnenteredActivitySelection && claimed.length === 0) return { kind: 'reject' }
+    if (this.inbox.activityCheckpoint(claimed) !== undefined
+      && this.loopCtx.get('notificationActivity')?.inspect(this) !== claimRevision) {
+      throw new LlmError('activity changed during claim', 'ACTIVITY_HELD')
+    }
+    const checkpoint = this.inbox.activityCheckpoint(claimed)
     const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal))
     signal.throwIfAborted()
     const sections = renderContextSections(assembly)
     const context = this.runtimeContext.project(joinContextSections(sections), sections)
     const decision = await this.dispatch.waterfall(
-      'agent/pre-step', { messages: claimed, ...position, signal },
+      'agent/pre-step', { messages: [...claimed], ...position, signal },
       (): Promise<PreStepDecision> => Promise.resolve<PreStepDecision>({
         kind: 'enter',
-        messages: context === undefined ? claimed : [...claimed, context],
+        messages: context === undefined ? [...claimed] : [...claimed, context],
       }),
     )
     signal.throwIfAborted()
+    this.inbox.assertActivityCheckpoint(claimed, checkpoint)
+    this.inbox.assertActivityDecision(claimed, decision.kind === 'reject' ? [] : decision.messages)
     if (decision.kind === 'reject') {
       this.inbox.settle(claimed, 'rejected')
       return decision
@@ -397,6 +435,10 @@ export class ReactLoopAgent implements Agent {
         turnEnds = { kind: 'aborted', reason: cause }
         throw error
       }
+      if (error instanceof LlmError && error.code === 'ACTIVITY_HELD') {
+        turnEnds = { kind: 'blocked' }
+        throw error
+      }
       // Every failure is structured: an `LlmError` keeps its facts, anything
       // else flattens to `errorChain` text under the `UNKNOWN` code.
       turnEnds = {
@@ -432,7 +474,15 @@ export class ReactLoopAgent implements Agent {
     const renderedPrompt = renderPrompt(assembly)
     let firstAttempt = true
     while (true) {
+      const checkpoint = this.inbox.activityCheckpoint(decision.messages)
       const { config, preparedCall } = await this.prepareRequest(turn, step, signal)
+      this.inbox.assertActivityCheckpoint(decision.messages, checkpoint)
+      const entryRevision = this.inbox.activityEntryRevision(decision.messages)
+      const admit = () => {
+        if (this.inbox.activityEntryRevision(decision.messages) !== entryRevision) {
+          throw new LlmError('activity changed before adapter entry', 'ACTIVITY_HELD')
+        }
+      }
       const startsRequestSeries = firstAttempt && decision.startsRequestSeries === true
       const commits = this.systemPrompt.project(renderedPrompt, {
         inHistory: preparedCall?.systemPromptUpdate === 'in-history',
@@ -443,13 +493,17 @@ export class ReactLoopAgent implements Agent {
       for (const { message, intent } of commits) {
         this.session.append('system/message', { turn, step, message }, intent)
       }
+      admit()
       if (firstAttempt) {
         for (const message of decision.messages) {
+          admit()
           this.session.append('user/message', message, { surfaceOp: 'append' })
         }
       }
       firstAttempt = false
-      const request = this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal)
+      const request = markAgentLoopRequest(
+        this.buildRequest(config, preparedCall, assembly.tools, { turn, step }, startsRequestSeries, signal),
+        entryRevision === undefined ? undefined : admit)
       const live = new AssistantStreamAttempt(
         this.session.id,
         ++this.assistantAttemptCounter,
@@ -460,10 +514,14 @@ export class ReactLoopAgent implements Agent {
       )
       let started = false
       try {
+        admit()
+        signal.throwIfAborted()
         const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request)
         signal.throwIfAborted()
         live.start()
         started = true
+        admit()
+        signal.throwIfAborted()
         for await (const chunk of stream) {
           signal.throwIfAborted()
           live.push(chunk)
@@ -518,6 +576,9 @@ export class ReactLoopAgent implements Agent {
             'assistant/attempt',
             () => this.session.append('assistant/attempt', { turn, step, stream: live.stream }).seq,
           )
+          if (finish.failure.code === 'ACTIVITY_HELD') {
+            throw new LlmError(finish.failure.message, 'ACTIVITY_HELD')
+          }
           const action = await this.dispatch.waterfall(
             'agent/request-error', {
               turn,

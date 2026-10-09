@@ -1,0 +1,81 @@
+conductor-relay step79 — task143236 attempt1
+EXECUTED_MODEL: gpt-6-astra
+SOURCE ONLY. Producer implementation and command observations; independent verification is pending.
+Repository https://github.com/n8guru/deepseek-harness.git
+Branch agents/forge/conductor-activity-snapshot, continuing reviewed step78.
+Exact publication commit and normal hook outcomes are recorded in the task/step evidence.
+Exclusive native writer lease: dsh-native-focus-admission / task:143236:attempt:1.
+
+DELTA
+Connection supplies current authenticated activity and native owner/control revisions.
+Native idle maintenance selects at most ten ordered identities before custody flush.
+Flush, claim observers, asynchronous preparation, each native user/message acceptance,
+stream middleware and final adapter dispatch recheck current authority. Session.seq
+fences awaits; synchronous internal log writes do not invalidate their own release.
+Goal identity/revision/phase/activation and native monotonic counters fence ABA.
+The exact loop-request marker carries a disposable final callback, never a persisted
+snapshot capability. Iterator construction that changes authority is closed before next().
+
+The socket reader does not await release: same-socket leave/Stop remains observable
+while the native-owned flush waits. Foreground insertion invalidates selection before
+observers; foreground claim clears selection before removing pending messages.
+No-driver maintenance and driver completion retire selection. Middleware cannot drop,
+reject, reorder, duplicate, replace or inject selected gated input as a release.
+Recovery retains original receipt order ahead of late arrivals. Empty initial admission
+is distinct from an already-admitted tool continuation, including when other selected
+next-turn receipts remain pending. Existing foreground work is not canceled to deliver reports.
+
+Current diagnostic eligible is now meaningful. New valid admission, qualifying activity
+or authenticated hold clearing can ask the existing native inbox to release. Read, Pong,
+reconnect and exact receipt-only retry never authorize release. Historical tuples cannot
+restore process-local selection. Native user/message is acceptance into history, NOT
+provider delivery or proof the operator saw anything. Admission never emits delivered/seen
+ACKs; held/eligible and ordered accepted receipts describe flushed custody/current eligibility.
+No persistence type or accepted history was rewritten.
+
+COMMAND OBSERVATIONS (2026-10-09, isolated forge clone)
+1. Final source matrix:
+   pnpm exec vitest run packages/client/connection/tests packages/core/agent-loop/tests packages/llm/llm/tests --maxWorkers=4
+   1067 successful, 2 timeout failures, 2 intentionally skipped; 63 successful files,
+   1 failed file, 1 skipped file. NOT an all-green matrix.
+   activity-admission.host.spec.ts:104 successful; gated-custody.spec.ts:13 successful;
+   service.spec.ts:93 successful; focus-profile.spec.ts:3 successful.
+   Skips are the unavailable midturn-codex.host adapter cases.
+   The two failures are unchanged binary-rpc.host HTTP gzip/none 5000ms timeouts.
+   They recur in a single-worker isolated run (41 successful/2 timeout), and recur
+   with the only executed new constructor registration temporarily removed as a control.
+   The registration was restored exactly. No timeout was raised and no assertion removed.
+   Earlier same-session Connection+LLM run completed559 tests with no failures before
+   later load increased. Host load at12:04Z was49.65/51.47/37.74. Contention is plausible,
+   not a proven full explanation; quiet-environment binary regression qualification is owed.
+2. pnpm exec vitest run packages/core/agent/tests packages/goal/goal/tests packages/goal/goal-round-driver/tests packages/session/session-persistence-jsonl/tests
+   30 files,931 successful,1 skipped. Native owner/persistence regression evidence.
+3. pnpm exec vitest run packages/api/gateway/tests/stream-server.host.spec.ts packages/api/gateway/tests/gateway-stream.host.spec.ts
+   2 files,69 successful.
+4. Deterministic queued-turn tool continuation regression first reproduced1 model call
+   instead of3; restricting empty-selection rejection to the initial step produced3,
+   one tool execution and exact ordered once-only acceptance. Full matrix includes it.
+5. pnpm run typecheck completed with exit0 (canonical host build and client contracts).
+   The final one-line queued-turn refinement is also subject to the normal publication
+   prepush typecheck; final-pin hook and rebuilt-profile outcomes are in task evidence.
+6. Connection Host+Client tsc -b completed successfully. Full type-aware lint on final
+   agent.ts and activity-admission.host.spec.ts:0 warnings/errors. Two unnecessary test
+   casts found by the parent were removed without changing the adversarial assertions.
+   Scoped source lint, six bilingual pairs, all580 Agent Note formats and diff whitespace
+   checks completed successfully. Agent type-equiv block now matches the public contract.
+7. Full initial doc-sync diagnostic, while edits were in flight:28 successful/15 failed.
+   Test narrowing and touched note-header defects were corrected. A final broad diagnostic
+   was stopped under heavy contention after it again reported doc-graph, Cordis catalog,
+   inspect-catalog and inherited Inbox/LlmAdapter/Subagent type-equivalence failures.
+   No final full doc-sync success is claimed; Agent itself has no remaining type-equiv drift.
+
+REQUIRED LIMITS
+This source candidate does not complete step70, unblock notifier71 or perform step80's
+whole A01–A22 GUI/adapter qualification. Raw authenticated socket/native fixtures are not
+fresh trusted-DOM evidence. Final rebuilt-profile smoke does not replace that obligation.
+The inherited step77 finalized-format-changed/canonical persistence-history qualification
+remains unresolved, not silently waived by these tests. Old-runtime compatibility remains
+owed under the reviewed old-source pin; notifier/R13 processing, step18 counters and
+steps71–74 remain unchanged. No installation, restart, live notice delivery, live hold
+release, general pump enable, capacity override or new scheduler/durable inbox occurred.
+[DEPLOY-N/A: native source artifact only; no Forage serving-tree merge.]

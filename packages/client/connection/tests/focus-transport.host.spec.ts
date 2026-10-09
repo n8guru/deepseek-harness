@@ -185,7 +185,7 @@ it('authenticates an actual caller, durably retries its identity and never accep
   }
 })
 
-it('binds activity to the authenticated Gateway socket and exact session without granting notification release', async () => {
+it('binds activity to the authenticated Gateway socket and defers notification entry to the native driver', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-activity-wire-'))
   const ctx = new Context()
   const sockets: WebSocket[] = []
@@ -200,7 +200,7 @@ it('binds activity to the authenticated Gateway socket and exact session without
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(GoalService)
-    const adapter = new MockAdapter([textResponse('programmatic prompt')])
+    const adapter = new MockAdapter([textResponse('notification'), textResponse('programmatic prompt')])
     ctx.llm.registerAdapter(['mock'], adapter)
     const agent = await ctx.agentLoop.create(SessionId('activity-wire'), { provider: 'mock', model: 'mock' })
     const bearer = 'activity-read-test-bearer-123456789012345'
@@ -260,7 +260,7 @@ it('binds activity to the authenticated Gateway socket and exact session without
     const frame = (sequence: number, extra = {}) => ({ type: 'item', streamId: 'activity', value: { version: 1, bindingEpoch, sequence, interaction: 'input', ...extra } })
     expect((await send(socket, frame(1))).value.accepted).toBe(true)
     const active = await read()
-    expect(active).toMatchObject({ state: 'active', eligible: false, stop: 'clear', goal: { state: 'none' }, hostAdmission: 'open', binding: { bindingEpoch, principalClass: 'authenticated-operator-gui' } })
+    expect(active).toMatchObject({ state: 'active', eligible: true, stop: 'clear', goal: { state: 'none' }, hostAdmission: 'open', binding: { bindingEpoch, principalClass: 'authenticated-operator-gui' } })
     for (const bad of [frame(1), frame(2, { bindingEpoch: 'forged' }), frame(2, { lastActivityAt: 1 }), frame(2, { sequence: Number.MAX_SAFE_INTEGER + 1 })]) {
       expect((await send(socket, bad)).value.accepted).toBe(false)
       expect(await read()).toMatchObject({ lastActivityAt: active.lastActivityAt, activityRevision: active.activityRevision })
@@ -291,7 +291,7 @@ it('binds activity to the authenticated Gateway socket and exact session without
     expect(adapter.requests).toHaveLength(0)
     expect((await operator({ action: 'set', enabled: false })).status).toBe(200)
     const allClear = await read()
-    expect(allClear).toMatchObject({ state: 'active', stop: 'clear', focus: 'disabled', goal: { state: 'none' }, hostAdmission: 'open', foregroundBusy: false, eligible: false })
+    expect(allClear).toMatchObject({ state: 'active', stop: 'clear', focus: 'disabled', goal: { state: 'none' }, hostAdmission: 'open', foregroundBusy: false, eligible: true })
     const count = agent.session.seq
     expect((await post({ sessionId: agent.id, items: [{ sequence: 'held', text: 'must not enter' }] })).status).toBe(409)
     expect((await post({ sessionId: agent.id, activityGated: false, items: [{ sequence: 'held', text: 'must not enter' }] })).status).toBe(400)
@@ -302,17 +302,19 @@ it('binds activity to the authenticated Gateway socket and exact session without
       items: [{ sequence: 'held', text: 'must not enter' }],
     })
     expect(custody.status).toBe(200)
-    expect(await custody.json()).toMatchObject({ accepted: true, delivery: 'held', receipts: [{ sequence: 'held', duplicate: false }] })
-    expect(agent.inbox.nextStep).toHaveLength(1)
-    expect(agent.inbox.notifications!.isHeld(agent.inbox.nextStep[0]!)).toBe(true)
-    expect(adapter.requests).toHaveLength(0)
+    const custodyAck = await custody.json()
+    expect(custodyAck).toMatchObject({ accepted: true, receipts: [{ sequence: 'held', duplicate: false }] })
+    expect(custodyAck.delivery).toBe(custodyAck.activity.eligible ? 'eligible' : 'held')
+    await agent.whenIdle()
+    expect(agent.inbox.nextStep).toHaveLength(0)
+    expect(adapter.requests).toHaveLength(1)
     expect((await send(socket, frame(2, { interaction: 'leave' }))).value.accepted).toBe(true)
     expect(await read()).toMatchObject({ state: 'stale', lastActivityAt: active.lastActivityAt })
     expect((await send(socket, frame(3))).value.accepted).toBe(false)
     agent.cancel({ kind: 'user' })
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'programmatic' }] }))
     await agent.whenIdle()
-    expect(adapter.requests).toHaveLength(1)
+    expect(adapter.requests).toHaveLength(2)
     expect(await read()).toMatchObject({ state: 'stale', stop: 'stopped', lastActivityAt: active.lastActivityAt })
 
     // Fake clocks exercise equality and rollback without advancing Gateway timers.

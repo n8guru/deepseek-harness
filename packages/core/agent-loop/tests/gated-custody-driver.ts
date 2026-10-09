@@ -12,7 +12,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import AgentLoop from '../src/index.ts'
 import { ReactLoopInbox } from '../src/inbox.ts'
-import { MockAdapter } from './mock-adapter.ts'
+import { MockAdapter, textResponse } from './mock-adapter.ts'
 
 const [root, mode] = process.argv.slice(2)
 assert.ok(root)
@@ -25,7 +25,7 @@ await ctx.plugin(ToolRuntime)
 await ctx.plugin(AgentRegistry)
 await ctx.plugin(AgentLoop, { agents: [] })
 await ctx.plugin(JsonlPersistence, { root, compression: 'none' })
-const adapter = new MockAdapter([])
+const adapter = new MockAdapter([textResponse('accepted once')])
 ctx.llm.registerAdapter(['mock'], adapter)
 const id = SessionId('gated-custody')
 const options = { provider: 'mock', model: 'mock' }
@@ -36,13 +36,34 @@ const items = (): GatedNotificationItem[] => ['second', 'first', 'third'].map(se
   admission: { origin: 'native:custody-test', sequence, activityGated: true },
   message: createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: sequence }] }),
 }))
-const handle = mode === 'read' || mode === 'terminal-read'
+const handle = mode === 'read' || mode === 'terminal-read' || mode === 'release-read' || mode === 'entered-read'
   ? await ctx.agents.resume({ resumeSessionId: id, agentOptions: options })
   : await ctx.agents.create({ sessionId: id, agentOptions: options })
 const { agent } = handle
 const inbox = agent.inbox.notifications!
-assert.ok(inbox.stageActivityGated)
-if (mode === 'read' || mode === 'terminal-read') {
+assert.ok(inbox.stageActivityGated !== undefined)
+if (mode === 'release-read' || mode === 'entered-read') {
+  const state = ctx.sessionProjections.stateOf(agent.session, 'notifications')!
+  const before = agent.session.seq
+  const replay = inbox.stageActivityGated('next-step', items(), { ...guard, hostEpoch: 'new-host' })
+  assert.equal(agent.session.seq, before)
+  assert.deepEqual(replay.map(r => r.messageId), state.receipts.map(r => r.message.id))
+  assert.ok(replay.every(r => r.duplicate))
+  // Test-only activity provider: transport/authentication is covered by the HTTP/WS suite.
+  // No recorded tuple supplies this fresh process-local authority.
+  ctx.provide('notificationActivity', { inspect: subject => subject === agent
+    && inbox.controls?.stop === 'clear' && !inbox.controls.focus ? 'fresh-test-observation' : undefined })
+  assert.equal(await agent.releaseActivityGated?.(), false) // restored Stop is unknown
+  inbox.resumeOperator!()
+  assert.equal(await agent.releaseActivityGated?.(), mode === 'release-read')
+  await agent.whenIdle()
+  assert.equal(adapter.requests.length, mode === 'release-read' ? 1 : 0)
+  assert.deepEqual(agent.session.snapshotEvents().filter(e => e.type === 'user/message').map(e => e.data.id), replay.map(r => r.messageId))
+  assert.equal(agent.inbox.nextStep.length, 0)
+  assert.equal(await ctx.sessions.flush(agent.session), true)
+  console.log('ENTERED_ONCE ' + JSON.stringify(replay))
+  process.exit(0)
+} else if (mode === 'read' || mode === 'terminal-read') {
   const state = ctx.sessionProjections.stateOf(agent.session, 'notifications')!
   assert.deepEqual(state.receipts.map(r => r.admission.sequence), ['second', 'first', 'third'])
   assert.deepEqual(state.receipts.map(r => r.activityGate), items().map(() => ({ sessionId: id, guard })))

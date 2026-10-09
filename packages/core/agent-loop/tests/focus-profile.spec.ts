@@ -15,7 +15,7 @@ it('boots the shipped headless profile from built packages and returns Focus to 
     tsconfigPath: fileURLToPath(new URL('../../../../tsconfig.json', import.meta.url)),
     configPath: 'focus.patch.yml',
     env: { DSH_TELEMETRY_DISABLED: '1' },
-    prepare: async cwd => {
+    prepare: async (cwd) => {
       await writeFile(join(cwd, 'focus.patch.yml'), `- id: headless-runner
   disabled: true
 - id: headless-startup
@@ -33,6 +33,7 @@ it('boots the shipped headless profile from built packages and returns Focus to 
 `)
     },
   })
+  expect(result.stdout).toContain('GATED_BUILT_SNAPSHOT {"starts":1,"nativeAccepted":2,"duplicateWake":0}')
   const line = result.stdout.split('\n').find(line => line.startsWith('FOCUS_BUILT_SNAPSHOT '))
   expect(line).toBeDefined()
   expect(JSON.parse(line!.slice('FOCUS_BUILT_SNAPSHOT '.length))).toEqual({
@@ -51,7 +52,7 @@ it('runs an actual built dsh headless task with Focus-held notifications and goa
     configPath: 'cli-focus.patch.yml',
     binArgs: ['--profile', 'headless', '--patch', 'cli-focus.patch.yml', 'foreground obligation'],
     env: { DSH_TELEMETRY_DISABLED: '1' },
-    prepare: async cwd => {
+    prepare: async (cwd) => {
       await writeFile(join(cwd, 'cli-focus.patch.yml'), `- id: llm-deepseek
   disabled: true
 - id: session-title-llm
@@ -89,7 +90,7 @@ it('serves an actual Python caller over loopback HTTP from built packages under 
     configPath: 'py-focus.patch.yml',
     binArgs: ['py-focus.patch.yml', bearer],
     env: { DSH_TELEMETRY_DISABLED: '1' },
-    prepare: async cwd => {
+    prepare: async (cwd) => {
       const grant = { origin: 'py:caller', bearerSha256: createHash('sha256').update(bearer).digest('hex'), sessionIds: ['py-focus'], urgency: ['safety'] }
       await writeFile(join(cwd, 'py-focus.patch.yml'), `- id: headless-runner
   disabled: true

@@ -71,6 +71,13 @@ interface Agent {
   readonly session: Session
   /** Agent-owned access to durable pending work. */
   readonly inbox: Inbox
+  /** Wake only runnable inbox work already admitted by an owner. */
+  wakeInbox?(): void
+  /**
+   * Select at most ten held receipts at a true idle boundary, flush, revalidate, then wake.
+   * @returns whether the native release attempt was eligible, never delivery confirmation.
+   */
+  releaseActivityGated?(): Promise<boolean>
   /** The current lifecycle state, mirrored on every `agent/status` transition. */
   readonly status: AgentStatus
   /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
@@ -79,7 +86,8 @@ interface Agent {
   /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active
    * turn or between-turn task. The first cause wins for that activity. With no
-   * active activity, cancellation is a no-op and does not arm later work.
+   * active activity, cancellation does not arm later work; native human Stop
+   * still latches the driver's process-local notification control.
    * @param cause - the stable caller intent carried by the active operation signal.
    * @param options - cancellation options; `keepInbox` preserves pending work.
    */
@@ -122,7 +130,7 @@ interface Agent {
    * sole ordinary message of its own turn.
    * @param message - identified prompt content and the source that supplied it.
    */
-  followup(message: UserMessage): void
+  followup(message: UserMessage, initialAdmission?: HostInitialAdmission): void
 
   /**
    * Submit steering for the nearest step. An idle driver starts a turn;
@@ -278,7 +286,7 @@ type InboxTarget = 'next-turn' | 'next-step'
 
 每个待处理入队项就是其 `UserMessage`；`MessageId` 是唯一标识。结构化 `Inbox` 方法会记录规范化的持久 `agent/inbox/spliced` 变更，并拒绝重复的待处理 id。`replace(messageId, newMessage)` 与 `remove(messageId)` 通过 `MessageId` 跨两份列表定位待处理消息；替换可以改变标识，并先将旧消息作为 discarded 发布，再将新消息作为 inserted 发布。普通删除和 `clear()` 都表示取消。在步骤边界，dsh-agent-loop 包内部的 `ReactLoopInbox` 会通过纯删除 splice 移除拟进入步骤的批次——全部 `next-step` 输入，外加轮次边界上的一条 `next-turn` 消息——且不发出 discarded 通知，随后逐条发出 claimed 通知。仅供循环使用的待处理检测与领取操作不属于 `Agent.inbox`。`AgentLoop` 服务在发布工厂之前注册标准 `inbox` 投影；其 cell 是唯一 live 状态，同一份折叠在没有 Agent 时也服务于冷消费方。该 fold 会拒绝不安全或越界的 splice 坐标，以及跨两份列表重复的标识，并通过事件 seq 指出格式错误的持久历史。跟踪单条消息的消费方使用精确的 `agent/inbox/inserted`、`claimed` 与 `discarded` 通知。
 
-`NotificationActivityGuard` 记录版本 1、`hostEpoch`、`bindingEpoch`、`activityRevision` 与 `controlRevision`；它是历史元数据，绝非实时授权。`GatedNotificationBatch` 将该元组绑定到一个 `sessionId`、目标及有序的一至十个 `GatedNotificationItem`。每项保留带标识的消息及含有 `activityGated: true` 的生产者准入信息。必读的 `agent/notification/activity-gated` 事件先于匹配的 inbox splice；不支持的读取方必须拒绝。`NotificationInbox.stageActivityGated()` 返回有序回执标识和重复标志，不确认托管或投递；[AgentLoop](../../packages/core/agent-loop/README.zh.md#use-this-package) 拥有暂存、恢复和暂停逻辑。
+`NotificationActivityGuard` 记录版本 1、`hostEpoch`、`bindingEpoch`、`activityRevision` 与 `controlRevision`；它是历史元数据，绝非实时授权。`GatedNotificationBatch` 将该元组绑定到一个 `sessionId`、目标及有序的一至十个 `GatedNotificationItem`。每项保留带标识的消息及含有 `activityGated: true` 的生产者准入信息。必读的 `agent/notification/activity-gated` 事件先于匹配的 inbox splice；不支持的读取方必须拒绝。`NotificationInbox.stageActivityGated()` 返回有序回执标识和重复标志，不确认托管或投递；[AgentLoop](../../packages/core/agent-loop/README.zh.md#use-this-package) 拥有暂存、恢复和暂停逻辑。其可选的 `Agent.releaseActivityGated(): Promise<boolean>` 报告刚重新验证过的有界释放尝试，而非投递。Connection 提供 `ctx.notificationActivity.inspect(agent): string | undefined`；驱动器跨准备阶段比较该进程本地实时修订值，缺失时视为暂停。回调忽略所选驱动器自身的运行状态和日志写入；驱动器独立执行空闲选择、前台排除和跨等待的 Session 序号检查。
 
 取消：
 

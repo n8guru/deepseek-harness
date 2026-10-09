@@ -4,7 +4,7 @@
  * @module @deepseek-ai/dsh-agent-loop/inbox
  */
 
-import type { MessageId } from '@deepseek-ai/dsh-llm'
+import { LlmError, type MessageId } from '@deepseek-ai/dsh-llm'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import type SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Session, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
@@ -84,6 +84,7 @@ export class ReactLoopInbox implements InboxContract {
     private readonly session: Session,
     private readonly dispatch: AgentEventDispatch,
     private readonly admission: () => HostAdmission | undefined = () => undefined,
+    private readonly activity: () => string | undefined = () => undefined,
   ) {
     // Until Stop has durable custody, restored/forked history cannot establish a clear latch.
     this.stop = session.seq === 0 && !session.header.isSeeded ? 'clear' : 'unknown'
@@ -122,8 +123,16 @@ export class ReactLoopInbox implements InboxContract {
     return { stop: this.stop, focus: this.notificationState().enabled, revision: this.controlRevision }
   }
 
-  /** Commit a live control revision before any owner notification can reenter a reader. */
-  advanceControlRevision(): void { this.controlRevision++ }
+  /**
+   * Commit a control revision before observers run; only the driver's own phase can preserve its selection.
+   * @param ownPhase - whether this is the selected driver's synchronous phase transition.
+   */
+  advanceControlRevision(ownPhase = false): void {
+    const selected = ownPhase && this.activitySelectionRevision !== undefined
+      && this.activitySelectionRevision === this.activity()
+    this.controlRevision++
+    if (selected) this.activitySelectionRevision = this.activity()
+  }
 
   /** A resumed empty log also cannot establish pre-restart Stop state. */
   restoreStop(): void { if (this.stop === 'clear') this.setStop('unknown') }
@@ -160,8 +169,9 @@ export class ReactLoopInbox implements InboxContract {
   isHeld(message: UserMessage): boolean {
     const state = this.notificationState()
     const receipt = this.admissionFor(message.id)
-    // Persistence-only capability: Check and Focus clearing cannot authorize gated delivery.
-    if (receipt?.activityGate !== undefined) return true
+    if (receipt?.activityGate !== undefined) return receipt.activityGate.sessionId !== this.session.id
+      || !this.activitySelection.has(message.id) || this.hasForeground || this.activitySelectionRevision === undefined
+      || this.activity() !== this.activitySelectionRevision
     return state.enabled && receipt !== undefined && !state.released.includes(message.id)
   }
 
@@ -243,17 +253,112 @@ export class ReactLoopInbox implements InboxContract {
   /** Restore admissions canceled before model-visible entry; committed messages never replay. */
   recoverUnentered(): void {
     const state = this.notificationState()
-    for (const { target, message, admission, activityGate } of state.receipts) {
+    const order = new Map(state.receipts.map((receipt, index) => [receipt.message.id, index]))
+    for (const [index, { target, message, admission, activityGate }] of state.receipts.entries()) {
       if (activityGate !== undefined && activityGate.sessionId !== this.session.id) continue
       if (!state.entered.includes(message.id)
         && !state.terminal.some(item => item.messageId === message.id)
         && this.locate(message.id) === undefined) {
-        this.mutate(target, Infinity, 0, [message], false, activityGate === undefined ? undefined : admission)
+        // A post-claim arrival must not overtake retained gated input on recovery.
+        const later = activityGate === undefined ? -1
+          : this.current()[target].findIndex(pending => (order.get(pending.id) ?? -1) > index)
+        this.mutate(target, later < 0 ? Infinity : later, 0, [message], false, activityGate === undefined ? undefined : admission)
       }
     }
   }
 
-  setFocus(enabled: boolean): void { this.session.append('agent/focus', { enabled }) }
+  setFocus(enabled: boolean): void {
+    this.advanceControlRevision()
+    this.session.append('agent/focus', { enabled })
+  }
+
+  private activitySelection = new Set<string>()
+  private activitySelectionRevision: string | undefined
+  /** Whether selected custody still awaits native acceptance (not a tool continuation). */
+  get hasUnenteredActivitySelection(): boolean {
+    const entered = this.notificationState().entered
+    return [...this.activitySelection].some(id => !entered.includes(id))
+  }
+
+  /**
+   * Capture a fixed ordered selection; late arrivals wait for another release.
+   * @returns up to ten pending gated message identities, or none while held.
+   */
+  selectActivityGated(): readonly string[] {
+    if (!this.accepting || this.hasForeground || this.activity() === undefined) return []
+    return [...this.nextStep, ...this.nextTurn].filter(m =>
+      this.admissionFor(m.id)?.activityGate?.sessionId === this.session.id).slice(0, 10).map(m => m.id)
+  }
+
+  /**
+   * Process-local selection is never restored from recorded activity tuples.
+   * @param ids - fixed bounded selection captured before the successful flush.
+   */
+  armActivitySelection(ids: readonly string[]): void {
+    this.activitySelection = new Set(ids)
+    this.activitySelectionRevision = this.activity()
+  }
+
+  /** Retire the selection when its driver ends, including canceled or failed preparation. */
+  clearActivitySelection(): void {
+    this.activitySelection.clear()
+    this.activitySelectionRevision = undefined
+  }
+
+  /**
+   * Preserve selected custody across middleware; rejection defers rather than retires it.
+   * @param claimed - native ordered input, not the waterfall's mutable array.
+   * @param proposed - waterfall input, or empty for a rejected step.
+   */
+  assertActivityDecision(claimed: readonly UserMessage[], proposed: readonly UserMessage[]): void {
+    const gated = (message: UserMessage) => this.admissionFor(message.id)?.activityGate !== undefined
+    const expected = claimed.filter(gated)
+    const actual = proposed.filter(gated)
+    if (expected.length !== actual.length || expected.some((message, index) => message !== actual[index])) {
+      throw new LlmError('activity-gated selection changed by preparation', 'ACTIVITY_HELD')
+    }
+    this.assertActivityEntry(actual)
+  }
+
+  /**
+   * Recheck selected input even after claim removes it from pending lists.
+   * @param messages - proposed or natively accepted input for this request.
+   */
+  assertActivityEntry(messages: readonly UserMessage[]): void {
+    if (messages.some(m => this.admissionFor(m.id)?.activityGate !== undefined && this.isHeld(m))) {
+      throw new LlmError('activity-gated model entry held', 'ACTIVITY_HELD')
+    }
+  }
+
+  /**
+   * Live controls remain mandatory after input is accepted into model history.
+   * @param messages - request input whose gated receipts remain selected.
+   * @returns current revision, or undefined for entirely ungated input; throws while held.
+   */
+  activityEntryRevision(messages: readonly UserMessage[]): string | undefined {
+    if (!messages.some(m => this.admissionFor(m.id)?.activityGate !== undefined)) return undefined
+    this.assertActivityEntry(messages)
+    return this.activity()
+  }
+
+  /**
+   * Await fences include Session.seq; native synchronous log writes are not external controls.
+   * @param messages - input awaiting asynchronous preparation.
+   * @returns revision and sequence checkpoint, or undefined for ungated input.
+   */
+  activityCheckpoint(messages: readonly UserMessage[]): string | undefined {
+    const revision = this.activityEntryRevision(messages)
+    return revision === undefined ? undefined : JSON.stringify([this.session.seq, revision])
+  }
+
+  /**
+   * Refuse intervening control changes even when they returned to the same value.
+   * @param messages - input whose preparation has just settled.
+   * @param checkpoint - state captured immediately before the await.
+   */
+  assertActivityCheckpoint(messages: readonly UserMessage[], checkpoint: string | undefined): void {
+    if (checkpoint !== this.activityCheckpoint(messages)) throw new LlmError('activity changed during preparation', 'ACTIVITY_HELD')
+  }
 
   check(id: string): readonly string[] {
     const previous = this.notificationState().checks.find(c => c.id === id)
@@ -310,6 +415,7 @@ export class ReactLoopInbox implements InboxContract {
   claim(target: InboxTarget, turn: number): UserMessage[] {
     const claimed: UserMessage[] = []
     const foreground = this.hasForeground
+    if (foreground) this.clearActivitySelection()
     const eligible = (m: UserMessage) => !this.isHeld(m) && !(this.focus.enabled && foreground && this.admissionFor(m.id) !== undefined)
     for (const [index, message] of [...this.nextStep.entries()].reverse()) {
       if (eligible(message)) claimed.unshift(...this.mutate('next-step', index, 1, [], false))
@@ -446,6 +552,12 @@ export class ReactLoopInbox implements InboxContract {
     }
     const removed = inbox.slice(actualStart, actualStart + actualDeleteCount)
     if (discardRemoved) this.settle(removed, 'discarded')
+    if (notification === undefined && inserted.some(message => this.admissionFor(message.id) === undefined)) {
+      // Foreground insertion irreversibly retires a background selection, even if
+      // a later claim/removal makes hasForeground false again in this same driver.
+      this.activitySelectionRevision = undefined
+      this.advanceControlRevision()
+    }
     const event = this.session.append('agent/inbox/spliced', splice)
     if (discardRemoved) {
       for (const message of removed) this.dispatch.emit('agent/inbox/discarded', { message })

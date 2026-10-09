@@ -67,6 +67,21 @@ export class OperatorActivity {
 
   }
 
+  /**
+   * Native driver read: its selected background turn is not foreground work.
+   * @param agent - exact registered native Agent requesting final admission.
+   * @returns live owner/control revision, or undefined while held; never a reusable capability.
+   */
+  inspect(agent: Agent): string | undefined {
+    if (this.ctx.get('agents')?.get(agent.id) !== agent) return undefined
+    try {
+      const cut = this.readSnapshot(agent.id, true)
+      if (cut?.eligible !== true) return undefined
+      return JSON.stringify([this.hostEpoch, cut.binding?.bindingEpoch, cut.activityRevision,
+        ...this.state(agent).controlStamp.slice(1)])
+    } catch (_error) { return undefined /* Unavailable controls or clocks hold native input. */ }
+  }
+
   private time(): { wall: number; mono: number } {
     const wall = this.clock.wall()
     const mono = this.clock.mono()
@@ -104,6 +119,10 @@ export class OperatorActivity {
    * @returns v1 snapshot, or undefined when no live native Agent exists.
    */
   snapshot(sessionId: string): ActivitySnapshot | undefined {
+    return this.readSnapshot(sessionId, false)
+  }
+
+  private readSnapshot(sessionId: string, selectedDriver: boolean): ActivitySnapshot | undefined {
     const agent = this.ctx.get('agents')?.get(SessionId(sessionId))
     if (agent?.inbox.notifications === undefined || agent.inbox.notifications.accepting === false) return undefined
     const { wall, mono } = this.time()
@@ -138,12 +157,13 @@ export class OperatorActivity {
     }
     const admission = this.ctx.get('hostAdmission')
     const hostAdmission = admission?.controlRevision === undefined ? 'unknown' : admission.open ? 'open' : 'closed'
-    const foregroundBusy = agent.status !== 'idle' || agent.inbox.notifications.hasForeground
+    const foregroundBusy = (!selectedDriver && agent.status !== 'idle') || agent.inbox.notifications.hasForeground
     // These are native monotonic revisions, not sampled control values. Session.seq
     // commits before session/event observers; live owners increment before emitting.
     // Stable native epochs fence replacement (Cordis service proxies are not identities).
     const stamp = [agent.session.seq, controls?.revision, goals?.controlEpoch, goals?.activationRevision(agent),
-      admission?.controlEpochId, admission?.controlRevision]
+      admission?.controlEpochId, admission?.controlRevision, goal.state,
+      ...goal.state === 'present' ? [goal.id, goal.revision, goal.phase, goal.activation] : []]
     if (stamp.some((value, index) => value !== state.controlStamp[index])) {
       state.controlStamp = stamp
       state.controlRevision++
@@ -165,7 +185,7 @@ export class OperatorActivity {
       idleThresholdMs: this.idleThresholdMs, snapshotTtlMs: 5000 as const, state: activity,
       binding: selected === undefined ? null : { bindingEpoch: selected.epoch, principalClass: 'authenticated-operator-gui' as const },
       stop, focus, goal, hostAdmission, foregroundBusy,
-      eligible: false, holdReasons,
+      eligible: holdReasons.length === 0, holdReasons,
     }
   }
 
@@ -216,6 +236,13 @@ export class OperatorActivity {
           state.lastActivityAt = time.wall
           state.clockUnknown = false
           state.revision++
+        }
+        // Only a new qualifying interaction may schedule retained custody. Opening,
+        // read, Pong and receipt retries never enter this path; Stop/leave cannot wake.
+        if (frame.interaction !== 'leave' && frame.interaction !== 'stop') {
+          // Native maintenance owns the async release. Keep consuming this socket:
+          // a queued leave/Stop must invalidate activity while custody flush awaits.
+          void agent.releaseActivityGated?.().catch(() => {})
         }
         yield { version: 1, accepted: true, sequence: frame.sequence }
       }

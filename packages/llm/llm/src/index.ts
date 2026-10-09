@@ -31,7 +31,7 @@ import { freezeMessage } from './message.ts'
 import { resolveRetryPolicy } from './retry-policy.ts'
 import type { ResolvedRetryPolicy } from './retry-policy.ts'
 import type { ProviderRequestId } from './brand.ts'
-import { callConfigEquals } from './call-config.ts'
+import { assertAgentLoopAdmission, callConfigEquals } from './call-config.ts'
 import type { LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
 import { HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
 import { normalizeLlmFailure } from './adapter-failure.ts'
@@ -994,51 +994,51 @@ export class LlmRuntime extends TypertRemoteService {
     const registration = this.registration(config.provider)
     const settled = this.trackBackendCaller(registration, 'prepare')
     try {
-    const adapterCall = await registration.adapter.prepareCall(config.provider, config.model, signal)
-    const modelInfo = this.normalizeModelInfo(registration, config.model, adapterCall.model)
-    const resolved = this.resolveCallWithInfo(config, modelInfo)
-    const resolvedConfig = deepFreeze(structuredClone(resolved.config))
-    const context = resolved.context === undefined
-      ? undefined
-      : deepFreeze(structuredClone(resolved.context))
-    const adapterDefaults = deepFreeze<LlmCallConfigAdapterDefaults>({
-      ...config.reasoningEffort === undefined && resolvedConfig.reasoningEffort !== undefined
-        ? { reasoningEffort: true }
-        : {},
-      ...config.maxTokens === undefined && resolvedConfig.maxTokens !== undefined
-        ? { maxTokens: true }
-        : {},
-    })
-    let dispatched = false
-    return Object.freeze({
-      config: resolvedConfig,
-      retryPolicy: registration.retryPolicy,
-      adapterDefaults,
-      ...context === undefined ? {} : { context },
-      ...modelInfo.inputModalities === undefined
-        ? {}
-        : { inputModalities: Object.freeze([...modelInfo.inputModalities]) },
-      ...modelInfo.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: modelInfo.systemPromptUpdate },
-      ...modelInfo.toolUpdate === undefined ? {} : { toolUpdate: modelInfo.toolUpdate },
-      stream: (options: GenerateOptions): AsyncIterable<StreamChunk> => {
-        if (dispatched) {
-          throw new LlmError('a prepared LLM call can only be dispatched once', 'INVALID_PREPARED_CALL')
-        }
-        if (!callConfigEquals(options, resolvedConfig)) {
-          throw new LlmError(
-            'prepared LLM call config changed before adapter dispatch',
-            'INVALID_PREPARED_CALL',
-          )
-        }
-        dispatched = true
-        return this.streamWithRegistration(options, {
-          registration,
-          config: resolvedConfig,
-          modelInfo,
-          dispatch: options => adapterCall.stream(options),
-        })
-      },
-    })
+      const adapterCall = await registration.adapter.prepareCall(config.provider, config.model, signal)
+      const modelInfo = this.normalizeModelInfo(registration, config.model, adapterCall.model)
+      const resolved = this.resolveCallWithInfo(config, modelInfo)
+      const resolvedConfig = deepFreeze(structuredClone(resolved.config))
+      const context = resolved.context === undefined
+        ? undefined
+        : deepFreeze(structuredClone(resolved.context))
+      const adapterDefaults = deepFreeze<LlmCallConfigAdapterDefaults>({
+        ...config.reasoningEffort === undefined && resolvedConfig.reasoningEffort !== undefined
+          ? { reasoningEffort: true }
+          : {},
+        ...config.maxTokens === undefined && resolvedConfig.maxTokens !== undefined
+          ? { maxTokens: true }
+          : {},
+      })
+      let dispatched = false
+      return Object.freeze({
+        config: resolvedConfig,
+        retryPolicy: registration.retryPolicy,
+        adapterDefaults,
+        ...context === undefined ? {} : { context },
+        ...modelInfo.inputModalities === undefined
+          ? {}
+          : { inputModalities: Object.freeze([...modelInfo.inputModalities]) },
+        ...modelInfo.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: modelInfo.systemPromptUpdate },
+        ...modelInfo.toolUpdate === undefined ? {} : { toolUpdate: modelInfo.toolUpdate },
+        stream: (options: GenerateOptions): AsyncIterable<StreamChunk> => {
+          if (dispatched) {
+            throw new LlmError('a prepared LLM call can only be dispatched once', 'INVALID_PREPARED_CALL')
+          }
+          if (!callConfigEquals(options, resolvedConfig)) {
+            throw new LlmError(
+              'prepared LLM call config changed before adapter dispatch',
+              'INVALID_PREPARED_CALL',
+            )
+          }
+          dispatched = true
+          return this.streamWithRegistration(options, {
+            registration,
+            config: resolvedConfig,
+            modelInfo,
+            dispatch: options => adapterCall.stream(options),
+          })
+        },
+      })
     } finally { settled() }
   }
 
@@ -1097,94 +1097,102 @@ export class LlmRuntime extends TypertRemoteService {
     let settled: (() => void) | undefined
     let cleanupFailed = false
     try {
-    let iterator: AsyncIterator<StreamChunk>
-    try {
-      const registration = prepared?.registration ?? this.registration(options.provider)
-      settled = this.trackBackendCaller(registration, 'stream', options.sessionId === undefined ? undefined : String(options.sessionId))
-      const adapter = registration.adapter
-      let modelInfo: LlmResolvedModelInfo
-      let resolvedConfig: LlmCallConfig
-      let dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>
-      if (prepared === undefined) {
-        const adapterCall = await adapter.prepareCall(options.provider, options.model, options.signal)
-        modelInfo = this.normalizeModelInfo(registration, options.model, adapterCall.model)
-        resolvedConfig = this.resolveCallWithInfo(options, modelInfo).config
-        dispatch = options => adapterCall.stream(options)
-      } else {
-        modelInfo = prepared.modelInfo
-        resolvedConfig = prepared.config
-        dispatch = prepared.dispatch
-      }
-      if (prepared !== undefined && !callConfigEquals(options, resolvedConfig)) {
-        throw new LlmError(
-          'prepared LLM call config changed before adapter dispatch',
-          'INVALID_PREPARED_CALL',
-        )
-      }
-      const resolvedOptions = callConfigEquals(options, resolvedConfig)
-        ? options
-        : Object.isFrozen(options)
-          ? deepFreeze({ ...options, ...resolvedConfig })
-          : { ...options, ...resolvedConfig }
-      // Files are never dispatched natively: every route receives handle text.
-      let projectedMessages: readonly RequestMessage[] = resolvedOptions.messages
-      if (projectedMessages.some(message => contentHasFile(message.content))) {
-        projectedMessages = projectFilesToText(projectedMessages, ref => this.fileReadPath(ref))
-      }
-      if (modelInfo.inputModalities !== undefined
+      let iterator: AsyncIterator<StreamChunk>
+      try {
+        const registration = prepared?.registration ?? this.registration(options.provider)
+        settled = this.trackBackendCaller(registration, 'stream', options.sessionId === undefined ? undefined : String(options.sessionId))
+        const adapter = registration.adapter
+        let modelInfo: LlmResolvedModelInfo
+        let resolvedConfig: LlmCallConfig
+        let dispatch: (options: GenerateOptions) => AsyncIterable<StreamChunk>
+        if (prepared === undefined) {
+          const adapterCall = await adapter.prepareCall(options.provider, options.model, options.signal)
+          modelInfo = this.normalizeModelInfo(registration, options.model, adapterCall.model)
+          resolvedConfig = this.resolveCallWithInfo(options, modelInfo).config
+          dispatch = options => adapterCall.stream(options)
+        } else {
+          modelInfo = prepared.modelInfo
+          resolvedConfig = prepared.config
+          dispatch = prepared.dispatch
+        }
+        if (prepared !== undefined && !callConfigEquals(options, resolvedConfig)) {
+          throw new LlmError(
+            'prepared LLM call config changed before adapter dispatch',
+            'INVALID_PREPARED_CALL',
+          )
+        }
+        const resolvedOptions = callConfigEquals(options, resolvedConfig)
+          ? options
+          : Object.isFrozen(options)
+            ? deepFreeze({ ...options, ...resolvedConfig })
+            : { ...options, ...resolvedConfig }
+        // Files are never dispatched natively: every route receives handle text.
+        let projectedMessages: readonly RequestMessage[] = resolvedOptions.messages
+        if (projectedMessages.some(message => contentHasFile(message.content))) {
+          projectedMessages = projectFilesToText(projectedMessages, ref => this.fileReadPath(ref))
+        }
+        if (modelInfo.inputModalities !== undefined
         && !modelInfo.inputModalities.includes('image')
         && projectedMessages.some(message => contentHasImage(message.content))) {
-        projectedMessages = projectImagesForTextModel(projectedMessages)
-      }
-      // Tool changes are logged on every route; the route's declared mode selects what it receives.
-      const projectedTools = projectToolUpdates(projectedMessages, resolvedOptions.tools, modelInfo.toolUpdate, resolvedOptions.toolHistory)
-      projectedMessages = projectedTools.messages
-      let projectedOptions = resolvedOptions
-      if (projectedMessages !== resolvedOptions.messages || projectedTools.tools !== resolvedOptions.tools) {
-        projectedOptions = {
-          ...resolvedOptions,
-          messages: projectedMessages as RequestMessage[],
-          ...projectedTools.tools === undefined ? {} : { tools: projectedTools.tools as ToolSchema[] },
+          projectedMessages = projectImagesForTextModel(projectedMessages)
         }
-        if (Object.isFrozen(resolvedOptions)) deepFreeze(projectedOptions)
+        // Tool changes are logged on every route; the route's declared mode selects what it receives.
+        const projectedTools = projectToolUpdates(
+          projectedMessages, resolvedOptions.tools, modelInfo.toolUpdate, resolvedOptions.toolHistory,
+        )
+        projectedMessages = projectedTools.messages
+        let projectedOptions = resolvedOptions
+        if (projectedMessages !== resolvedOptions.messages || projectedTools.tools !== resolvedOptions.tools) {
+          projectedOptions = {
+            ...resolvedOptions,
+            messages: projectedMessages as RequestMessage[],
+            ...projectedTools.tools === undefined ? {} : { tools: projectedTools.tools as ToolSchema[] },
+          }
+          if (Object.isFrozen(resolvedOptions)) deepFreeze(projectedOptions)
+        }
+        const adapterOptions = this.forAdapter(projectedOptions, adapter)
+        assertAgentLoopAdmission(options)
+        const stream = dispatch(adapterOptions)
+        iterator = stream[Symbol.asyncIterator]()
+      } catch (error: unknown) {
+        yield adapterFailureChunk(error, options.signal)
+        return
       }
-      const stream = dispatch(this.forAdapter(projectedOptions, adapter))
-      iterator = stream[Symbol.asyncIterator]()
-    } catch (error: unknown) {
-      yield adapterFailureChunk(error, options.signal)
-      return
-    }
 
-    let completed = false
-    try {
-      while (true) {
-        let item: { done: true } | { done: false; value: StreamChunk }
-        try {
-          const next = await iterator.next()
-          item = next.done
-            ? { done: true }
-            : { done: false, value: next.value }
-        } catch (error: unknown) {
-          completed = true
+      let completed = false
+      try {
+        try { assertAgentLoopAdmission(options) } catch (error: unknown) {
           yield adapterFailureChunk(error, options.signal)
           return
         }
-        if (item.done) {
-          completed = true
-          return
+        while (true) {
+          let item: { done: true } | { done: false; value: StreamChunk }
+          try {
+            const next = await iterator.next()
+            item = next.done
+              ? { done: true }
+              : { done: false, value: next.value }
+          } catch (error: unknown) {
+            completed = true
+            yield adapterFailureChunk(error, options.signal)
+            return
+          }
+          if (item.done) {
+            completed = true
+            return
+          }
+          // End the adapter-owned try before yielding: consumer/middleware
+          // failures resumed into this generator must remain thrown.
+          yield item.value
         }
-        // End the adapter-owned try before yielding: consumer/middleware
-        // failures resumed into this generator must remain thrown.
-        yield item.value
-      }
-    } finally {
-      if (!completed) {
-        const close = iterator.return?.bind(iterator)
-        if (close) {
-          try { await close() } catch (error) { cleanupFailed = true; throw error }
+      } finally {
+        if (!completed) {
+          const close = iterator.return?.bind(iterator)
+          if (close) {
+            try { await close() } catch (error) { cleanupFailed = true; throw error }
+          }
         }
       }
-    }
     } finally { if (!cleanupFailed) settled?.() }
   }
 

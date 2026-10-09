@@ -35,7 +35,8 @@ export interface ActivitySnapshot {
   }
   hostAdmission: 'open' | 'closed' | 'unknown'
   foregroundBusy: boolean
-  eligible: false
+  /** Diagnostic only; native release and final request entry always re-read current state. */
+  eligible: boolean
   holdReasons: string[]
 }
 

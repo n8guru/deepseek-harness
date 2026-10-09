@@ -172,6 +172,11 @@ declare module './types.ts' {
     readonly inbox: Inbox
     /** Wake only runnable inbox work already admitted by an owner. */
     wakeInbox?(): void
+    /**
+     * Select at most ten held receipts at a true idle boundary, flush, revalidate, then wake.
+     * @returns whether the native release attempt was eligible, never delivery confirmation.
+     */
+    releaseActivityGated?(): Promise<boolean>
     /** The current lifecycle state, mirrored on every `agent/status` transition. */
     readonly status: AgentStatus
     /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */

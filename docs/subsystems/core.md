@@ -67,6 +67,13 @@ interface Agent {
   readonly session: Session
   /** Agent-owned access to durable pending work. */
   readonly inbox: Inbox
+  /** Wake only runnable inbox work already admitted by an owner. */
+  wakeInbox?(): void
+  /**
+   * Select at most ten held receipts at a true idle boundary, flush, revalidate, then wake.
+   * @returns whether the native release attempt was eligible, never delivery confirmation.
+   */
+  releaseActivityGated?(): Promise<boolean>
   /** The current lifecycle state, mirrored on every `agent/status` transition. */
   readonly status: AgentStatus
   /** Agent-scoped context; its contributions are agent-local, unwind on disposal, and reject registration afterward. */
@@ -75,7 +82,8 @@ interface Agent {
   /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active
    * turn or between-turn task. The first cause wins for that activity. With no
-   * active activity, cancellation is a no-op and does not arm later work.
+   * active activity, cancellation does not arm later work; native human Stop
+   * still latches the driver's process-local notification control.
    * @param cause - the stable caller intent carried by the active operation signal.
    * @param options - cancellation options; `keepInbox` preserves pending work.
    */
@@ -118,7 +126,7 @@ interface Agent {
    * sole ordinary message of its own turn.
    * @param message - identified prompt content and the source that supplied it.
    */
-  followup(message: UserMessage): void
+  followup(message: UserMessage, initialAdmission?: HostInitialAdmission): void
 
   /**
    * Submit steering for the nearest step. An idle driver starts a turn;
@@ -274,7 +282,7 @@ type InboxTarget = 'next-turn' | 'next-step'
 
 Every pending occurrence is its `UserMessage`; `MessageId` is the sole identity. The structural `Inbox` methods record normalized durable `agent/inbox/spliced` mutations and reject duplicate pending ids. `replace(messageId, newMessage)` and `remove(messageId)` locate the pending message across both lists; replacement may change identity and emits the old message as discarded followed by the new message as inserted. Ordinary removals and `clear()` are cancellations. At a step boundary, dsh-agent-loop's package-internal `ReactLoopInbox` removes the proposed batch — all `next-step` input plus, at a turn boundary, one `next-turn` message — through pure deletion splices without discarded notifications, then emits per-message claimed notifications. Loop-only pending detection and claiming are not part of `Agent.inbox`. The `AgentLoop` service registers the standard `inbox` projection before publishing its factory; its cell is the sole live state, and the same fold serves cold consumers even when no Agent exists. The fold rejects unsafe or out-of-range splice coordinates and duplicate identities across both lists, identifying malformed durable history by event seq. Consumers following one message use the exact `agent/inbox/inserted`, `claimed`, and `discarded` notifications.
 
-`NotificationActivityGuard` records version 1, `hostEpoch`, `bindingEpoch`, `activityRevision` and `controlRevision`; it is historical metadata, never live authorization. `GatedNotificationBatch` binds that tuple to one `sessionId`, target and ordered one-to-ten `GatedNotificationItem` values. Each item retains its identified message and producer admission with `activityGated: true`. The required `agent/notification/activity-gated` event precedes matching inbox splices; unsupported readers must refuse it. `NotificationInbox.stageActivityGated()` returns ordered receipt identities and duplicate flags without acknowledging custody or delivery; [AgentLoop](../../packages/core/agent-loop/README.md#use-this-package) owns staging, recovery and holds.
+`NotificationActivityGuard` records version 1, `hostEpoch`, `bindingEpoch`, `activityRevision` and `controlRevision`; it is historical metadata, never live authorization. `GatedNotificationBatch` binds that tuple to one `sessionId`, target and ordered one-to-ten `GatedNotificationItem` values. Each item retains its identified message and producer admission with `activityGated: true`. The required `agent/notification/activity-gated` event precedes matching inbox splices; unsupported readers must refuse it. `NotificationInbox.stageActivityGated()` returns ordered receipt identities and duplicate flags without acknowledging custody or delivery; [AgentLoop](../../packages/core/agent-loop/README.md#use-this-package) owns staging, recovery and holds. Its optional `Agent.releaseActivityGated(): Promise<boolean>` reports a freshly revalidated bounded release attempt, never delivery. Connection provides `ctx.notificationActivity.inspect(agent): string | undefined`; the driver compares that process-local live revision across preparation and treats absence as held. The callback omits the selected driver’s own running status and log writes; the driver independently enforces idle selection, foreground exclusion and awaited Session-sequence fences.
 
 Cancellation:
 

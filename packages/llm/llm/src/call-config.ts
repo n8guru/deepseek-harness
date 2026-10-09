@@ -10,7 +10,7 @@ import type { GenerateOptions } from './types.ts'
 import type { ReasoningEffortId } from './brand.ts'
 
 /** Process-local identities of request objects assembled by dsh-agent-loop. */
-const AGENT_LOOP_REQUESTS = new WeakSet<GenerateOptions>()
+const AGENT_LOOP_REQUESTS = new WeakMap<GenerateOptions, (() => void) | undefined>()
 
 // TODO(call-config-shape): Revisit which fields are epoch-level for cache reuse
 // and where provider-specific request options belong.
@@ -61,10 +61,11 @@ export function callConfigEquals(a: LlmCallConfig, b: LlmCallConfig): boolean {
 /**
  * Mark one exact request object as assembled by dsh-agent-loop.
  * @param request - loop-owned request envelope before LLM dispatch.
+ * @param admit - optional live check immediately before adapter dispatch, after stream middleware.
  * @returns the same request object marked as created by the process-local agent loop.
  */
-export function markAgentLoopRequest<T extends GenerateOptions>(request: T): T {
-  AGENT_LOOP_REQUESTS.add(request)
+export function markAgentLoopRequest<T extends GenerateOptions>(request: T, admit?: () => void): T {
+  AGENT_LOOP_REQUESTS.set(request, admit)
   return request
 }
 
@@ -75,4 +76,15 @@ export function markAgentLoopRequest<T extends GenerateOptions>(request: T): T {
  */
 export function isAgentLoopRequest(request: GenerateOptions): boolean {
   return AGENT_LOOP_REQUESTS.has(request)
+}
+
+/**
+ * Recheck the exact loop request's live admission at the adapter owner.
+ * @param request - original request identity, before adapter-specific projections.
+ */
+export function assertAgentLoopAdmission(request: GenerateOptions): void {
+  const admit = AGENT_LOOP_REQUESTS.get(request)
+  if (admit === undefined) return
+  request.signal?.throwIfAborted()
+  admit()
 }

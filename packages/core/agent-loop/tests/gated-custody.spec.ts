@@ -23,6 +23,19 @@ async function logFile(root: string) {
   return join(root, files[0]!)
 }
 
+it('replays ordered identities across fresh owners and accepts each message into native history at most once', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-gated-entered-'))
+  try {
+    const seeded = (await run(root, 'seed')).stdout
+    const first = (await run(root, 'release-read')).stdout
+    const second = (await run(root, 'entered-read')).stdout
+    const ids = JSON.parse(seeded.split('CUSTODY_HELD ')[1]!) as string[]
+    const receipts = JSON.parse(first.split('ENTERED_ONCE ')[1]!) as { messageId: string }[]
+    expect(receipts.map(r => r.messageId)).toEqual(ids)
+    expect(second).toBe(first)
+  } finally { await rm(root, { recursive: true, force: true }) }
+}, 60_000)
+
 it('recovers a torn final splice from the original required ordered custody event', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-gated-torn-'))
   try {

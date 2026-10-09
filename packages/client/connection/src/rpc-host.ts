@@ -83,6 +83,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
   ) {
     super(ctx, 'connection')
     this.operatorActivity = new OperatorActivity(ctx, idleThresholdMs)
+    ctx.provide('notificationActivity', { inspect: agent => this.operatorActivity.inspect(agent) })
     this.operator = new OperatorPeer(ctx)
     ctx.effect(() => () => this.operator.dispose(), 'client-connection: operator Peer')
   }

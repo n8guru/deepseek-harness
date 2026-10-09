@@ -50,9 +50,9 @@ cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-sessi
 
 不受活动约束的准入会在变更或 ACK 之前拒绝任何包含已保留为受约束托管的 origin/sequence 的批次。改变生产者授权不能降低已有回执的约束。
 
-具有显式 `activityRead: true` 授权的生产者可向 `/api/notifications.admit` POST `{version:1, action:"activity", sessionId}`。此分支要求原有 bearer 与精确会话授权，浏览器 cookie 不提供认证。读取返回 `Cache-Control: no-store`，不创建、唤醒或修改会话输入。`activityRead` 与 `activityGated` 均默认为 false。同时具有两项授权的生产者必须为新通知提供与当前观测完全一致的 `activityGuard` 元组。准入在现有收件箱暂存前检查原生活动新鲜度和暂停状态，并在参与持久化的刷新完成后重新检查所有者、授权和活动。响应仅确认有序托管（`delivery: "held"`），不确认实际投递。仅重试已有精确回执时，即使空闲或暂停也安全；混合新条目的重试需要新的未暂停元组。任何请求字段都不能取消活动约束。
+具有显式 `activityRead: true` 授权的生产者可向 `/api/notifications.admit` POST `{version:1, action:"activity", sessionId}`。此分支要求原有 bearer 与精确会话授权，浏览器 cookie 不提供认证。读取返回 `Cache-Control: no-store`，不创建、唤醒或修改会话输入。`activityRead` 与 `activityGated` 均默认为 false。同时具有两项授权的生产者必须为新通知提供与当前观测完全一致的 `activityGuard` 元组。准入在现有收件箱暂存前检查原生活动新鲜度和暂停状态，并在参与持久化的刷新完成后重新检查所有者、授权和活动。响应确认有序持久托管，绝不确认实际投递：`delivery: "eligible"` 同时要求刚重新验证过的原生释放尝试与当前仍具资格的快照；`"held"` 涵盖延期或返回观测中的任意暂停条件。资格结果不是已投递或用户已读 ACK。仅重试已有精确回执时，即使空闲或暂停也安全；混合新条目的重试需要新的未暂停元组。任何请求字段都不能取消活动约束。
 
-活动快照同步读取原生 Stop/Focus 控制、GoalService 阶段与实时激活状态、Host 准入以及前台占用。服务缺失或控制不受支持时保持 unknown。`controlRevision` 对原生计数器、已提交的会话序号与所有者 epoch 向量建立版本边界，不依赖布尔值采样或观察者回调。所有者先递增再通知观察者，因此重入读取和离开再返回原状态都会使旧快照失效。受浏览器认证保护的 `/api/session.focus` 的 `resume` 动作显式清除原生 Stop 锁存，但不唤醒轮次、不改变其他暂停状态，也不记录活动。包括 `submit` 在内的活动帧仅供诊断，绝不清除控制；通用 `session.prompt` 不携带恢复权限。
+活动快照同步读取原生 Stop/Focus 控制、GoalService 阶段与实时激活状态、Host 准入以及前台占用。服务缺失或控制不受支持时保持 unknown。`controlRevision` 对原生计数器、已提交的会话序号与所有者 epoch 向量建立版本边界，不依赖布尔值采样或观察者回调。所有者先递增再通知观察者，因此重入读取和离开再返回原状态都会使旧快照失效。受浏览器认证保护的 `/api/session.focus` 的 `resume` 动作只显式清除原生 Stop 锁存，不改变其他暂停状态，也不记录活动。新的合格活动帧、已认证恢复或清除 Focus 可以请求有界原生释放；驱动器重新验证每项暂停条件，绝不恢复目标。包括 `submit` 在内的活动帧绝不清除控制；通用 `session.prompt` 不携带恢复权限。读取、打开或重连流、Pong 以及精确回执重试都不请求释放。
 
 <a id="connection-generation"></a>
 ## Connection generation
@@ -81,7 +81,7 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
 - **浏览器 cookie 不带 `Secure`**：当前随产品提供的传输方式是 loopback HTTP；若部署经明文网络暴露同一 authority，bearer cookie 可能在传输中泄露。
-- **受活动约束的托管不能释放输入**：快照始终将资格报告为 false，即使准入有效，所有受约束回执仍保持暂停。最终认领和请求前释放检查尚不可用。原生 Stop 仅保存在进程内；恢复的历史初始为 unknown，直到操作者显式恢复。持久化托管记录仅保留历史元组，绝不保留实时权限。
+- **资格不等于投递**：快照不能授权稍后的输入。原生认领、异步准备和最终适配器分发重新读取活动与控制；[驱动器](../../core/agent-loop/README.zh.md#use-this-package) 负责有序保留与接纳。原生 Stop 仅保存在进程内；恢复的历史初始为 unknown，直到操作者显式恢复。持久元组绝不恢复实时权限。
 - **没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
 
 
