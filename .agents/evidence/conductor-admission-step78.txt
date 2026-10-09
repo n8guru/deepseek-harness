@@ -1,0 +1,74 @@
+conductor-relay step78 — task143192 attempt1
+EXECUTED_MODEL: gpt-6-astra
+SOURCE ONLY; done_unverified pending independent cross-provider review.
+Native repository https://github.com/n8guru/deepseek-harness.git
+Branch agents/forge/conductor-activity-snapshot, continuing reviewed step77.
+Exclusive writer lease dsh-native-focus-admission held by task:143192:attempt:1.
+
+DELTA
+Existing notifications.admit accepts a strict activityGuard only with explicit
+activityRead and activityGated grants and exact target authorization. New items
+require current host/socket/activity/control tuple and no native hold. Admission
+stages the existing required-on-read held custody record, awaits a participating
+Session flush, then reauthenticates the producer and rechecks live Agent/inbox
+ownership plus current native activity, Stop, Focus, goal and Host admission.
+It returns ordered durable custody only: accepted:true, delivery:held, activity
+snapshot, receipts and Focus state. There is no gated wake or release path.
+The diagnostic eligible flag and final native model-entry behavior stay fail-closed.
+
+Receipt-only exact retry is permitted with a historical tuple while held. Native
+staging checks source/payload/target conflicts for the entire batch before mutation.
+Mixed old/new batches need fresh admission; failed/throwing flush has no accepted
+ACK, retained identities remain retryable. Grant changes during request-body await
+are refused before any native read. No persistence types or accepted history change.
+
+PRODUCER EVIDENCE (not independent verification)
+Final bounded matrix command:
+pnpm exec vitest run packages/client/connection/tests
+ packages/core/agent-loop/tests/focus-native.spec.ts
+ packages/core/agent-loop/tests/focus-profile.spec.ts
+ packages/core/agent-loop/tests/inbox.spec.ts
+ packages/core/agent-loop/tests/gated-custody.spec.ts
+ packages/api/gateway/tests/stream-server.host.spec.ts
+ packages/api/gateway/tests/gateway-stream.host.spec.ts
+Result: 23 files, 297 tests passed, no skips/failures.
+
+New assembled activity-admission.host.spec.ts: 20 tests. Real authenticated
+Gateway/HTTP, native Agent/Goal/Host controls and isolated JSONL persistence.
+Monotonic clock injected per fixture; explicit barriers cross awaited flush.
+Cases include idle equality, socket expiry, no-goal Stop, Focus and away/back
+revisions, maintenance close, paused/disarmed goal, reconnect without gesture,
+false and throwing flush, stale/forged tuples, wrong session/grants, strict
+unknown fields, bounded/duplicate batches, replay order and conflict atomicity.
+All gated cases observe zero model requests and zero durable user/message entries.
+New activity-admission-auth.spec.ts: 4 body-await grant revocation tests.
+Earlier 16-case fixture version also passed in a separate concurrent Vitest
+process while the wider matrix ran, with independent loopback ports/temp roots.
+Inherited fresh-process custody/restart/fault tests: 12 passed in final matrix.
+
+Affected Connection Host and Client tsc -b passed.
+Scoped staged-policy lint passed; new assembled test full type-aware lint passed.
+Bilingual Connection README and checkpoint note pairs validated.
+doc-sync: 31 passed,12 failed before repairing the touched checkpoint's missing
+translation. Inherited failures remain: maintenance doc graph, type-equivalence,
+catalogs, export JSDoc, persistence history/format references, repository references,
+concrete terms, and unpaired reviewed specification. No full doc-sync success claim.
+Initial built CLI profile failed for absent apps/cli/lib/bin.js; built the actual
+CLI from this clone and reran all three built profile cases successfully.
+Initial prepush found two test assertions reading union-only goal fields without
+narrowing. Replaced them with exact present-goal structural assertions, preserving
+the negative-control expectations. Normal precommit/prepush and exact published
+commit are recorded in task result.
+
+LIMITS
+This delta does not satisfy final step70 or unblock notifier71. Step79 must add
+independent final claim/model-entry enforcement and release; step80 owes assembled
+whole-contract qualification. Raw authenticated socket tests are not fresh GUI
+trusted-DOM evidence. Existing step77 canonical finalized-format-changed persistence
+history finding remains unresolved; reviewer143176 explicitly classified it as
+nonblocking for step77 code, not as a clean history/installation qualification.
+No format migration, false attribution, history rewrite or guard bypass was made.
+No installation, service restart, runtime activation, live notice delivery,
+hold release, pump enable, capacity override, or new scheduler/inbox occurred.
+Reviewed old-source and notifier obligations, R13 processing, step18 counters,
+and downstream71-74 remain unchanged. [DEPLOY-N/A: native source artifact only.]

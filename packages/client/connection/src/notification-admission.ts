@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { z } from 'zod'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -51,6 +52,14 @@ const requestSchema = Schema.object({
     })]),
   }).required()).min(1).max(10).required(),
 })
+
+const activityGuardSchema = z.object({
+  version: z.literal(1),
+  hostEpoch: z.string().min(1).max(256),
+  bindingEpoch: z.string().min(1).max(256),
+  activityRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  controlRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+}).strict()
 
 function assertKeys(value: object, keys: readonly string[]): void {
   if (Object.entries(value).some(([key, item]) => !keys.includes(key) || item === null)) throw new Error('invalid notification fields')
@@ -99,10 +108,15 @@ export async function receiveMaintenance(
  */
 export async function admitNotifications(ctx: Context, request: Request, producers: readonly NotificationProducer[]): Promise<Response> {
   if (request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return new Response('application/json required', { status: 415 })
-  const producer = authenticateNotification(request, producers)
-  if (producer === undefined) return new Response('notification producer unauthorized', { status: 403 })
+  const authenticated = authenticateNotification(request, producers)
+  if (authenticated === undefined) return new Response('notification producer unauthorized', { status: 403 })
+  // Do not retain mutable grant arrays across request-body or persistence awaits.
+  const producer = structuredClone(authenticated)
+  const authorized = () => JSON.stringify(authenticateNotification(request, producers)) === JSON.stringify(producer)
   let raw: unknown
   try { raw = await request.json() } catch { return new Response('invalid notification JSON', { status: 400 }) }
+  request.signal.throwIfAborted()
+  if (!authorized()) return new Response('notification grant changed', { status: 403 })
   if (typeof raw === 'object' && raw !== null && 'action' in raw) {
     if (producer.activityRead !== true) return new Response('activity read grant denied', { status: 403 })
     try {
@@ -117,13 +131,12 @@ export async function admitNotifications(ctx: Context, request: Request, produce
       return Response.json(snapshot, { headers: { 'cache-control': 'no-store' } })
     } catch { return new Response('operator activity unavailable', { status: 409 }) }
   }
-  // Source checkpoint: native durable-marker/claim/pre-request enforcement is not yet installed.
-  // Never let a provisioned gated producer silently use the legacy ungated branch.
-  if (producer.activityGated === true) return new Response('native activity-gated delivery unavailable', { status: 409 })
+  let guard: z.infer<typeof activityGuardSchema> | undefined
   let parsed: ReturnType<typeof requestSchema>
   try {
     parsed = requestSchema(raw as never)
-    assertKeys(raw as object, ['sessionId', 'items'])
+    assertKeys(raw as object, ['sessionId', 'items', 'activityGuard'])
+    if (typeof raw === 'object' && raw !== null && 'activityGuard' in raw) guard = activityGuardSchema.parse(raw.activityGuard)
     for (const item of (raw as { items: object[] }).items) {
       assertKeys(item, ['sequence', 'text', 'evidenceRefs', 'urgency'])
       const urgency = (item as { urgency?: object }).urgency
@@ -135,6 +148,11 @@ export async function admitNotifications(ctx: Context, request: Request, produce
     }
   } catch { return new Response('invalid notification request', { status: 400 }) }
   const { sessionId, items } = parsed
+  if (guard !== undefined && (producer.activityGated !== true || producer.activityRead !== true)) return new Response('activity gated grant denied', { status: 403 })
+  if (producer.activityGated === true) {
+    if (producer.activityRead !== true) return new Response('activity read grant denied', { status: 403 })
+    if (guard === undefined) return new Response('activity guard required', { status: 409 })
+  }
   if (!producer.sessionIds.includes(sessionId) || items.some(i => i.urgency !== undefined && !producer.urgency.includes(i.urgency.kind))) return new Response('notification grant denied', { status: 403 })
   const agent = ctx.get('agents')?.get(SessionId(sessionId))
   // A cold session must be resumed through its existing owner before retry; this ingress cannot create an executor.
@@ -155,11 +173,46 @@ export async function admitNotifications(ctx: Context, request: Request, produce
   for (const { item, message } of messages) {
     if (sequences.has(item.sequence)) return new Response('duplicate sequence in batch', { status: 400 })
     sequences.add(item.sequence)
-    if (inbox.isActivityGatedReceipt?.(producer.origin, item.sequence)) return new Response('gated receipt requires gated handling', { status: 409 })
+    if (guard === undefined && inbox.isActivityGatedReceipt?.(producer.origin, item.sequence)) return new Response('gated receipt requires gated handling', { status: 409 })
     const previous = inbox.receipt(producer.origin, item.sequence)
     if (previous !== undefined && JSON.stringify(previous.content) !== JSON.stringify(message.content)) return new Response('notification sequence content conflict', { status: 409 })
   }
   request.signal.throwIfAborted()
+  if (guard !== undefined) {
+    const accepting = () => inbox.accepting === true
+    if (inbox.stageActivityGated === undefined || inbox.isActivityGatedReceipt === undefined || !accepting()) return new Response('native activity-gated custody unavailable', { status: 409 })
+    try {
+      const snapshot = ctx.get('connection')?.operatorActivity.snapshot(sessionId)
+      if (snapshot === undefined || ctx.get('agents')?.get(agent.id) !== agent) return new Response('operator activity unavailable', { status: 409 })
+      const replay = messages.every(({ item }) => inbox.isActivityGatedReceipt?.(producer.origin, item.sequence) === true
+        && inbox.receipt(producer.origin, item.sequence) !== undefined)
+      // Exact receipt-only replay needs no live release permission. The native
+      // staging operation checks all payload/target collisions before mutation.
+      if (!replay && (snapshot.sessionId !== sessionId || snapshot.hostEpoch !== guard.hostEpoch
+        || snapshot.binding?.bindingEpoch !== guard.bindingEpoch
+        || snapshot.activityRevision !== guard.activityRevision || snapshot.controlRevision !== guard.controlRevision
+        || snapshot.holdReasons.length !== 0)) return new Response('stale or held activity guard', { status: 409 })
+      const receipts = inbox.stageActivityGated('next-step', messages.map(({ item, message }) => ({
+        message,
+        admission: { origin: producer.origin, sequence: item.sequence,
+          ...item.urgency === undefined ? {} : { urgency: item.urgency }, activityGated: true },
+      })), guard)
+      if (!await ctx.get('sessions')?.flush(agent.session)) return new Response('notification durability unavailable', { status: 503 })
+      request.signal.throwIfAborted()
+      if (!authorized()) return new Response('notification grant changed', { status: 403 })
+      if (ctx.get('agents')?.get(agent.id) !== agent || agent.inbox.notifications !== inbox || !accepting()) return new Response('notification owner changed', { status: 409 })
+      const current = ctx.get('connection')?.operatorActivity.snapshot(sessionId)
+      if (current === undefined) return new Response('operator activity unavailable', { status: 409 })
+      // Recompute binding/age/holds and revisions after persistence. Our own
+      // insertion advances Session.seq/controlRevision too: neither matching
+      // nor changed tuples authorize release until native step-79 enforcement.
+      return Response.json({ accepted: true, delivery: 'held', origin: producer.origin, receipts, focus: inbox.focus, activity: current },
+        { headers: { 'cache-control': 'no-store' } })
+    } catch {
+      // Retained receipts remain retryable; failed staging/flush is never ACKed.
+      return new Response('activity-gated custody unavailable; no accepted ACK', { status: 409 })
+    }
+  }
   const receipts = messages.map(({ item, message }) => {
     const inserted = inbox.admit('next-step', message, { origin: producer.origin, sequence: item.sequence, ...item.urgency === undefined ? {} : { urgency: item.urgency } })
     const accepted = inbox.receipt(producer.origin, item.sequence)
@@ -170,6 +223,7 @@ export async function admitNotifications(ctx: Context, request: Request, produce
   if (!await ctx.get('sessions')?.flush(agent.session)) return new Response('notification durability unavailable', { status: 503 })
   if (ctx.get('agents')?.get(agent.id) !== agent) return new Response('notification owner changed', { status: 409 })
   request.signal.throwIfAborted()
+  if (!authorized()) return new Response('notification grant changed', { status: 403 })
   if (receipts.some(r => inbox.isPendingReceipt(producer.origin, r.sequence))) agent.wakeInbox()
   return Response.json({ accepted: true, origin: producer.origin, receipts, focus: inbox.focus })
 }
@@ -216,8 +270,9 @@ export async function controlFocus(ctx: Context, request: Request): Promise<Resp
   if (checkId === undefined) return new Response('checkId required', { status: 400 })
   // Claim the existing maintenance fence atomically; human arrivals and Stop remain immediate and abort this fence.
   if (agent.status !== 'idle') return new Response('Check requires a safe idle boundary', { status: 409 })
+  let pending: Promise<Response>
   try {
-    return agent.runMaintenance(async (signal) => {
+    pending = agent.runMaintenance(async (signal) => {
       let accepted = false
       try {
         if (!await ctx.get('sessions')?.flush(agent.session)) return new Response('checkpoint durability unavailable', { status: 503 })
@@ -242,4 +297,5 @@ export async function controlFocus(ctx: Context, request: Request): Promise<Resp
     // Async storage/abort errors retain their rejected promise and never receive an accepted ACK.
     return new Response('Check boundary already owned', { status: 409 })
   }
+  return pending
 }

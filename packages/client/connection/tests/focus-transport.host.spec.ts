@@ -293,12 +293,18 @@ it('binds activity to the authenticated Gateway socket and exact session without
     const allClear = await read()
     expect(allClear).toMatchObject({ state: 'active', stop: 'clear', focus: 'disabled', goal: { state: 'none' }, hostAdmission: 'open', foregroundBusy: false, eligible: false })
     const count = agent.session.seq
-    for (const payload of [
-      { sessionId: agent.id, items: [{ sequence: 'held', text: 'must not enter' }] },
-      { sessionId: agent.id, activityGated: false, items: [{ sequence: 'held', text: 'must not enter' }] },
-      { sessionId: agent.id, activityGuard: { version: 1, hostEpoch: allClear.hostEpoch, bindingEpoch, activityRevision: allClear.activityRevision, controlRevision: allClear.controlRevision }, items: [{ sequence: 'held', text: 'must not enter' }] },
-    ]) expect((await post(payload)).status).toBe(409)
+    expect((await post({ sessionId: agent.id, items: [{ sequence: 'held', text: 'must not enter' }] })).status).toBe(409)
+    expect((await post({ sessionId: agent.id, activityGated: false, items: [{ sequence: 'held', text: 'must not enter' }] })).status).toBe(400)
     expect(agent.session.seq).toBe(count)
+    const custody = await post({ sessionId: agent.id,
+      activityGuard: { version: 1, hostEpoch: allClear.hostEpoch, bindingEpoch,
+        activityRevision: allClear.activityRevision, controlRevision: allClear.controlRevision },
+      items: [{ sequence: 'held', text: 'must not enter' }],
+    })
+    expect(custody.status).toBe(200)
+    expect(await custody.json()).toMatchObject({ accepted: true, delivery: 'held', receipts: [{ sequence: 'held', duplicate: false }] })
+    expect(agent.inbox.nextStep).toHaveLength(1)
+    expect(agent.inbox.notifications!.isHeld(agent.inbox.nextStep[0]!)).toBe(true)
     expect(adapter.requests).toHaveLength(0)
     expect((await send(socket, frame(2, { interaction: 'leave' }))).value.accepted).toBe(true)
     expect(await read()).toMatchObject({ state: 'stale', lastActivityAt: active.lastActivityAt })

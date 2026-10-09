@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for 2026-10-09-operator-activity-transport-checkpoint.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-10-09-operator-activity-transport-checkpoint.md
+/agent-note-diagnostic-operator-activity-transport-checkpoint:
+  en: c30603611927f739
+  zh: 32ba73fe7d5b0f24
+/agent-note-diagnostic-operator-activity-transport-checkpoint/problem:
+  en: 09e5a963e8cbea3e
+  zh: 29ca99339eab91d7
+/agent-note-diagnostic-operator-activity-transport-checkpoint/proposal:
+  en: 351e2b0c625efd77
+  zh: 7507ec6a7de8f775
+/agent-note-diagnostic-operator-activity-transport-checkpoint/custody-persistence:
+  en: dc8abc89ebde802a
+  zh: e1a47cebf4a54711
+/agent-note-diagnostic-operator-activity-transport-checkpoint/alternatives-considered:
+  en: ceb5d1e7bb03afb5
+  zh: 7655d6c25ee23998
+/agent-note-diagnostic-operator-activity-transport-checkpoint/acceptance-criteria:
+  en: 6c208d3353de3546
+  zh: d0752c36f43299ac
+/agent-note-diagnostic-operator-activity-transport-checkpoint/risks:
+  en: b8c56b938ad28790
+  zh: 714f98c626086296
