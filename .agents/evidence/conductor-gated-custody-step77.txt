@@ -42,8 +42,10 @@ ordered replay; crash after custody before any splice; torn final splice;
 unknown version/event, missing binding/custody/receipt, ignorable custody;
 real FileHandle.sync uncertainty and participant failure after bytes persist;
 terminal evidence-only replay; zero model requests. Corruption subprocess
-assertions other than missing-receipt currently accept any nonzero process error;
-a follow-up should tighten these to exact refusal diagnostics.
+assertions now require exit1, killed:false, signal:null and each expected stderr
+diagnostic; launch failures/timeouts/signals cannot satisfy refusal evidence.
+Writer final gated-custody.spec.ts:12passed; Host+Connection Client tsc -b passed;
+changed subprocess-test oxlint0 warnings/errors;git diff --check passed (exit0).
 Host/client noEmit passed before the final documentation-only changes.
 Final normal precommit/prepush outcomes are recorded in the task reporting pin.
 Parent synchronous mutation probe: PARENT_REENTRANT_MUTATION_HELD.
@@ -62,7 +64,18 @@ new event's canonical acknowledgment. Our event is root-added, splice field is
 additive; generated inventory also contains inherited Focus/maintenance deltas.
 Catalog/schema generated normally; accepted history remains untouched.
 
-Attempted the standard record command: refused on the above breaking roots.
+Exact commands attempted from the native repository:
+pnpm --silent run verify-persistence-changes --json
+pnpm --silent run persistence-changes --record 2026-10-09-gated-notification-custody --prose .artifacts/gated-custody-persistence-prose.json --json
+Both exit1 finalized-format-changed; the blocked record wrote no acknowledgment.
+Parent classifier /tmp/143099-persistence-history.json confirms the new
+event:agent/notification/activity-gated is root-added,requiresVersionBump:false.
+The inbox notification field is optional-property-added,requiresVersionBump:false;
+its activityGated marker is optional. Required-on-read semantics are preserved:
+new readers validate binding/marker, while an unknown nonignorable event refuses
+at the JSONL reader boundary (covered by the subprocess diagnostic assertion).
+This is bounded new-root compatibility evidence, NOT a canonical record or proof
+that the global persistence verifier passes. Canonical recording is incomplete.
 Parent investigated @persistenceAttribution as a metadata-only alternative.
 Its mechanical classification permits recording, but its semantic promise
 (no reader validation/replay dependency) is FALSE for the new orphan-receipt
@@ -79,7 +92,7 @@ PROPOSED CONTINUATION (needs_split / compatibility scope)
    persistence history check green without false attribution or history rewrites.
 2. Finish step77 custody acceptance from this exact checkpoint.
    Acceptance: canonical bilingual acknowledgment and current inventory agree,
-   precise corruption refusal assertions, final native tests/typechecks pass;
+   retain precise corruption refusal assertions, final native tests/typechecks pass;
    independent cross-provider reviewer result before done_verified.
 These are proposals, not newly authorized work. Resume only after ledger owner
 records the compatibility continuation scope and preserves the source-only holds.
