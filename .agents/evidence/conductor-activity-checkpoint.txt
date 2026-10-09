@@ -1,0 +1,78 @@
+conductor-relay step70: diagnostic transport checkpoint (NOT acceptance)
+
+Task142607 attempt1 source delegation. Branch agents/forge/conductor-activity-snapshot
+descends from the reviewed specification branch. This checkpoint is source-only,
+unpublished, uninstalled and unverified. No runtime controls or service holds changed.
+
+IMPLEMENTED
+- Existing authenticated Gateway multiplexed socket owns session.operatorActivity.
+  Strict open/frame parsing; opaque host/binding epochs; exact live Agent binding;
+  monotonic sequence; same-cookie revalidation; scoped leave/cancel invalidation.
+- Reuses the Gateway heartbeat. Expired freshness/clock continuity cannot be revived
+  by a late Pong; fresh connections do not record gestures. No new poller or timer.
+- Read action at the existing producer endpoint requires explicit activityRead,
+  bearer, Host/Origin trust and exact session grant; no-store diagnostic snapshots.
+- Monotonic age, threshold equality, wall rollback, multi-tab selection and
+  programmatic-prompt non-interference.
+- Mandatory activityGated grant refuses ALL notification admission with 409:
+  no capability fallback, no request-body opt-out and no release mutation.
+- Existing ungated notification admission remains unchanged.
+
+IMPORTANT LIMITS / NEXT OBLIGATIONS
+1. No shipped GUI trusted-DOM adapter. Host observations authenticate a browser
+   credential report, not biological presence or a DOM event. Do not claim A01/A03
+   trusted-DOM acceptance from the raw WebSocket fixture.
+2. Stop and goal are deliberately UNKNOWN, and eligible is ALWAYS FALSE.
+   Need native Stop latch (including no-goal Stop), explicit authenticated submit/
+   resume clearing, authoritative Goal service reads and full hold integration.
+3. controlRevision currently records observed Focus/admission/foreground values,
+   not every intervening native transition. Replace with native transition ownership
+   before any guard can authorize release.
+4. No durable diagnostic event or notification activity-gated marker. Implement
+   required persistence-type acknowledgement/version work, strict replay and fork
+   semantics. This checkpoint changes no released Session persistence type.
+5. No native admission/claim/final-pre-request release predicate, bounded automatic
+   selection, ordered gated receipt replay or post-flush held ACK implementation.
+   Do NOT remove the unconditional gated refusal until all these parts and races
+   are implemented together. Never use current eligibility fields as authority.
+6. Revisit all A01-A22 cases in the reviewed specification. The unchanged
+   focus-profile built Loader/CLI suite has not been rebuilt/exercised here.
+   No GUI browser smoke, full doc-sync, full repository typecheck or deployment
+   acceptance is claimed. Old Host remains unsupported; no backport exists.
+
+EVIDENCE
+- pnpm install --frozen-lockfile --ignore-scripts: passed in isolated clone.
+  ws/@types/ws added only as Connection test dependencies; lockfile regenerated.
+- pnpm run build:native-system: passed; local system.node built for JSONL locking.
+- pnpm exec tsc -b packages/client/connection/tsconfig.host.json
+  packages/client/connection/tsconfig.client.json
+  packages/api/gateway/tsconfig.host.json packages/api/gateway/tsconfig.client.json:
+  passed after separating pure transport types from Host implementation.
+- pnpm exec vitest run packages/client/connection/tests: 14 files, 166 tests passed.
+- pnpm exec vitest run packages/api/gateway/tests/gateway-stream.host.spec.ts:
+  48 tests passed in the combined focused run.
+- pnpm exec vitest run packages/api/gateway/tests/stream-server.host.spec.ts
+  packages/client/connection/tests/focus-transport.host.spec.ts:
+  23 tests passed (21 transport + 2 actual HTTP/native caller cases).
+- packages/core/agent-loop/tests/focus-native.spec.ts: 3 tests passed in combined run.
+- Connection/Gateway focused tsdown host+client bundles completed successfully.
+  Initial Connection bundle warned that vendored cosmokit was not yet built;
+  its exact export was subsequently built and Connection rerun without that warning.
+- pnpm run verify-translation-pairing packages/client/connection/README.md
+  packages/api/gateway/README.md: 2 named pairs consistent.
+- git diff --check passed.
+
+INITIAL FAILURES (RESOLVED, NOT HIDDEN)
+- Initial typecheck imported Host OperatorActivity through the shared RPC type file,
+  leaking Host dependencies into the Client program. Replaced with pure interfaces.
+  Removed only untracked compiler-generated source twins left by that failed build.
+- Initial Focus tests lacked isolated system.node and test ws dependency. Built
+  native prerequisite and declared the test dependency, then reran successfully.
+- Initial Gateway test mocked crypto.randomUUID call counts; eager host epoch UUID
+  consumed those counts. Host epoch now uses independent randomBytes; 48 tests pass.
+- Initial new test used nonexistent Session.events; corrected to Session.seq.
+- Vendor prerequisite bundle first attempted root configuration (missing unrelated
+  generator artifact), then cleaned its own input. Regenerated with tsc and used
+  no-config/no-clean with exact .js output. No vendor source was modified.
+
+No full step70 completion or independent review verdict is asserted.

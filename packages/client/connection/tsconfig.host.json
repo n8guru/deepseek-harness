@@ -14,6 +14,7 @@
     "src/http-bridge.ts",
     "src/index.ts",
     "src/notification-admission.ts",
+    "src/operator-activity.ts",
     "src/loopback-hostname.ts",
     "src/operator-peer.ts",
     "src/recovery-config.ts",

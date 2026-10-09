@@ -46,6 +46,10 @@ cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-sessi
 
 通过认证的共享 HTTP 请求在传输请求体之前经过 `connection/request` waterfall。监听器可以拒绝新请求，或等待 `next()` 直到响应完成；释放所属 fiber 会移除准入行为。Desktop 使用此扩展点，在已批准的安装期间锁住新的 API 工作，而不取消已接纳的工作。客户端断开会中止处理函数的信号；桥接器停止写入 socket，并排空剩余响应块。WebSocket 流仍由 API Gateway 负责。
 
+仅 socket 可用的 `session.operatorActivity` 流接受针对现有会话的严格版本 1 打开请求，并返回不透明的绑定 epoch。帧只携带严格递增的序号和交互类别，不携带草稿或调用方时间戳。Connection 在处理帧和读取时重新验证升级请求的 cookie 与 socket 新鲜度。打开流、Pong 和程序化提示不会记录交互。离开、流取消或传输过期只会使对应绑定失效；新 socket 不能借用旧 epoch。`activityIdleThresholdMs` 默认为 300000，允许 1000 到 3600000 的整数。活动年龄由单调时钟决定；墙钟回退会使观测失效，直到接受新的帧。
+
+具有显式 `activityRead: true` 授权的生产者可向 `/api/notifications.admit` POST `{version:1, action:"activity", sessionId}`。此分支要求原有 bearer 与精确会话授权，浏览器 cookie 不提供认证。读取返回 `Cache-Control: no-store`，不创建、唤醒或修改会话输入。`activityRead` 与 `activityGated` 均默认为 false。配置 `activityGated: true` 的生产者提交通知会收到 409，因为原生受活动约束的释放尚不受支持；请求字段不能绕过该限制。
+
 <a id="connection-generation"></a>
 ## Connection generation
 
@@ -73,6 +77,7 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
 - **浏览器 cookie 不带 `Secure`**：当前随产品提供的传输方式是 loopback HTTP；若部署经明文网络暴露同一 authority，bearer cookie 可能在传输中泄露。
+- **活动传输仅供诊断**：随附 GUI 没有可信 DOM 活动适配器。快照将 Stop 与目标控制报告为 unknown，将资格报告为 false。持久化活动诊断、通知标记、有序受限重放、权威控制修订以及认领和请求前释放检查均尚未实现。此传输不能授权受活动约束的通知释放。
 - **没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
 
 

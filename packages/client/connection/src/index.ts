@@ -94,6 +94,8 @@ export const inject = ['credentials']
 export interface ConnectionConfig {
   /** Operator-provisioned producers; no grants by default. */
   notificationProducers?: NotificationProducer[]
+  /** Host inactivity threshold in milliseconds; does not grant gated release. */
+  activityIdleThresholdMs?: number
   /** Explicit producer-origin grants for the native maintenance receiver; none by default. */
   maintenanceOwners?: string[]
   /** Browser recovery timing, injected into each served page. */
@@ -115,6 +117,7 @@ export interface ConnectionConfig {
 
 export const Config: z<ConnectionConfig> = z.object({
   notificationProducers: z.array(notificationProducerSchema).default([]),
+  activityIdleThresholdMs: z.number().step(1).min(1000).max(3600000).default(300000),
   maintenanceOwners: z.array(z.string().min(1).max(128)).default([]),
   recovery: ConnectionRecoveryConfigSchema.default({}),
   trustedHosts: z.array(String).default([]),
@@ -141,7 +144,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   assertImageBodyCapacity(ctx, maxRequestBodyBytes)
   const origins = new Set<string>()
   const hashes = new Set<string>()
-  const producers = (config?.notificationProducers ?? []).map(raw => {
+  const producers = (config?.notificationProducers ?? []).map((raw) => {
     const producer = notificationProducerSchema(raw)
     if (producer.origin.startsWith('native:') || origins.has(producer.origin) || hashes.has(producer.bearerSha256)) throw new Error('notification grants require unique non-native origins and bearers')
     origins.add(producer.origin)
@@ -152,6 +155,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     ctx,
     trustedHosts,
     await BrowserAuth.create(ctx.root, ctx.credentials, cookieMaxAgeDays),
+    config?.activityIdleThresholdMs ?? 300000,
   )
   connection.fetch.register({
     path: '/api/session.focus', methods: ['POST'], requestBody: 'buffered',

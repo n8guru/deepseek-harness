@@ -23,6 +23,10 @@ export interface NotificationProducer {
   sessionIds: string[]
   /** Critical kinds this principal may truthfully assert with a reason. */
   urgency: ('safety' | 'security' | 'deadline')[]
+  /** Explicit read grant; notification and maintenance authority do not imply it. */
+  activityRead?: boolean
+  /** Mandatory release gating; unsupported native implementations refuse, never fall back. */
+  activityGated?: boolean
 }
 
 /** Source config schema; empty grants fail closed and provisioning never happens automatically. */
@@ -31,6 +35,8 @@ export const notificationProducerSchema = Schema.object({
   bearerSha256: Schema.string().pattern(/^[a-f0-9]{64}$/).required(),
   sessionIds: Schema.array(Schema.string().min(1).required()).min(1).required(),
   urgency: Schema.array(Schema.union(['safety', 'security', 'deadline'])).default([]),
+  activityRead: Schema.boolean().default(false),
+  activityGated: Schema.boolean().default(false),
 })
 
 const requestSchema = Schema.object({
@@ -64,7 +70,9 @@ export function authenticateNotification(request: Request, producers: readonly N
 }
 
 /** Authenticated owner/run native receiver; request bodies never confer owner authority. */
-export async function receiveMaintenance(ctx: Context, request: Request, producers: readonly NotificationProducer[], owners: readonly string[]): Promise<Response> {
+export async function receiveMaintenance(
+  ctx: Context, request: Request, producers: readonly NotificationProducer[], owners: readonly string[],
+): Promise<Response> {
   if (request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return new Response('application/json required', { status: 415 })
   const producer = authenticateNotification(request, producers)
   if (producer === undefined || !owners.includes(producer.origin)) return new Response('maintenance owner unauthorized', { status: 403 })
@@ -95,6 +103,23 @@ export async function admitNotifications(ctx: Context, request: Request, produce
   if (producer === undefined) return new Response('notification producer unauthorized', { status: 403 })
   let raw: unknown
   try { raw = await request.json() } catch { return new Response('invalid notification JSON', { status: 400 }) }
+  if (typeof raw === 'object' && raw !== null && 'action' in raw) {
+    if (producer.activityRead !== true) return new Response('activity read grant denied', { status: 403 })
+    try {
+      assertKeys(raw, ['version', 'action', 'sessionId'])
+      if (!('version' in raw) || raw.version !== 1 || raw.action !== 'activity'
+        || !('sessionId' in raw) || typeof raw.sessionId !== 'string' || !raw.sessionId || raw.sessionId.length > 256) throw new Error('invalid activity request')
+      if (!producer.sessionIds.includes(raw.sessionId)) return new Response('activity read grant denied', { status: 403 })
+    } catch { return new Response('invalid activity request', { status: 400 }) }
+    try {
+      const snapshot = ctx.get('connection')?.operatorActivity.snapshot((raw as { sessionId: string }).sessionId)
+      if (snapshot === undefined) return new Response('operator activity unavailable', { status: 409 })
+      return Response.json(snapshot, { headers: { 'cache-control': 'no-store' } })
+    } catch { return new Response('operator activity unavailable', { status: 409 }) }
+  }
+  // Source checkpoint: native durable-marker/claim/pre-request enforcement is not yet installed.
+  // Never let a provisioned gated producer silently use the legacy ungated branch.
+  if (producer.activityGated === true) return new Response('native activity-gated delivery unavailable', { status: 409 })
   let parsed: ReturnType<typeof requestSchema>
   try {
     parsed = requestSchema(raw as never)

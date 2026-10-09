@@ -24,6 +24,7 @@ export type RemoteStreamOpener = (
   uplink: AsyncIterable<unknown>,
   peer: PeerScope,
   control: AbortController,
+  transport: { request: IncomingMessage; live(): boolean; observed(): void },
 ) => Promise<AsyncIterable<unknown>>
 
 /** The opener one socket uses: its Peer is fixed at upgrade time. */
@@ -73,10 +74,27 @@ export class RemoteStreamMuxServer {
       const release = bindPeer(websocket, peer)
       if (release === undefined) return
       this.missedHeartbeats.set(websocket, 0)
-      websocket.on('pong', () => { this.missedHeartbeats.set(websocket, 0) })
+      let lastObserved = performance.now()
+      let continuous = true
+      const fresh = (): boolean => {
+        const age = performance.now() - lastObserved
+        if (!Number.isFinite(age) || age < 0 || age >= 2 * this.heartbeatIntervalMs) continuous = false
+        return continuous && this.heartbeatIntervalMs > 0
+      }
+      const observed = (): void => {
+        fresh()
+        lastObserved = performance.now()
+        this.missedHeartbeats.set(websocket, 0)
+      }
+      websocket.on('pong', observed)
+      const transport = {
+        request: req,
+        live: () => websocket.readyState === WebSocket.OPEN && fresh(),
+        observed,
+      }
       this.startHeartbeat()
       const bound: BoundStreamOpener = (endpoint, payload, uplink, control) =>
-        this.open(endpoint, payload, uplink, peer, control)
+        this.open(endpoint, payload, uplink, peer, control, transport)
       const connection = new RemoteStreamMuxConnection(websocket, bound, this.failure, this.streamInboxBytes)
       const done = connection.run()
       this.connections.add(done)

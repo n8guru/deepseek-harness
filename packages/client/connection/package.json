@@ -56,6 +56,8 @@
     "@deepseek-ai/dsh-brand": "workspace:*",
     "@deepseek-ai/dsh-host-webserver": "workspace:*",
     "@deepseek-ai/dsh-scope": "workspace:*",
-    "@deepseek-ai/dsh-typert-protocol": "workspace:*"
+    "@deepseek-ai/dsh-typert-protocol": "workspace:*",
+    "@types/ws": "^8.18.1",
+    "ws": "^8.21.0"
   }
 }

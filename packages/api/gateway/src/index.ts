@@ -240,8 +240,10 @@ export class TypertGatewayService extends Service implements TypertGateway {
     ctx.inject(['connection', 'webServer'], (webCtx) => {
       const listen = (): void => {
         const mux = new RemoteStreamMuxServer(
-          (endpoint, payload, uplink, peer, control) =>
-            this.openWireStream(endpoint, payload, uplink, peer, control.signal, control),
+          (endpoint, payload, uplink, peer, control, transport) =>
+            endpoint === 'session.operatorActivity'
+              ? Promise.resolve(webCtx.connection.openOperatorActivity(transport.request, payload, uplink, transport, control.signal))
+              : this.openWireStream(endpoint, payload, uplink, peer, control.signal, control),
           this.wireStream.failure,
           resolved.websocketHeartbeatIntervalMs,
           resolved.streamInboxBytes,

@@ -2,6 +2,36 @@
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { PeerScope } from '@deepseek-ai/dsh-typert-protocol'
+/** Socket-local facts supplied by Gateway, never decoded from activity frames. */
+export interface ActivityTransport {
+  /** Whether the physical socket's heartbeat is fresh. */
+  live(): boolean
+  /** Record accepted-frame transport freshness. */
+  observed(): void
+}
+
+/** Diagnostic v1 activity snapshot. This checkpoint has no release authority. */
+export interface ActivitySnapshot {
+  schema: 'operator-activity/v1'
+  sessionId: string
+  hostEpoch: string
+  activityRevision: number
+  controlRevision: number
+  observedAt: number
+  lastActivityAt: number | null
+  activityAgeMs: number | null
+  idleThresholdMs: number
+  snapshotTtlMs: 5000
+  state: 'active' | 'idle' | 'stale' | 'unknown'
+  binding: { bindingEpoch: string; principalClass: 'authenticated-operator-gui' } | null
+  stop: 'unknown'
+  focus: 'enabled' | 'disabled'
+  goal: { state: 'unknown' }
+  hostAdmission: 'open' | 'closed' | 'unknown'
+  foregroundBusy: boolean
+  eligible: false
+  holdReasons: string[]
+}
 
 /** Correlation id minted by a caller and echoed by the Connection response. */
 export type RpcId = Branded<'rpc-id'>
@@ -191,6 +221,25 @@ export interface HostConnectionRpc {
 
 /** Host `ctx.connection` members consumed by transport-independent adapters. */
 export interface HostConnectionHandle {
+  /** Process-local observations; reads cannot wake or release inbox input. */
+  readonly operatorActivity: { snapshot(sessionId: string): ActivitySnapshot | undefined }
+  /**
+   * Open only from the authenticated Gateway socket owner, never generic RPC.
+   * @param request - actual upgrade headers retained by Gateway.
+   * @param payload - untrusted logical open payload.
+   * @param uplink - socket-bound frame iterator.
+   * @param transport - physical socket freshness callbacks.
+   * @param signal - stream lifetime.
+   * @returns bound activity acknowledgements.
+   */
+  openOperatorActivity(
+    request: ConnectionTrustRequest,
+    payload: unknown,
+    uplink: AsyncIterable<unknown>,
+    transport: ActivityTransport,
+    signal: AbortSignal,
+  ): AsyncIterable<unknown>
+
   /** Generic RPC channel registry. */
   readonly rpc: HostConnectionRpc
   /** Exact Fetch routes for streaming or browser-native responses. */

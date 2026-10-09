@@ -14,6 +14,8 @@ import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type { BrowserAuth } from './browser-auth.ts'
 import { OperatorPeer } from './operator-peer.ts'
+import { OperatorActivity } from './operator-activity.ts'
+import type { ActivityTransport } from './rpc.ts'
 import type {
   PeerAdmission,
   ConnectionIndexRequest,
@@ -63,6 +65,7 @@ declare module '@deepseek-ai/cordis' {
 export class HostConnectionService extends Service implements HostConnectionHandle {
   /** The operator Peer every admitted request speaks for. */
   readonly operator: PeerScope
+  readonly operatorActivity: OperatorActivity
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
   private readonly fetchRoutes = new Map<string, RegisteredFetchRoute>()
 
@@ -76,8 +79,10 @@ export class HostConnectionService extends Service implements HostConnectionHand
     ctx: Context,
     private readonly trustedHosts: readonly string[],
     private readonly browserAuth: BrowserAuth,
+    idleThresholdMs = 300000,
   ) {
     super(ctx, 'connection')
+    this.operatorActivity = new OperatorActivity(ctx, idleThresholdMs)
     this.operator = new OperatorPeer(ctx)
     ctx.effect(() => () => this.operator.dispose(), 'client-connection: operator Peer')
   }
@@ -110,6 +115,17 @@ export class HostConnectionService extends Service implements HostConnectionHand
   admit(request: ConnectionTrustRequest): PeerAdmission {
     const rejection = this.requestRejection(request)
     return rejection === undefined ? { peer: this.operator } : { rejection }
+  }
+
+  /** Gateway owns the actual upgrade request and socket callbacks; no RPC endpoint exposes this method. */
+  openOperatorActivity(
+    request: ConnectionTrustRequest,
+    payload: unknown,
+    uplink: AsyncIterable<unknown>,
+    transport: ActivityTransport,
+    signal: AbortSignal,
+  ): AsyncIterable<unknown> {
+    return this.operatorActivity.open(payload, uplink, transport, () => this.requestRejection(request) === undefined, signal)
   }
 
   /** Authenticate an index request through the process-token exchange or cookie. */

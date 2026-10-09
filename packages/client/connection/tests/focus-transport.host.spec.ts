@@ -1,6 +1,11 @@
 /** Keyless assembled native HTTP admission with actual durable JSONL receipts. */
 import { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
+import { once } from 'node:events'
+import WebSocket from 'ws'
+import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
+import Gateway from '../../../api/gateway/src/index.ts'
+import { OperatorActivity } from '../src/operator-activity.ts'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -108,9 +113,12 @@ it('authenticates an actual caller, durably retries its identity and never accep
     expect((await post('/api/maintenance.receive', delivery, { cookie })).status).toBe(403)
     const receiveTrace = vi.spyOn(ctx.hostMaintenance, 'receive')
     const delivered = await Promise.all([0, 1].map(() => maintenance(delivery)))
-    const receiverErrors = await Promise.all(receiveTrace.mock.results.map(result => Promise.resolve(result.value).then(() => undefined, error => String(error))))
+    const receiverErrors = await Promise.all(receiveTrace.mock.results.map(result =>
+      Promise.resolve(result.value).then(() => undefined, error => String(error))))
     receiveTrace.mockRestore()
-    expect({ statuses: delivered.map(response => response.status), receiverErrors }).toEqual({ statuses: [200, 200], receiverErrors: [undefined, undefined] })
+    expect({ statuses: delivered.map(response => response.status), receiverErrors }).toEqual({
+      statuses: [200, 200], receiverErrors: [undefined, undefined],
+    })
     const acknowledgements = await Promise.all(delivered.map(response => response.json()))
     expect(acknowledgements[0].deliveries).toEqual(acknowledgements[1].deliveries)
     const admission = acknowledgements[0].deliveries[0]
@@ -125,6 +133,140 @@ it('authenticates an actual caller, durably retries its identity and never accep
     expect((await maintenance({ action: 'release', runId: 'http-run' })).status).toBe(200)
     expect(adapter.requests).toHaveLength(2)
   } finally {
+    await ctx.fiber.dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+it('binds activity to the authenticated Gateway socket and exact session without granting notification release', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-activity-wire-'))
+  const ctx = new Context()
+  const sockets: WebSocket[] = []
+  try {
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(JsonlPersistence, { root, compression: 'none' })
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    const adapter = new MockAdapter([textResponse('programmatic prompt')])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('activity-wire'), { provider: 'mock', model: 'mock' })
+    const bearer = 'activity-read-test-bearer-123456789012345'
+    const denied = 'notification-only-bearer-123456789012345'
+    await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
+    provideBrowserCredentials(ctx)
+    await ctx.plugin(Connection, { notificationProducers: [
+      { origin: 'test:activity', bearerSha256: createHash('sha256').update(bearer).digest('hex'),
+        sessionIds: [agent.id], urgency: [], activityRead: true, activityGated: true },
+      { origin: 'test:notify', bearerSha256: createHash('sha256').update(denied).digest('hex'),
+        sessionIds: [agent.id], urgency: [] },
+    ] })
+    await ctx.plugin(TypertRegistry)
+    await ctx.plugin(Gateway, { websocketHeartbeatIntervalMs: 2000 })
+    ctx.webServer.register({ kind: 'exact', path: '/', handler: (req, res) => {
+      if (!ctx.connection.authorizeIndex(req, res)) { res.writeHead(401); res.end() }
+    } })
+    const base = `http://127.0.0.1:${ctx.webServer.port}`
+    const exchange = await fetch(ctx.connection.authenticatedUrl(base), { redirect: 'manual' })
+    const cookie = exchange.headers.get('set-cookie')?.split(';', 1)[0]
+    if (cookie === undefined) throw new Error('cookie missing')
+    const body = { version: 1, action: 'activity', sessionId: agent.id }
+    const post = (payload: unknown, headers: Record<string, string> = { authorization: `Bearer ${bearer}` }) =>
+      fetch(base + '/api/notifications.admit', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload) })
+    const read = async () => {
+      const response = await post(body)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      return response.json()
+    }
+    expect((await post(body, { cookie })).status).toBe(403)
+    expect((await post(body, { authorization: `Bearer ${denied}` })).status).toBe(403)
+    expect((await post(body, { authorization: `Bearer ${bearer}`, origin: 'null' })).status).toBe(403)
+    expect((await post({ ...body, sessionId: 'wrong-session' })).status).toBe(403)
+    for (const extra of [{ origin: 'foreground' }, { isHuman: true }, { clientTime: 999999999999 }, { trusted: true }]) {
+      expect((await post({ ...body, ...extra })).status).toBe(400)
+    }
+    expect((await read()).state).toBe('unknown')
+    const connect = async () => {
+      const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/remote.mux', { headers: { cookie, origin: base } })
+      sockets.push(socket)
+      await once(socket, 'open')
+      return socket
+    }
+    const send = async (socket: WebSocket, message: object) => {
+      const received = once(socket, 'message')
+      socket.send(JSON.stringify(message))
+      const [bytes] = await received
+      return JSON.parse(String(bytes))
+    }
+    const socket = await connect()
+    const opened = await send(socket, { type: 'open', streamId: 'activity', endpoint: 'session.operatorActivity', payload: { version: 1, sessionId: agent.id } })
+    expect(opened.type).toBe('item')
+    const bindingEpoch = opened.value.bindingEpoch
+    expect(typeof bindingEpoch).toBe('string')
+    expect((await read()).state).toBe('unknown')
+    const frame = (sequence: number, extra = {}) => ({ type: 'item', streamId: 'activity', value: { version: 1, bindingEpoch, sequence, interaction: 'input', ...extra } })
+    expect((await send(socket, frame(1))).value.accepted).toBe(true)
+    const active = await read()
+    expect(active).toMatchObject({ state: 'active', eligible: false, stop: 'unknown', goal: { state: 'unknown' }, binding: { bindingEpoch, principalClass: 'authenticated-operator-gui' } })
+    for (const bad of [frame(1), frame(2, { bindingEpoch: 'forged' }), frame(2, { lastActivityAt: 1 }), frame(2, { sequence: Number.MAX_SAFE_INTEGER + 1 })]) {
+      expect((await send(socket, bad)).value.accepted).toBe(false)
+      expect(await read()).toMatchObject({ lastActivityAt: active.lastActivityAt, activityRevision: active.activityRevision })
+    }
+    const second = await connect()
+    const next = await send(second, { type: 'open', streamId: 'activity', endpoint: 'session.operatorActivity', payload: { version: 1, sessionId: agent.id } })
+    expect(next.value.bindingEpoch).not.toBe(bindingEpoch)
+    expect((await read()).binding.bindingEpoch).toBe(bindingEpoch)
+    expect((await send(second, frame(1))).value.accepted).toBe(false)
+    const closed = once(second, 'close'); second.close(); await closed
+    expect((await read()).binding.bindingEpoch).toBe(bindingEpoch)
+    const count = agent.session.seq
+    for (const payload of [
+      { sessionId: agent.id, items: [{ sequence: 'held', text: 'must not enter' }] },
+      { sessionId: agent.id, activityGated: false, items: [{ sequence: 'held', text: 'must not enter' }] },
+      { sessionId: agent.id, activityGuard: { version: 1, hostEpoch: active.hostEpoch, bindingEpoch, activityRevision: active.activityRevision, controlRevision: active.controlRevision }, items: [{ sequence: 'held', text: 'must not enter' }] },
+    ]) expect((await post(payload)).status).toBe(409)
+    expect(agent.session.seq).toBe(count)
+    expect(adapter.requests).toHaveLength(0)
+    expect((await send(socket, frame(2, { interaction: 'leave' }))).value.accepted).toBe(true)
+    expect(await read()).toMatchObject({ state: 'stale', lastActivityAt: active.lastActivityAt })
+    expect((await send(socket, frame(3))).value.accepted).toBe(false)
+    agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'programmatic' }] }))
+    await agent.whenIdle()
+    expect(adapter.requests).toHaveLength(1)
+    expect(await read()).toMatchObject({ state: 'stale', lastActivityAt: active.lastActivityAt })
+
+    // Fake clocks exercise equality and rollback without advancing Gateway timers.
+    let wall = 1000000, mono = 0
+    const owner = new OperatorActivity(ctx, 300000, { wall: () => wall, mono: () => mono })
+    const frames: unknown[] = []
+    const source = { async *[Symbol.asyncIterator]() { while (frames.length) yield frames.shift() } }
+    const stream = owner.open(
+      { version: 1, sessionId: agent.id }, source, { live: () => true, observed: () => {} }, () => true, new AbortController().signal,
+    )
+    const iterator = stream[Symbol.asyncIterator]()
+    const initial = await iterator.next()
+    const epoch = (initial.value as { bindingEpoch: string }).bindingEpoch
+    frames.push({ version: 1, bindingEpoch: epoch, sequence: 1, interaction: 'input' })
+    await iterator.next()
+    expect(owner.snapshot(agent.id)?.state).toBe('active')
+    wall += 299999; mono += 299999
+    expect(owner.snapshot(agent.id)?.state).toBe('active')
+    wall++; mono++
+    expect(owner.snapshot(agent.id)?.state).toBe('idle')
+    wall--
+    expect(owner.snapshot(agent.id)?.state).toBe('unknown')
+    frames.push({ version: 1, bindingEpoch: epoch, sequence: 2, interaction: 'input' })
+    await iterator.next()
+    expect(owner.snapshot(agent.id)?.state).toBe('active')
+    await iterator.return?.()
+    expect(owner.snapshot(agent.id)?.state).toBe('stale')
+    expect(() => new OperatorActivity(ctx, 999)).toThrow('idleThresholdMs')
+  } finally {
+    for (const socket of sockets) socket.terminate()
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true })
   }

@@ -46,6 +46,10 @@ Every admitted request speaks for one Peer, the operator. `ctx.connection.operat
 
 Authenticated shared HTTP requests pass through the `connection/request` waterfall before body transfer. A listener may refuse new requests or await `next()` through response completion; removing its owning fiber removes admission behavior. Desktop uses this hook to lock new API work during an approved installation without canceling already-admitted work. Client disconnection aborts the handler signal; the bridge stops socket writes and drains any remaining response chunks. WebSocket stream ownership remains with API Gateway.
 
+The socket-only `session.operatorActivity` stream accepts strict version-1 opens for an existing session and returns an opaque binding epoch. Frames carry a strictly increasing sequence and an interaction kind, never draft content or caller timestamps. Connection revalidates the upgrade cookie and socket freshness on frames and reads. Opening, Pong and programmatic prompts do not record interaction. A leave, cancelled stream or stale transport invalidates only that binding; a new socket cannot borrow its epoch. `activityIdleThresholdMs` defaults to 300000 and accepts integer values from 1000 through 3600000. Monotonic time controls age; wall-clock rollback invalidates observations until another accepted frame.
+
+A producer with an explicit `activityRead: true` grant may POST `{version:1, action:"activity", sessionId}` to `/api/notifications.admit`. The existing bearer and exact-session grant are required; browser cookies do not authenticate this branch. Reads return `Cache-Control: no-store` without creating, waking or changing session input. Both `activityRead` and `activityGated` default to false. A producer provisioned with `activityGated: true` receives 409 for notification admission because native gated release is unsupported; no request field can opt it out.
+
 <a id="connection-generation"></a>
 ## Connection generation
 
@@ -73,6 +77,7 @@ None; this package neither assembles nor sends a provider request.
 
 - **Buffered `/api` routes retain each request body in memory** — `maxRequestBodyBytes` (default 300 MiB, sized for the default 200 MiB aggregate image limit after base64 expansion plus envelope headroom) bounds ordinary image and RPC envelopes. Opt-in streaming routes receive backpressured chunks and bypass the aggregate cap; route implementations own persistence, cancellation, and any storage quota.
 - **The browser cookie is not marked `Secure`** — loopback HTTP is the shipped transport, so exposing the same authority over plaintext networking can expose the bearer cookie in transit.
+- **Activity transport is diagnostic only** — the shipped GUI has no trusted-DOM activity adapter. Snapshots report Stop and goal controls as unknown and eligibility as false. Durable activity diagnostics, the notification marker, ordered gated replay, authoritative control revisions and claim/pre-request release checks remain unimplemented. This transport cannot authorize gated notification release.
 - **There is no logout operation** — clearing the browser cookie ends one browser session; deleting the owner credential record and restarting `dsh` revokes every session.
 
 

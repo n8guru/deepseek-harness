@@ -27,6 +27,34 @@ afterEach(async () => {
 })
 
 describe('Remote stream mux server carrier lifecycle', () => {
+  it('does not restore activity continuity when a Pong arrives after the freshness boundary', async () => {
+    let mono = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => mono)
+    let transport: Parameters<RemoteStreamOpener>[5] | undefined
+    try {
+      const entry = await startMux(async (_endpoint, _payload, _uplink, _peer, control, socket) => {
+        transport = socket
+        return waitForAbort(control.signal)
+      }, 10000)
+      const client = await connect(entry.url)
+      client.send(JSON.stringify({ type: 'open', streamId: 'activity-freshness', endpoint: 'test', payload: {} }))
+      await vi.waitFor(() => { expect(transport).toBeDefined() })
+      expect(transport?.live()).toBe(true)
+      mono = 19999
+      expect(transport?.live()).toBe(true)
+      mono = 20000
+      acceptedSocket(entry.mux).emit('pong', Buffer.alloc(0))
+      expect(transport?.live()).toBe(false)
+      mono++
+      transport?.observed()
+      expect(transport?.live()).toBe(false)
+      const closed = once(client, 'close')
+      client.close()
+      await closed
+      expect(transport?.live()).toBe(false)
+    } finally { clock.mockRestore() }
+  })
+
   it('sends WebSocket Ping control frames without application messages', async () => {
     const entry = await startMux(async (_endpoint, _payload, _uplink, _peer, control) => waitForAbort(control.signal), 20)
     const client = await connect(entry.url)
