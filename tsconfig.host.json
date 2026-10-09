@@ -10,6 +10,7 @@
   "include": [
     "apps/web/product-isolation.ts",
     "apps/web/tests/operator-activity.e2e.ts",
+    "apps/web/tests/operator-activity-qualification.e2e.ts",
     "apps/web/tests/connection-recovery.e2e.ts",
     "apps/web/tests/server-restart.e2e.ts",
     "apps/web/tests/shortcuts.e2e.ts",

@@ -23,6 +23,7 @@
   // cannot see both sides of the cordis Context merges).
   "exclude": [
     "tests/operator-activity.e2e.ts",
+    "tests/operator-activity-qualification.e2e.ts",
     "tests/shortcuts-desktop.e2e.ts",
     "tests/shortcuts-workspace.e2e.ts",
     "tests/shortcuts-panels.e2e.ts",
