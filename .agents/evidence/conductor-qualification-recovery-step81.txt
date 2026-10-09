@@ -1,0 +1,69 @@
+conductor-relay step81 / task143577 attempt1 / 2026-10-09
+EXECUTED_MODEL: gpt-6-astra
+STATUS: recovered WIP; reported typecheck failure NOT REPRODUCED.
+This is diagnostic evidence, not step81 acceptance, whole-contract qualification,
+independent verification, runtime activation, or authorization to unblock step70/71.
+
+SOURCE AND OWNERSHIP
+Repository: https://github.com/n8guru/deepseek-harness.git
+Canonical branch: agents/forge/conductor-activity-snapshot
+Reviewed base: eb4986a28a217ca84d470a3cd82f60cbe136c9da
+Recovered WIP: c2816bd60cdf4381d802bc7f2eda4e6398abf406
+Original WIP branch: agents/n8razer/task-143345-wip
+The WIP is a direct child of the reviewed base. No cherry-pick or rewrite.
+The local uncommitted three-file WIP matched the rescued commit byte-for-byte;
+its qualification file Git blob is 3c1fa4c093d839159e67d6eadc85308c79a85fdf.
+Preserved a local stash before fast-forwarding the canonical local branch.
+Canonical writer lease dsh-native-focus-admission:1710539 acquired for
+holder task:143577:attempt:1, with the existing project driver claim refreshed.
+Live task landing_registration and step81.task_id matched 143577; initial
+step81 rev2/material_rev1 matched the dispatch material baseline. The executor's
+CAS to in_progress advanced the live row to rev3/material_rev3.
+Project control-status: no active intent epoch, no dispatch block or incidents.
+
+COMMANDS EXECUTED ON UNMODIFIED c2816bd60cdf4381d802bc7f2eda4e6398abf406
+Node v22.23.1; pnpm 11.7.0; TypeScript 6.0.3.
+1. git merge-base --is-ancestor eb4986a28a c2816bd60c
+   Exit 0. git ls-remote confirmed both exact remote pins before recovery.
+2. pnpm run typecheck
+   Exit 0. Canonical build:lib:host (tsc host + host bundles + Desktop bundle)
+   followed by typecheck:contracts-ready (tsc client) completed successfully.
+   Full local log: /tmp/task143577-baseline-typecheck.log
+3. pnpm exec tsc -b tsconfig.host.json --force
+   Exit 0; no diagnostics. Forces the host program and all referenced projects
+   to rebuild, rather than treating an incremental-cache pass as sufficient.
+   Full local log: /tmp/task143577-force-host.log
+4. pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/operator-activity-qualification.e2e.ts
+   Exit 0; one file, one test passed, no skips; 5.47 seconds total.
+   Test: releases trusted GUI custody once and holds a real Focus race across flush.
+   Actual shipped GUI adapter fixture, authenticated HTTP/Gateway, native custody
+   and keyless model entry; assertions and fixture unchanged. Isolated loopback
+   port and temporary JSONL state only; no live conductor input or live GUI change.
+   Full local log: /tmp/task143577-smoke-baseline.log
+5. pnpm --silent run change-scope --base eb4986a28a217ca84d470a3cd82f60cbe136c9da
+   Exit 0. Recovered diff is only the 204-line qualification test and the existing
+   one-line host/client program registration pair from the WIP.
+
+FINDING AND HANDOFF
+Studio insight76758 describes a failed pre-push while the rescuer fetched this
+WIP into another checkout (/home/n8/deepseek-harness). It contains no compiler
+error or source-tree identification for that failed hook. Git pre-push runs the
+hook in the pushing worktree, not the commit named by a refspec. The earlier
+failure therefore does not by itself establish a defect in c2816bd60c. A
+wrong-worktree failure is a hypothesis, not a reproduced diagnosis.
+No test/config/product repair is justified by the observed commands. No source,
+assertion, type, test selection, timeout or hook was changed or weakened.
+Only this evidence record is added after the recovered WIP.
+
+The literal acceptance requirement to reproduce a failure and publish a repair
+has not been met. The canonical supervisor should reconcile that premise using
+this exact-pin evidence: authorize no-code recovery for independent review, or
+provide the original failing compiler command/output, checkout SHA and toolchain
+so the same owner can reproduce a real defect. Do not manufacture a cosmetic
+source change or claim that an unobserved failure was fixed.
+Steps82/83/80 retain A01-A22 assembly, focused regressions and source manifest;
+step70 remains the final acceptance gate. Old-source
+c2fa8f0e6e9eef3c6db94e0c6708fbd88012fd88 and notifier
+e4eb33d8f5f76e8f4a85685d0cc677be01d31901 obligations are unchanged. The step77
+persistence-history finding is not adjudicated here. No install, restart, hold
+release, forced interruption, capacity override or general pump enable occurred.
