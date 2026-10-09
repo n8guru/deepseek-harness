@@ -24,9 +24,15 @@ export interface ActivitySnapshot {
   snapshotTtlMs: 5000
   state: 'active' | 'idle' | 'stale' | 'unknown'
   binding: { bindingEpoch: string; principalClass: 'authenticated-operator-gui' } | null
-  stop: 'unknown'
-  focus: 'enabled' | 'disabled'
-  goal: { state: 'unknown' }
+  stop: 'clear' | 'stopped' | 'unknown'
+  focus: 'enabled' | 'disabled' | 'unknown'
+  goal: { state: 'unknown' | 'none' } | {
+    state: 'present'
+    id: string
+    revision: number
+    phase: 'active' | 'paused' | 'blocked' | 'complete'
+    activation: 'armed' | 'disarmed'
+  }
   hostAdmission: 'open' | 'closed' | 'unknown'
   foregroundBusy: boolean
   eligible: false

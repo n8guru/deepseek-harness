@@ -53,7 +53,7 @@ goal 适合一个需要跨自动 Goal Round 持续的长期完成目标——例
 
 ### 驱动生命周期
 
-goal 经历四种持久 phase——`active`、`paused`、`blocked`、`complete`——外加一个进程本地标志，表示自动续行是否已启用。动词如下：
+goal 经历四种持久 phase——`active`、`paused`、`blocked`、`complete`——外加一个进程本地标志，表示自动续行是否已启用。原生读取者通过 `activationRevision(agent)` 与服务的 `controlEpoch` 为实时激活状态建立版本边界；计数器在通知观察者之前递增，独立于持久 goal revision。这两个值都不持久化，也不授予续行权限。动词如下：
 
 | 操作 | 作用 |
 |---|---|

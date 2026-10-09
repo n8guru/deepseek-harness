@@ -50,7 +50,7 @@ async function inboxAgent(rawId: string): Promise<{
   onTestFinished(() => ctx.fiber.dispose())
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
-    ctx.sessionProjections.register(notificationProjectionDefinition)
+  ctx.sessionProjections.register(notificationProjectionDefinition)
   ctx.sessionProjections.register(inboxProjectionDefinition)
   const session = ctx.sessions.create(SessionId(rawId))
   const agent = stubAgent(rawId, { ctx, session })
@@ -69,7 +69,7 @@ async function reconstructPersistedInbox(
   const session = ctx.sessions.create(SessionId(rawId))
   populate(session)
   await ctx.plugin(SessionProjectionRegistry)
-    ctx.sessionProjections.register(notificationProjectionDefinition)
+  ctx.sessionProjections.register(notificationProjectionDefinition)
   ctx.sessionProjections.register(inboxProjectionDefinition)
   const agent = stubAgent(rawId, { ctx, session })
   const inbox = new ReactLoopInbox(ctx.sessionProjections, session, agentEvents(ctx, agent))
@@ -83,6 +83,36 @@ async function reconstructPersistedInbox(
 }
 
 describe('ReactLoopInbox', () => {
+  it('invalidates an empty resumed Stop state without weakening a known Stop', async () => {
+    const { session, inbox } = await inboxAgent('empty-stop')
+    expect(session.seq).toBe(0)
+    expect(inbox.controls.stop).toBe('clear')
+    inbox.restoreStop()
+    expect(inbox.controls.stop).toBe('unknown')
+    inbox.latchStop()
+    inbox.restoreStop()
+    expect(inbox.controls.stop).toBe('stopped')
+    inbox.resumeOperator()
+    expect(inbox.controls.stop).toBe('clear')
+    expect(session.seq).toBe(0)
+    inbox.stopAccepting()
+    expect(() => inbox.resumeOperator()).toThrow('disposed')
+  })
+
+  it('does not infer clear Stop when forking an empty session with unlogged no-goal Stop', async () => {
+    const { ctx, session, inbox } = await inboxAgent('stopped-parent')
+    inbox.latchStop()
+    expect(session.seq).toBe(0)
+    const child = ctx.sessions.fork(session, undefined, SessionId('empty-fork'))
+    const childAgent = stubAgent('empty-fork', { ctx, session: child })
+    const childInbox = new ReactLoopInbox(ctx.sessionProjections, child, agentEvents(ctx, childAgent))
+    expect(child.header.isSeeded).toBe(true)
+    expect(childInbox.controls.stop).toBe('unknown')
+    childInbox.resumeOperator()
+    expect(childInbox.controls.stop).toBe('clear')
+    expect(inbox.controls.stop).toBe('stopped')
+  })
+
   it('reads the shared projection without owning its registration', async () => {
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())

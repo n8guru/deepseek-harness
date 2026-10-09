@@ -180,7 +180,8 @@ declare module './types.ts' {
     /**
    * Clear queued and steering work — unless `keepInbox` — and abort the active
    * turn or between-turn task. The first cause wins for that activity. With no
-   * active activity, cancellation is a no-op and does not arm later work.
+   * active activity, cancellation does not arm later work; native human Stop
+   * still latches the driver's process-local notification control.
    * @param cause - the stable caller intent carried by the active operation signal.
    * @param options - cancellation options; `keepInbox` preserves pending work.
    */
@@ -290,6 +291,13 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'agent/cancelled'(this: Scoped<Agent>, payload: { agent: Agent; cause: AgentCancelCause }): void
+    /**
+     * Native Stop latch changed, including explicit authenticated operator resume.
+     * @param payload.agent - the exact owner of the committed live control.
+     * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
+     * @mode emit
+     */
+    'agent/stop-changed'(this: Scoped<Agent>, payload: { agent: Agent }): void
     /**
      * One message entered the live inbox.
      * @param payload.agent - the agent whose inbox changed.

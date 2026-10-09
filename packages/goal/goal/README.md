@@ -53,7 +53,7 @@ Load the package with a composition entry; the only deployment choice is the def
 
 ### Drive the lifecycle
 
-A goal moves through four durable phases — `active`, `paused`, `blocked`, `complete` — plus a process-local flag that says whether automatic continuation is armed. The verbs:
+A goal moves through four durable phases — `active`, `paused`, `blocked`, `complete` — plus a process-local flag that says whether automatic continuation is armed. Native readers fence live activation with `activationRevision(agent)` and the service's `controlEpoch`; the counter advances before observers, independently of durable goal revisions. Neither value persists or grants continuation authority. The verbs:
 
 | Operation | What it does |
 |---|---|

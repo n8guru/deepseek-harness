@@ -24,6 +24,7 @@
   ],
   "references": [
     { "path": "../../core/agent" },
+    { "path": "../../goal/goal" },
     { "path": "../../llm/llm" },
     {
       "path": "../../../vendor/cordis"

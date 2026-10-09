@@ -55,6 +55,9 @@ it('durably rejects a background admission without resurrecting it after reload 
   const reloaded = await ctx.agents.resume({ resumeSessionId: SessionId('rejected-reload'), agentOptions: { provider: 'mock', model: 'mock' } })
   try {
     const inbox = reloaded.agent.inbox.notifications!
+    expect(inbox.controls?.stop).toBe('unknown')
+    inbox.resumeOperator!()
+    expect(inbox.controls?.stop).toBe('clear')
     expect(inbox.receipt('native:test', 'rejected-1')?.id).toBe(message.id)
     expect(reloaded.agent.inbox.nextTurn).toEqual([])
     expect(reloaded.agent.inbox.nextStep).toEqual([])

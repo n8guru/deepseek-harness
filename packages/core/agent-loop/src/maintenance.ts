@@ -1,6 +1,6 @@
 /** Optional native durable maintenance receiver. No process restart or activation authority. */
 import { Context, Service, symbols } from '@deepseek-ai/cordis'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { SessionId, SessionSeq, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
@@ -34,7 +34,10 @@ export const maintenanceLaunchConfigSchema = z.object({
   cwd: z.string().min(1).refine(value => value.startsWith('/'), 'absolute native workspace required'),
 }).strict()
 export type MaintenanceLaunchConfig = z.infer<typeof maintenanceLaunchConfigSchema>
-export const maintenanceConfigSchema = z.object({ successor: maintenanceLaunchConfigSchema.optional(), receiptGrants: z.array(maintenanceReceiptGrantSchema).default([]) }).strict()
+export const maintenanceConfigSchema = z.object({
+  successor: maintenanceLaunchConfigSchema.optional(),
+  receiptGrants: z.array(maintenanceReceiptGrantSchema).default([]),
+}).strict()
 export type MaintenanceConfig = z.input<typeof maintenanceConfigSchema>
 const successorIntentSchema = z.object({
   messageId: identity, baton: z.string().min(1).max(200_000),
@@ -54,7 +57,15 @@ export type MaintenanceState = z.infer<typeof maintenanceStateSchema>
 export type MaintenanceRun = z.infer<typeof runSchema>
 /** Unknown participants prohibit an idle claim; initiating agents are never excluded. */
 export interface MaintenanceStatus extends MaintenanceRun {
-  activity: { closed: boolean; busy: boolean; activeAgents: string[]; activeTools: number; activeReservations: { kind: string; sessionId?: string }[]; unknownParticipants: string[]; providerBackends?: LlmBackendCoverage }
+  activity: {
+    closed: boolean
+    busy: boolean
+    activeAgents: string[]
+    activeTools: number
+    activeReservations: { kind: string; sessionId?: string }[]
+    unknownParticipants: string[]
+    providerBackends?: LlmBackendCoverage
+  }
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -81,6 +92,8 @@ const runKey = (owner: string, runId: string): string => hash(JSON.stringify([ow
 /** A single leased control log owns all transactions; uncertain durability poisons admission. */
 export class HostMaintenance extends Service implements HostAdmission {
   static inject = ['sessionPersistence']
+  /** Process-local identity fencing replacement of the admission owner. */
+  readonly controlEpochId: string = randomUUID()
   private readonly ownedPersistence: SessionPersistence
   private handle: SessionHandle | undefined
   private seq = 0
@@ -118,7 +131,7 @@ export class HostMaintenance extends Service implements HostAdmission {
       try { return await next() } finally { this.activeTools -= 1 }
     })
     ctx.effect(() => async () => {
-      this.ready = false
+      this.updateAdmission(() => { this.ready = false })
       await this.tail.catch(() => {})
       await this.handle?.close()
     })
@@ -141,13 +154,25 @@ export class HostMaintenance extends Service implements HostAdmission {
     }
     this.seq = events.length
     await this.handle.flush()
-    this.ready = true
+    this.updateAdmission(() => { this.ready = true })
     this.ctx.provide('hostMaintenanceReady', this)
   }
 
   get open(): boolean {
     const active = this.state.active === null ? undefined : this.state.runs[this.state.active]
     return this.ready && !this.failed && this.closing === 0 && active?.phase !== 'closed'
+  }
+
+  private controlEpoch = 0
+  /** Native live admission revision; committed before changed-event observers run. */
+  get controlRevision(): number { return this.controlEpoch }
+
+  /** Publish every live admission edge at its owner, including failed close round trips. */
+  private updateAdmission(change: () => void): void {
+    const wasOpen = this.open
+    change()
+    this.controlEpoch++
+    if (wasOpen !== this.open) this.ctx.emit('host-admission/changed')
   }
 
   /** New work never inherits authority from a prompt, Focus, or ambient initiator. */
@@ -196,8 +221,11 @@ export class HostMaintenance extends Service implements HostAdmission {
       release: () => {
         this.reservations.delete(ticket)
         for (const child of children) {
-          const capability = this.initialTickets.get(child)!
-          if (!this.initialAdmissions.get(capability)!.claimed) this.reservations.delete(child)
+          const capability = this.initialTickets.get(child)
+          if (capability === undefined) throw new Error('native initial capability unavailable')
+          const grant = this.initialAdmissions.get(capability)
+          if (grant === undefined) throw new Error('native initial admission unavailable')
+          if (!grant.claimed) this.reservations.delete(child)
         }
       },
     }
@@ -243,7 +271,8 @@ export class HostMaintenance extends Service implements HostAdmission {
       if (this.reservations.has(ticket)) throw new Error('native publication is not receipt authority')
       return
     }
-    const grant = this.initialAdmissions.get(capability)!
+    const grant = this.initialAdmissions.get(capability)
+    if (grant === undefined) throw new Error('native initial admission unavailable')
     this.assert(ticket)
     if (!grant.claimed || grant.accepted || (grant.compiler !== undefined && grant.compiled !== 'complete') || JSON.stringify(message) !== JSON.stringify(grant.message)) throw new Error('native initial input refused')
     grant.accepted = true
@@ -264,11 +293,10 @@ export class HostMaintenance extends Service implements HostAdmission {
       return { get open() { try { check(); return true } catch { return false } }, assert: check, begin: () => { check(); return permit } }
     }
     const authority = this.permits.get(permit)
-    const owner = this
     const check = (): void => {
       if (authority === undefined || !authority.active || authority.sessionId !== sessionId
-        || !owner.ready || owner.failed || owner.state.active !== authority.key
-        || owner.state.runs[authority.key]?.phase !== 'closed') throw new Error('native successor permit refused')
+        || !this.ready || this.failed || this.state.active !== authority.key
+        || this.state.runs[authority.key]?.phase !== 'closed') throw new Error('native successor permit refused')
     }
     check()
     return {
@@ -278,16 +306,19 @@ export class HostMaintenance extends Service implements HostAdmission {
     }
   }
 
-  private async commit(next: MaintenanceState): Promise<void> {
+  private async commit(next: MaintenanceState, release = false): Promise<void> {
     next.revision = this.state.revision + 1
     const handle = this.handle
     if (handle === undefined) throw new Error('maintenance control handle unavailable')
     try {
       await handle.append([{ type: 'host/maintenance', seq: SessionSeq(this.seq), time: Date.now(), data: next }])
       await handle.flush()
-    } catch (error) { this.failed = true; throw error }
+    } catch (error) { this.updateAdmission(() => { this.failed = true }); throw error }
     this.seq += 1
-    this.state = next
+    this.updateAdmission(() => {
+      if (release) this.admissionEpoch += 1
+      this.state = next
+    })
   }
 
   private async materializeSuccessor(key: string): Promise<MaintenanceRun> {
@@ -311,20 +342,28 @@ export class HostMaintenance extends Service implements HostAdmission {
     try {
       if (child === undefined) {
         const agentOptions = { provider: launch.provider, model: launch.model }
-        const binding = { owner: run.owner, runId: run.runId, batonDigest: successor.batonDigest, messageId: successor.intent.messageId, launch }
+        const binding = {
+          owner: run.owner, runId: run.runId, batonDigest: successor.batonDigest, messageId: successor.intent.messageId, launch,
+        }
         const validateBinding: AgentSetup = async (ctx, agent) => {
           const prior = agent.session.snapshotEvents().filter(event => event.type === 'host/maintenance-successor')
           if (prior.length !== 1 || JSON.stringify(prior[0]?.data) !== JSON.stringify(binding)) throw new Error('successor durable owner/run binding mismatch')
           return await setup(ctx, agent)
         }
         try {
-          child = await agents.resume({ resumeSessionId: SessionId(successor.sessionId), agentOptions, setup: validateBinding, maintenancePermit: permit })
+          child = await agents.resume({
+            resumeSessionId: SessionId(successor.sessionId), agentOptions, setup: validateBinding, maintenancePermit: permit,
+          })
         } catch (error) {
           if (!(error instanceof SessionPersistenceNotFoundError)) throw error
-          child = await agents.create({ sessionId: SessionId(successor.sessionId), meta: { cwd: launch.cwd, agentPreset: launch.agentPreset }, agentOptions, setup: async (ctx, agent) => {
-            agent.session.append('host/maintenance-successor', binding)
-            return await setup(ctx, agent)
-          }, maintenancePermit: permit })
+          child = await agents.create({
+            sessionId: SessionId(successor.sessionId), meta: { cwd: launch.cwd, agentPreset: launch.agentPreset }, agentOptions,
+            setup: async (ctx, agent) => {
+              agent.session.append('host/maintenance-successor', binding)
+              return await setup(ctx, agent)
+            },
+            maintenancePermit: permit,
+          })
         }
         this.successors.set(key, child)
       }
@@ -354,7 +393,9 @@ export class HostMaintenance extends Service implements HostAdmission {
       const entryIndex = events.findIndex(event => event.type === 'user/message' && event.data.id === sequence)
       settled.status = events.slice(entryIndex + 1).some(event => event.type === 'turn/end' && event.data.reason.kind === 'completed') ? 'complete' : 'started'
       await this.commit(next)
-      return structuredClone(this.state.runs[key]!)
+      const committed = this.state.runs[key]
+      if (committed === undefined) throw new Error('maintenance owner/run lost')
+      return structuredClone(committed)
     } finally { authority.active = false }
   }
 
@@ -400,7 +441,9 @@ export class HostMaintenance extends Service implements HostAdmission {
       accepted.status = 'delivered'
       await this.commit(next) // ACK only after target receipt durability, reconciled on restart
     }
-    return structuredClone(this.state.runs[key]!)
+    const committed = this.state.runs[key]
+    if (committed === undefined) throw new Error('maintenance owner/run lost')
+    return structuredClone(committed)
   }
 
   private readStatus(key: string): MaintenanceStatus {
@@ -418,7 +461,8 @@ export class HostMaintenance extends Service implements HostAdmission {
       try {
         const producer = this.ctx.get(service) as { maintenanceCoverage?: object } | undefined
         const proof = producer?.maintenanceCoverage === undefined ? undefined : this.producerCoverage.get(producer.maintenanceCoverage)
-        if (proof?.kind !== kind || proof.producer !== (Reflect.get(producer!, symbols.original) ?? producer) || !proof.joined()
+        if (producer === undefined || proof?.kind !== kind
+          || proof.producer !== (Reflect.get(producer, symbols.original) ?? producer) || !proof.joined()
           || kind === 'publication' && (this.ctx.get('sessionPersistence')?.identity !== this.ownedPersistence.identity || this.ownedPersistence.writeJoined?.() !== true)
           || [...this.reservations.values()].some(reservation => reservation.kind === kind)) unknownParticipants.push(group)
       } catch { unknownParticipants.push(group) }
@@ -430,7 +474,15 @@ export class HostMaintenance extends Service implements HostAdmission {
     try { providerBackends = this.ctx.get('llm')?.backendCoverage() } catch { /* unavailable remains UNKNOWN */ }
     if (providerBackends?.state !== 'JOINED') unknownParticipants.push('provider-backends')
     const activeReservations = [...this.reservations.values()].map(value => ({ ...value }))
-    return { ...structuredClone(run), activity: { closed: !this.open, busy: activeAgents.length > 0 || this.activeTools > 0 || activeReservations.length > 0 || unknownParticipants.length > 0, activeAgents, activeTools: this.activeTools, activeReservations, unknownParticipants, ...providerBackends === undefined ? {} : { providerBackends } } }
+    return {
+      ...structuredClone(run),
+      activity: {
+        closed: !this.open,
+        busy: activeAgents.length > 0 || this.activeTools > 0 || activeReservations.length > 0 || unknownParticipants.length > 0,
+        activeAgents, activeTools: this.activeTools, activeReservations, unknownParticipants,
+        ...providerBackends === undefined ? {} : { providerBackends },
+      },
+    }
   }
 
   /** Detached state prevents a caller mutating receiver authority or durable receipts. */
@@ -450,7 +502,7 @@ export class HostMaintenance extends Service implements HostAdmission {
     if (command.action === 'status') return Promise.resolve(this.readStatus(runKey(owner, command.runId)))
     // Close rejects new calls immediately, including while its durable write is pending.
     const closes = command.action === 'close'
-    if (closes) { this.closing += 1; this.admissionEpoch += 1 }
+    if (closes) this.updateAdmission(() => { this.closing += 1; this.admissionEpoch += 1 })
     const result = this.tail.then(async () => {
       if (!this.ready || this.failed) throw new Error('native maintenance durability unavailable')
       const key = runKey(owner, command.runId)
@@ -501,19 +553,18 @@ export class HostMaintenance extends Service implements HostAdmission {
             if (run.successor?.intent !== undefined && JSON.stringify(run.successor.intent) !== JSON.stringify(intent)) throw new Error('immutable successor intent conflict')
             run.successor = { batonDigest: command.batonDigest, sessionId: `successor-${key}`, status: run.successor?.intent === undefined ? 'accepted-intent' : run.successor.status, intent }
           } else {
-          if (next.active !== null && next.active !== key) throw new Error('successor claim belongs to another closed run')
-          if (run.successor !== null && run.successor.batonDigest !== command.batonDigest) throw new Error('successor baton conflict')
-          run.successor ??= { batonDigest: command.batonDigest, sessionId: `successor-${key}`, status: 'claimed' }
+            if (next.active !== null && next.active !== key) throw new Error('successor claim belongs to another closed run')
+            if (run.successor !== null && run.successor.batonDigest !== command.batonDigest) throw new Error('successor baton conflict')
+            run.successor ??= { batonDigest: command.batonDigest, sessionId: `successor-${key}`, status: 'claimed' }
           }
         }
       }
       // A retry that changes nothing spends no new event or epoch.
       if (JSON.stringify(next) === JSON.stringify(this.state)) return command.action === 'start-successor' ? this.materializeSuccessor(key) : command.action === 'deliver-receipts' ? this.deliverReceipts(key) : structuredClone(run)
-      await this.commit(next)
-      if (command.action === 'release') this.admissionEpoch += 1
+      await this.commit(next, command.action === 'release')
       this.ctx.emit('host-admission/changed')
       return command.action === 'start-successor' ? this.materializeSuccessor(key) : command.action === 'deliver-receipts' ? this.deliverReceipts(key) : structuredClone(run)
-    }).finally(() => { if (closes) this.closing -= 1 })
+    }).finally(() => { if (closes) this.updateAdmission(() => { this.closing -= 1 }) })
     this.tail = result.catch(() => {})
     // Durable close ACK includes live drain telemetry, never waits for its caller.
     return closes ? result.then(() => this.readStatus(runKey(owner, command.runId))) : result

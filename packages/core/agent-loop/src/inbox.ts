@@ -81,7 +81,10 @@ export class ReactLoopInbox implements InboxContract {
     private readonly session: Session,
     private readonly dispatch: AgentEventDispatch,
     private readonly admission: () => HostAdmission | undefined = () => undefined,
-  ) {}
+  ) {
+    // Until Stop has durable custody, restored/forked history cannot establish a clear latch.
+    this.stop = session.seq === 0 && !session.header.isSeeded ? 'clear' : 'unknown'
+  }
 
   private acceptingAdmissions = true
   get accepting(): boolean { return this.acceptingAdmissions }
@@ -95,6 +98,35 @@ export class ReactLoopInbox implements InboxContract {
     const state = this.projections.stateOf(this.session, 'notifications')
     if (state === undefined) throw new Error('notification projection unavailable')
     return state
+  }
+
+  private stop: 'clear' | 'stopped' | 'unknown' = 'clear'
+
+  private controlRevision = 0
+
+  get controls(): { stop: 'clear' | 'stopped' | 'unknown'; focus: boolean; revision: number } {
+    return { stop: this.stop, focus: this.notificationState().enabled, revision: this.controlRevision }
+  }
+
+  /** Commit a live control revision before any owner notification can reenter a reader. */
+  advanceControlRevision(): void { this.controlRevision++ }
+
+  /** A resumed empty log also cannot establish pre-restart Stop state. */
+  restoreStop(): void { if (this.stop === 'clear') this.setStop('unknown') }
+
+  /** Commit native cancellation intent even while idle and without a goal. */
+  latchStop(): void { this.setStop('stopped') }
+
+  resumeOperator(): void {
+    if (!this.accepting) throw new Error('native inbox admission disposed')
+    this.setStop('clear')
+  }
+
+  private setStop(stop: 'clear' | 'stopped' | 'unknown'): void {
+    if (stop === this.stop) return
+    this.stop = stop
+    this.advanceControlRevision()
+    this.dispatch.emit('agent/stop-changed', {})
   }
 
   get focus(): { enabled: boolean; queued: number } {
@@ -149,7 +181,9 @@ export class ReactLoopInbox implements InboxContract {
   recoverUnentered(): void {
     const state = this.notificationState()
     for (const { target, message } of state.receipts) {
-      if (!state.entered.includes(message.id) && !state.terminal.some(item => item.messageId === message.id) && this.locate(message.id) === undefined) this.mutate(target, Infinity, 0, [message], false)
+      if (!state.entered.includes(message.id)
+        && !state.terminal.some(item => item.messageId === message.id)
+        && this.locate(message.id) === undefined) this.mutate(target, Infinity, 0, [message], false)
     }
   }
 
@@ -157,8 +191,12 @@ export class ReactLoopInbox implements InboxContract {
 
   check(id: string): readonly string[] {
     const previous = this.notificationState().checks.find(c => c.id === id)
-    if (previous !== undefined && !previous.messageIds.some(id => [...this.nextStep, ...this.nextTurn].some(m => m.id === id && this.isHeld(m)))) return previous.messageIds
-    const messageIds = previous === undefined ? [...this.nextStep, ...this.nextTurn].filter(m => this.isHeld(m) && this.admissionFor(m.id) !== undefined).slice(0, 10).map(m => m.id) : [...previous.messageIds]
+    if (previous !== undefined && !previous.messageIds.some(id => [...this.nextStep, ...this.nextTurn]
+      .some(m => m.id === id && this.isHeld(m)))) return previous.messageIds
+    const messageIds = previous === undefined
+      ? [...this.nextStep, ...this.nextTurn]
+        .filter(m => this.isHeld(m) && this.admissionFor(m.id) !== undefined).slice(0, 10).map(m => m.id)
+      : [...previous.messageIds]
     this.session.append('agent/focus', { enabled: this.focus.enabled, check: { id, messageIds } })
     return messageIds
   }

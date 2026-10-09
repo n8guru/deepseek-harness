@@ -151,6 +151,7 @@ export class ReactLoopAgent implements Agent {
     this.phase = next
     const status = this.status
     if (status !== previousStatus) {
+      this.inbox.advanceControlRevision()
       this.dispatch.emit('agent/status', { status })
     }
   }
@@ -191,6 +192,7 @@ export class ReactLoopAgent implements Agent {
   }
 
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
+    if (cause.kind === 'user') this.inbox.latchStop()
     if (cause.kind === 'disposed') this.inbox.stopAccepting()
     if (!options.keepInbox) {
       this.inbox.clear(cause.kind === 'disposed')

@@ -182,6 +182,7 @@ export interface ResolvedConfig {
 
 /** Process-local activation state crossing the synchronous append boundary. */
 interface GoalRuntimeState {
+  revision: number
   activation: GoalActivation
   pendingActivation: {
     readonly offset: SessionLogOffset
@@ -239,6 +240,9 @@ function resolveBlockReason(reason: unknown): GoalBlockReason {
 /** Goal service (`ctx.goals`) backed exclusively by the owning session log. */
 export class GoalService extends TypertRemoteService {
   static inject = ['agents', 'sessionProjections']
+
+  /** Process-local identity fencing replacement of the activation owner. */
+  readonly controlEpoch: string = randomUUID()
 
   static Config: z<Config> = z.object({
     defaultMaxGoalRounds: z.number().default(256),
@@ -482,11 +486,22 @@ export class GoalService extends TypertRemoteService {
     return state.current
   }
 
+  /**
+   * Read the native live activation revision, committed before activation observers.
+   * @param agent - exact live owner.
+   * @returns process-local counter; durable changes are independently fenced by Session.seq.
+   */
+  activationRevision(agent: Agent): number {
+    this.assertLive(agent)
+    return this.runtimeState(agent.session).revision
+  }
+
   /** Return the process-local activation state, initially disarmed. */
   private runtimeState(session: Session): GoalRuntimeState {
     let runtime = this.runtimeStates.get(session)
     if (runtime !== undefined) return runtime
     runtime = {
+      revision: 0,
       activation: 'disarmed',
       pendingActivation: undefined,
     }
@@ -499,6 +514,7 @@ export class GoalService extends TypertRemoteService {
     const runtime = this.runtimeState(session)
     if (runtime.activation === activation) return
     runtime.activation = activation
+    runtime.revision++
     const state = this.ctx.sessionProjections.stateOf(session, 'goal')
     /* v8 ignore next -- static inject requires the projection registry before this service activates. */
     if (state === undefined) return
@@ -614,7 +630,7 @@ export class GoalService extends TypertRemoteService {
     try {
       const event = agent.session.append('goal/change', change)
       /* v8 ignore next -- Session.append returns the event committed at the pre-append seq. */
-      if (SessionSeq(runtime.pendingActivation.offset) === event.seq) runtime.activation = activation
+      if (SessionSeq(runtime.pendingActivation.offset) === event.seq) this.setActivation(agent.session, activation)
     } finally {
       runtime.pendingActivation = undefined
     }

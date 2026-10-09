@@ -183,7 +183,7 @@ export async function controlFocus(ctx: Context, request: Request): Promise<Resp
   if (request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !== 'application/json') return new Response('application/json required', { status: 415 })
   const schema = Schema.object({
     sessionId: Schema.string().min(1).required(),
-    action: Schema.union(['inspect', 'set', 'check']).required(),
+    action: Schema.union(['inspect', 'set', 'check', 'resume']).required(),
     enabled: Schema.union([Schema.const(undefined), Schema.boolean()]),
     checkId: Schema.union([Schema.const(undefined), Schema.string().min(1).max(256)]),
   })
@@ -198,6 +198,12 @@ export async function controlFocus(ctx: Context, request: Request): Promise<Resp
   if (inbox === undefined) return new Response('Focus driver unavailable', { status: 409 })
   if (input.action === 'inspect') return Response.json(inbox.focus)
   request.signal.throwIfAborted()
+  if (input.action === 'resume') {
+    if (input.enabled !== undefined || input.checkId !== undefined) return new Response('invalid resume control', { status: 400 })
+    if (inbox.resumeOperator === undefined) return new Response('native Stop control unavailable', { status: 409 })
+    inbox.resumeOperator()
+    return Response.json(inbox.controls)
+  }
   if (input.action === 'set') {
     if (input.enabled === undefined) return new Response('enabled required', { status: 400 })
     inbox.setFocus(input.enabled)

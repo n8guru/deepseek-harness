@@ -46,21 +46,37 @@ export interface HostInitialAdmission { readonly sessionId: SessionId; readonly 
 export interface HostReservation {
   readonly ticket: HostAdmissionTicket
   /** Each child is individually admitted synchronously while OPEN. */
-  child?(sessionId: SessionId, message: UserMessage, parent: Agent, signal: AbortSignal, compiler?: (child: Agent, original: UserMessage) => UserMessage): HostInitialAdmission
+  child?(sessionId: SessionId, message: UserMessage, parent: Agent, signal: AbortSignal,
+    compiler?: (child: Agent, original: UserMessage) => UserMessage): HostInitialAdmission
   release(): void
 }
 /** Central native lifecycle admission; absent when the optional durable receiver is not mounted. */
 export interface HostAdmission {
   readonly open: boolean
+  /** Process-local native admission revision, advanced before observers; absent means unsupported. */
+  readonly controlRevision?: number
+  /** Process-local identity of the authoritative admission owner. */
+  readonly controlEpochId?: string
   begin(): HostAdmissionTicket
   /** Optional native drain accounting. Tickets preserve only work admitted before close. */
   reserve?(kind: 'publication' | 'job' | 'delegate' | 'workflow', sessionId?: SessionId): HostReservation
   /** Constructor-bound instrumentation receipt; absence/preexisting service cannot imply global coverage. */
   coverage?(kind: 'publication' | 'job' | 'delegate' | 'workflow', producer: object, joined?: () => boolean): object
   assert(ticket?: HostAdmissionTicket): void
-  initial?(capability: HostInitialAdmission, sessionId: SessionId, parent: Agent | undefined, consume: boolean): { ticket: HostAdmissionTicket; message: UserMessage; signal: AbortSignal; deferred: boolean; release(): void; join(): void }
+  initial?(capability: HostInitialAdmission, sessionId: SessionId, parent: Agent | undefined, consume: boolean): {
+    ticket: HostAdmissionTicket
+    message: UserMessage
+    signal: AbortSignal
+    deferred: boolean
+    release(): void
+    join(): void
+  }
   /** Invoke only the compiler bound before await; supplied message must match its fixed output. */
-  compileInitial?(capability: HostInitialAdmission, child: Agent, message?: UserMessage): { ticket: HostAdmissionTicket; message: UserMessage; release(): void }
+  compileInitial?(capability: HostInitialAdmission, child: Agent, message?: UserMessage): {
+    ticket: HostAdmissionTicket
+    message: UserMessage
+    release(): void
+  }
   /** Restrict child publication tickets to their sole immutable receipt. */
   assertReceipt?(ticket: HostAdmissionTicket, message: UserMessage): void
   assertMaintenancePermit?(ticket: HostAdmissionTicket): void
@@ -86,6 +102,10 @@ export interface NotificationAdmission {
 /** Driver-owned durable notification controls; unsupported drivers fail closed at ingress. */
 export interface NotificationInbox {
   readonly focus: { enabled: boolean; queued: number }
+  /** Native control values without queue evaluation; absent on unsupported drivers. */
+  readonly controls?: { readonly stop: 'clear' | 'stopped' | 'unknown'; readonly focus: boolean; readonly revision: number }
+  /** Trusted explicit operator resume only; never call from activity or generic prompts. Does not wake input or resume goals. */
+  resumeOperator?(): void
   readonly hasForeground: boolean
   admit(target: InboxTarget, message: UserMessage, admission: NotificationAdmission): boolean
   /** Native inbox lifecycle admission, false synchronously when disposed. */

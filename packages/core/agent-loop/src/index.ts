@@ -198,7 +198,7 @@ async function raceAbortCall<T>(
   // One observed join covers BOTH delayed backend completion and abandoned-handle cleanup,
   // without an empty accounting cut between them. Cancellation only ends the public waiter.
   const joined = publicResult.then(() => undefined, async () => {
-    await pending.then(async value => {
+    await pending.then(async (value) => {
       if (signal.aborted) await releaseAbandoned?.(value)
     }, () => undefined)
   })
@@ -647,6 +647,7 @@ export class AgentLoop extends Service implements AgentFactory {
           try {
             assertLive()
             admission?.assert(admissionTicket)
+            if (source === 'resume') agent.inbox.restoreStop()
             detachSession = agent.ctx.sessions.enter(session)
             // The mounted backend routes announced live events into the active
             // write handle by session id; the loop only owns the handle itself.
@@ -691,7 +692,9 @@ export class AgentLoop extends Service implements AgentFactory {
       let prepared: PreparedAgent
       try {
         admission?.assert(ticket)
-        prepared = this.prepare(this.ctx, id, options, preparation.session, undefined, stored?.handle, undefined, undefined, reservation?.ticket)
+        prepared = this.prepare(
+          this.ctx, id, options, preparation.session, undefined, stored?.handle, undefined, undefined, reservation?.ticket,
+        )
       } catch (error: unknown) {
         await stored?.handle.close().catch(() => { this.publicationUnknown = true })
         throw error
@@ -751,13 +754,21 @@ export class AgentLoop extends Service implements AgentFactory {
    */
   async createAgent(ownerCtx: Context, options: CreateAgentOptions): Promise<AgentHandle> {
     const rootAdmission = this.runtime.ctx.get('hostAdmission')
-    if (options.initialAdmission !== undefined && (rootAdmission?.initial === undefined || options.maintenancePermit !== undefined)) throw new Error('native initial admission unsupported')
-    const initial = options.initialAdmission === undefined ? undefined : rootAdmission!.initial!(options.initialAdmission, options.sessionId, options.parentAgent, true)
+    const initial = (() => {
+      if (options.initialAdmission === undefined) return undefined
+      if (rootAdmission?.initial === undefined || options.maintenancePermit !== undefined) {
+        throw new Error('native initial admission unsupported')
+      }
+      return rootAdmission.initial(options.initialAdmission, options.sessionId, options.parentAgent, true)
+    })()
     if (initial !== undefined) {
       if (options.meta?.parentSession !== undefined && options.meta.parentSession !== options.parentAgent?.id) throw new Error('native initial parent metadata refused')
-      options = { ...options, signal: initial.signal, meta: { ...options.meta, parentSession: options.parentAgent!.id } }
+      if (options.parentAgent === undefined) throw new Error('native initial parent unavailable')
+      options = { ...options, signal: initial.signal, meta: { ...options.meta, parentSession: options.parentAgent.id } }
     }
-    const admission = options.maintenancePermit === undefined ? rootAdmission : rootAdmission?.forSession?.(options.maintenancePermit, options.sessionId)
+    const admission = options.maintenancePermit === undefined
+      ? rootAdmission
+      : rootAdmission?.forSession?.(options.maintenancePermit, options.sessionId)
     if (options.maintenancePermit !== undefined && admission === undefined) throw new Error('native maintenance permit unsupported')
     const preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(options.sessionId, {
       ...options.seed === undefined ? {} : { seed: options.seed },
@@ -778,8 +789,8 @@ export class AgentLoop extends Service implements AgentFactory {
             () => this.createStoredSession(preparation.session, options.signal),
             options.signal,
             options.sessionId,
-            (abandoned) => abandoned?.handle.close(),
-            joined => { this.trackPublication(joined).catch(() => { this.publicationUnknown = true }) },
+            abandoned => abandoned?.handle.close(),
+            (joined) => { this.trackPublication(joined).catch(() => { this.publicationUnknown = true }) },
           )
         admission?.assert(ticket)
       } catch (error: unknown) {
@@ -843,7 +854,9 @@ export class AgentLoop extends Service implements AgentFactory {
     const session = ownedPreparation.session
     let prepared: PreparedAgent
     try {
-      prepared = this.prepare(ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, maintenancePermit, publicationTicket)
+      prepared = this.prepare(
+        ownerCtx, id, agentOptions, session, signal, stored?.handle, parentAgent, maintenancePermit, publicationTicket,
+      )
     } catch (error: unknown) {
       await stored?.handle.close().catch(() => { this.publicationUnknown = true })
       throw error
@@ -903,7 +916,9 @@ export class AgentLoop extends Service implements AgentFactory {
     options: ResumeAgentOptions,
   ): Promise<AgentHandle> {
     const rootAdmission = this.runtime.ctx.get('hostAdmission')
-    const admission = options.maintenancePermit === undefined ? rootAdmission : rootAdmission?.forSession?.(options.maintenancePermit, options.resumeSessionId)
+    const admission = options.maintenancePermit === undefined
+      ? rootAdmission
+      : rootAdmission?.forSession?.(options.maintenancePermit, options.resumeSessionId)
     if (options.maintenancePermit !== undefined && admission === undefined) throw new Error('native maintenance permit unsupported')
     const reservation = options.maintenancePermit === undefined ? admission?.reserve?.('publication', options.resumeSessionId) : undefined
     const ticket = reservation?.ticket ?? admission?.begin()
@@ -932,8 +947,8 @@ export class AgentLoop extends Service implements AgentFactory {
             () => persistence.open(id, 'write', { signal: fused }),
             fused,
             id,
-            (abandoned) => abandoned.close(),
-            joined => { this.trackPublication(joined).catch(() => { this.publicationUnknown = true }) },
+            abandoned => abandoned.close(),
+            (joined) => { this.trackPublication(joined).catch(() => { this.publicationUnknown = true }) },
           )
           // Semantic crash repair is the agent layer's job: persistence hands
           // back the physically valid log; an interrupted final turn receives

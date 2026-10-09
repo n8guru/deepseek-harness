@@ -50,6 +50,8 @@ The socket-only `session.operatorActivity` stream accepts strict version-1 opens
 
 A producer with an explicit `activityRead: true` grant may POST `{version:1, action:"activity", sessionId}` to `/api/notifications.admit`. The existing bearer and exact-session grant are required; browser cookies do not authenticate this branch. Reads return `Cache-Control: no-store` without creating, waking or changing session input. Both `activityRead` and `activityGated` default to false. A producer provisioned with `activityGated: true` receives 409 for notification admission because native gated release is unsupported; no request field can opt it out.
 
+Activity snapshots synchronously read native Stop/Focus controls, GoalService phase and live activation, Host admission, and foreground ownership. Missing services or unsupported controls remain unknown. `controlRevision` fences a vector of native counters, committed session sequence, and owner epochs, not sampled booleans or observer callbacks. Owners advance before observers run, so reentrant reads and away-and-back transitions invalidate prior snapshots. The browser-fenced `/api/session.focus` action `resume` explicitly clears only the native Stop latch, without waking a turn, changing another hold or recording activity. Activity frames, including `submit`, remain diagnostic and never clear controls; generic `session.prompt` carries no resume authority.
+
 <a id="connection-generation"></a>
 ## Connection generation
 
@@ -77,7 +79,7 @@ None; this package neither assembles nor sends a provider request.
 
 - **Buffered `/api` routes retain each request body in memory** — `maxRequestBodyBytes` (default 300 MiB, sized for the default 200 MiB aggregate image limit after base64 expansion plus envelope headroom) bounds ordinary image and RPC envelopes. Opt-in streaming routes receive backpressured chunks and bypass the aggregate cap; route implementations own persistence, cancellation, and any storage quota.
 - **The browser cookie is not marked `Secure`** — loopback HTTP is the shipped transport, so exposing the same authority over plaintext networking can expose the bearer cookie in transit.
-- **Activity transport is diagnostic only** — the shipped GUI has no trusted-DOM activity adapter. Snapshots report Stop and goal controls as unknown and eligibility as false. Durable activity diagnostics, the notification marker, ordered gated replay, authoritative control revisions and claim/pre-request release checks remain unimplemented. This transport cannot authorize gated notification release.
+- **Activity transport is diagnostic only** — snapshots always report eligibility as false. Native Stop is process-local; restored history starts unknown until explicit operator resume. Durable activity diagnostics, the notification marker, ordered gated replay and claim/pre-request release checks remain unimplemented. This transport cannot authorize gated notification release.
 - **There is no logout operation** — clearing the browser cookie ends one browser session; deleting the owner credential record and restarting `dsh` revokes every session.
 
 

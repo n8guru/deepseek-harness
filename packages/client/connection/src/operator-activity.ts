@@ -2,6 +2,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-goal'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { z } from 'zod'
 import type { ActivitySnapshot, ActivityTransport } from './rpc.ts'
@@ -34,7 +35,7 @@ interface SessionActivity {
   agent: Agent
   revision: number
   controlRevision: number
-  controls: string
+  controlStamp: readonly unknown[]
   bindings: Set<Binding>
   lastActivityAt: number | null
   clockUnknown: boolean
@@ -42,9 +43,10 @@ interface SessionActivity {
 
 /**
  * Connection-owned activity observations for exact existing Agents.
- * This checkpoint deliberately reports unknown Stop/goal controls and never grants release.
+ * Reads native controls and their owner-committed revisions; never grants release.
  */
 export class OperatorActivity {
+  /** Opaque Connection activation identity; never persisted or reused after reload. */
   readonly hostEpoch = randomBytes(32).toString('base64url')
   private readonly sessions = new Map<string, SessionActivity>()
   private previousWall: number | undefined
@@ -62,6 +64,7 @@ export class OperatorActivity {
     ctx.on('agent/disposed', ({ agent }) => {
       if (this.sessions.get(agent.id)?.agent === agent) this.sessions.delete(agent.id)
     })
+
   }
 
   private time(): { wall: number; mono: number } {
@@ -89,7 +92,7 @@ export class OperatorActivity {
   private state(agent: Agent): SessionActivity {
     let state = this.sessions.get(agent.id)
     if (state?.agent !== agent) {
-      state = { agent, revision: 0, controlRevision: 0, controls: '', bindings: new Set(), lastActivityAt: null, clockUnknown: false }
+      state = { agent, revision: 0, controlRevision: 0, controlStamp: [], bindings: new Set(), lastActivityAt: null, clockUnknown: false }
       this.sessions.set(agent.id, state)
     }
     return state
@@ -102,7 +105,7 @@ export class OperatorActivity {
    */
   snapshot(sessionId: string): ActivitySnapshot | undefined {
     const agent = this.ctx.get('agents')?.get(SessionId(sessionId))
-    if (agent?.inbox.notifications === undefined) return undefined
+    if (agent?.inbox.notifications === undefined || agent.inbox.notifications.accepting === false) return undefined
     const { wall, mono } = this.time()
     const state = this.state(agent)
     let selected: Binding | undefined
@@ -120,16 +123,38 @@ export class OperatorActivity {
     const activity = state.clockUnknown ? 'unknown'
       : selected !== undefined ? (age !== null && age < this.idleThresholdMs ? 'active' : 'idle')
         : state.lastActivityAt === null || [...state.bindings].some(binding => !binding.left) ? 'unknown' : 'stale'
-    const focus = agent.inbox.notifications.focus.enabled ? 'enabled' : 'disabled'
+    const controls = agent.inbox.notifications.controls
+    const stop = controls?.stop ?? 'unknown'
+    const focus = controls === undefined ? 'unknown' : controls.focus ? 'enabled' : 'disabled'
+    let goal: ActivitySnapshot['goal'] = { state: 'unknown' }
+    const goals = this.ctx.get('goals')
+    if (goals !== undefined) {
+      try {
+        const current = goals.get(agent)
+        goal = current === undefined ? { state: 'none' } : {
+          state: 'present', id: current.id, revision: current.revision, phase: current.phase, activation: current.activation,
+        }
+      } catch (_error) { /* Missing/invalid goal projections are unknown, never authoritative absence. */ }
+    }
     const admission = this.ctx.get('hostAdmission')
-    const hostAdmission = admission === undefined ? 'unknown' : admission.open ? 'open' : 'closed'
+    const hostAdmission = admission?.controlRevision === undefined ? 'unknown' : admission.open ? 'open' : 'closed'
     const foregroundBusy = agent.status !== 'idle' || agent.inbox.notifications.hasForeground
-    const controls = JSON.stringify([focus, hostAdmission, foregroundBusy])
-    if (state.controls !== controls) { state.controls = controls; state.controlRevision++ }
+    // These are native monotonic revisions, not sampled control values. Session.seq
+    // commits before session/event observers; live owners increment before emitting.
+    // Stable native epochs fence replacement (Cordis service proxies are not identities).
+    const stamp = [agent.session.seq, controls?.revision, goals?.controlEpoch, goals?.activationRevision(agent),
+      admission?.controlEpochId, admission?.controlRevision]
+    if (stamp.some((value, index) => value !== state.controlStamp[index])) {
+      state.controlStamp = stamp
+      state.controlRevision++
+    }
     const holdReasons = [
-      'stop-unknown', 'goal-unknown',
+      ...stop === 'clear' ? [] : [`stop-${stop}`],
+      ...goal.state === 'unknown' ? ['goal-unknown'] : [],
+      ...goal.state === 'present' && (goal.phase === 'paused' || goal.phase === 'blocked') ? [`goal-${goal.phase}`] : [],
+      ...goal.state === 'present' && goal.phase === 'active' && goal.activation === 'disarmed' ? ['goal-disarmed'] : [],
       ...activity === 'active' ? [] : [`activity-${activity}`],
-      ...focus === 'enabled' ? ['focus-enabled'] : [],
+      ...focus === 'disabled' ? [] : [`focus-${focus}`],
       ...hostAdmission === 'open' ? [] : [`admission-${hostAdmission}`],
       ...foregroundBusy ? ['foreground-busy'] : [],
     ]
@@ -139,7 +164,7 @@ export class OperatorActivity {
       observedAt: wall, lastActivityAt: selected?.at ?? state.lastActivityAt, activityAgeMs: age,
       idleThresholdMs: this.idleThresholdMs, snapshotTtlMs: 5000 as const, state: activity,
       binding: selected === undefined ? null : { bindingEpoch: selected.epoch, principalClass: 'authenticated-operator-gui' as const },
-      stop: 'unknown' as const, focus, goal: { state: 'unknown' as const }, hostAdmission, foregroundBusy,
+      stop, focus, goal, hostAdmission, foregroundBusy,
       eligible: false, holdReasons,
     }
   }

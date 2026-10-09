@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import GoalService from '@deepseek-ai/dsh-goal'
 import HostMaintenance from '../../../core/agent-loop/src/maintenance.ts'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -103,11 +104,19 @@ it('authenticates an actual caller, durably retries its identity and never accep
       await agent.whenIdle()
       expect(adapter.requests).toHaveLength(2)
     } finally { flush.mockRestore() }
+    const admissionCuts: ReturnType<OperatorActivity['snapshot']>[] = []
+    ctx.on('host-admission/changed', () => { admissionCuts.push(activity.snapshot(agent.id)) })
+    const activity = new OperatorActivity(ctx, 300000)
+    const beforeMaintenance = activity.snapshot(agent.id)!
     const maintenance = (body: unknown) => post('/api/maintenance.receive', body, { authorization: `Bearer ${bearer}` })
     expect((await post('/api/maintenance.receive', { action: 'close', runId: 'http-run' }, { cookie })).status).toBe(403)
     const closed = await maintenance({ action: 'close', runId: 'http-run' })
     expect(closed.status).toBe(200)
     expect(await closed.json()).toMatchObject({ owner: 'test:caller', runId: 'http-run', phase: 'closed' })
+    expect(activity.snapshot(agent.id)).toMatchObject({ hostAdmission: 'closed' })
+    expect(activity.snapshot(agent.id)!.controlRevision).toBeGreaterThan(beforeMaintenance.controlRevision)
+    expect(admissionCuts[0]?.hostAdmission).toBe('closed')
+    expect(admissionCuts[0]!.controlRevision).toBeGreaterThan(beforeMaintenance.controlRevision)
     expect(() => agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'blocked new work' }] }))).toThrow('admission closed')
     const delivery = { action: 'deliver-receipts', runId: 'http-run', items: [{ sequence: 'typed-supervisor', kind: 'supervisor', payload: 'trusted caller checkpoint', target: { kind: 'agent', sessionId: agent.id } }] }
     expect((await post('/api/maintenance.receive', delivery, { cookie })).status).toBe(403)
@@ -131,6 +140,23 @@ it('authenticates an actual caller, durably retries its identity and never accep
     expect((await maintenance({ action: 'release', runId: 'another-run' })).status).toBe(409)
     expect((await maintenance({ action: 'release', runId: 'http-run', owner: 'forged-owner' })).status).toBe(409)
     expect((await maintenance({ action: 'release', runId: 'http-run' })).status).toBe(200)
+    expect(activity.snapshot(agent.id)!.hostAdmission).toBe('open')
+    const beforeRejectedClose = activity.snapshot(agent.id)!
+    admissionCuts.length = 0
+    const rejected = ctx.hostMaintenance.receive('test:caller', { action: 'close', runId: 'http-run' })
+    expect(activity.snapshot(agent.id)!.hostAdmission).toBe('closed')
+    expect(activity.snapshot(agent.id)!.controlRevision).toBeGreaterThan(beforeRejectedClose.controlRevision)
+    await expect(rejected).rejects.toThrow('released maintenance run')
+    expect(admissionCuts.map(value => value?.hostAdmission)).toEqual(['closed', 'open'])
+    expect(admissionCuts[0]!.controlRevision).toBeGreaterThan(beforeRejectedClose.controlRevision)
+    expect(admissionCuts[1]!.controlRevision).toBeGreaterThan(admissionCuts[0]!.controlRevision)
+    expect(activity.snapshot(agent.id)!.hostAdmission).toBe('open')
+    expect(activity.snapshot(agent.id)!.controlRevision).toBeGreaterThan(beforeRejectedClose.controlRevision + 1)
+    const beforeRoundTrip = activity.snapshot(agent.id)!
+    await ctx.hostMaintenance.receive('test:caller', { action: 'close', runId: 'revision-roundtrip' })
+    await ctx.hostMaintenance.receive('test:caller', { action: 'release', runId: 'revision-roundtrip' })
+    expect(activity.snapshot(agent.id)!.hostAdmission).toBe('open')
+    expect(activity.snapshot(agent.id)!.controlRevision).toBeGreaterThan(beforeRoundTrip.controlRevision)
     expect(adapter.requests).toHaveLength(2)
   } finally {
     await ctx.fiber.dispose()
@@ -147,10 +173,12 @@ it('binds activity to the authenticated Gateway socket and exact session without
     await ctx.plugin(SessionStore)
     await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(JsonlPersistence, { root, compression: 'none' })
+    await ctx.plugin(HostMaintenance)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(GoalService)
     const adapter = new MockAdapter([textResponse('programmatic prompt')])
     ctx.llm.registerAdapter(['mock'], adapter)
     const agent = await ctx.agentLoop.create(SessionId('activity-wire'), { provider: 'mock', model: 'mock' })
@@ -211,7 +239,7 @@ it('binds activity to the authenticated Gateway socket and exact session without
     const frame = (sequence: number, extra = {}) => ({ type: 'item', streamId: 'activity', value: { version: 1, bindingEpoch, sequence, interaction: 'input', ...extra } })
     expect((await send(socket, frame(1))).value.accepted).toBe(true)
     const active = await read()
-    expect(active).toMatchObject({ state: 'active', eligible: false, stop: 'unknown', goal: { state: 'unknown' }, binding: { bindingEpoch, principalClass: 'authenticated-operator-gui' } })
+    expect(active).toMatchObject({ state: 'active', eligible: false, stop: 'clear', goal: { state: 'none' }, hostAdmission: 'open', binding: { bindingEpoch, principalClass: 'authenticated-operator-gui' } })
     for (const bad of [frame(1), frame(2, { bindingEpoch: 'forged' }), frame(2, { lastActivityAt: 1 }), frame(2, { sequence: Number.MAX_SAFE_INTEGER + 1 })]) {
       expect((await send(socket, bad)).value.accepted).toBe(false)
       expect(await read()).toMatchObject({ lastActivityAt: active.lastActivityAt, activityRevision: active.activityRevision })
@@ -223,21 +251,42 @@ it('binds activity to the authenticated Gateway socket and exact session without
     expect((await send(second, frame(1))).value.accepted).toBe(false)
     const closed = once(second, 'close'); second.close(); await closed
     expect((await read()).binding.bindingEpoch).toBe(bindingEpoch)
+    const operator = (payload: object, headers: Record<string, string> = { cookie }) => fetch(base + '/api/session.focus', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ sessionId: agent.id, ...payload }),
+    })
+    agent.cancel({ kind: 'user' })
+    const stopped = await read()
+    expect(stopped.stop).toBe('stopped')
+    expect(stopped.controlRevision).toBeGreaterThan(active.controlRevision)
+    expect((await operator({ action: 'resume' }, { authorization: `Bearer ${bearer}` })).status).toBe(401)
+    expect((await operator({ action: 'resume', isHuman: true })).status).toBe(400)
+    expect((await operator({ action: 'resume' }, { cookie, origin: 'null' })).status).toBe(403)
+    expect((await read()).stop).toBe('stopped')
+    expect((await operator({ action: 'set', enabled: true })).status).toBe(200)
+    expect((await read()).stop).toBe('stopped')
+    expect((await operator({ action: 'resume' })).status).toBe(200)
+    expect(await read()).toMatchObject({ stop: 'clear', focus: 'enabled', lastActivityAt: active.lastActivityAt })
+    expect((await read()).controlRevision).toBeGreaterThan(stopped.controlRevision)
+    expect(adapter.requests).toHaveLength(0)
+    expect((await operator({ action: 'set', enabled: false })).status).toBe(200)
+    const allClear = await read()
+    expect(allClear).toMatchObject({ state: 'active', stop: 'clear', focus: 'disabled', goal: { state: 'none' }, hostAdmission: 'open', foregroundBusy: false, eligible: false })
     const count = agent.session.seq
     for (const payload of [
       { sessionId: agent.id, items: [{ sequence: 'held', text: 'must not enter' }] },
       { sessionId: agent.id, activityGated: false, items: [{ sequence: 'held', text: 'must not enter' }] },
-      { sessionId: agent.id, activityGuard: { version: 1, hostEpoch: active.hostEpoch, bindingEpoch, activityRevision: active.activityRevision, controlRevision: active.controlRevision }, items: [{ sequence: 'held', text: 'must not enter' }] },
+      { sessionId: agent.id, activityGuard: { version: 1, hostEpoch: allClear.hostEpoch, bindingEpoch, activityRevision: allClear.activityRevision, controlRevision: allClear.controlRevision }, items: [{ sequence: 'held', text: 'must not enter' }] },
     ]) expect((await post(payload)).status).toBe(409)
     expect(agent.session.seq).toBe(count)
     expect(adapter.requests).toHaveLength(0)
     expect((await send(socket, frame(2, { interaction: 'leave' }))).value.accepted).toBe(true)
     expect(await read()).toMatchObject({ state: 'stale', lastActivityAt: active.lastActivityAt })
     expect((await send(socket, frame(3))).value.accepted).toBe(false)
+    agent.cancel({ kind: 'user' })
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'programmatic' }] }))
     await agent.whenIdle()
     expect(adapter.requests).toHaveLength(1)
-    expect(await read()).toMatchObject({ state: 'stale', lastActivityAt: active.lastActivityAt })
+    expect(await read()).toMatchObject({ state: 'stale', stop: 'stopped', lastActivityAt: active.lastActivityAt })
 
     // Fake clocks exercise equality and rollback without advancing Gateway timers.
     let wall = 1000000, mono = 0

@@ -50,6 +50,8 @@ cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-sessi
 
 具有显式 `activityRead: true` 授权的生产者可向 `/api/notifications.admit` POST `{version:1, action:"activity", sessionId}`。此分支要求原有 bearer 与精确会话授权，浏览器 cookie 不提供认证。读取返回 `Cache-Control: no-store`，不创建、唤醒或修改会话输入。`activityRead` 与 `activityGated` 均默认为 false。配置 `activityGated: true` 的生产者提交通知会收到 409，因为原生受活动约束的释放尚不受支持；请求字段不能绕过该限制。
 
+活动快照同步读取原生 Stop/Focus 控制、GoalService 阶段与实时激活状态、Host 准入以及前台占用。服务缺失或控制不受支持时保持 unknown。`controlRevision` 对原生计数器、已提交的会话序号与所有者 epoch 向量建立版本边界，不依赖布尔值采样或观察者回调。所有者先递增再通知观察者，因此重入读取和离开再返回原状态都会使旧快照失效。受浏览器认证保护的 `/api/session.focus` 的 `resume` 动作显式清除原生 Stop 锁存，但不唤醒轮次、不改变其他暂停状态，也不记录活动。包括 `submit` 在内的活动帧仅供诊断，绝不清除控制；通用 `session.prompt` 不携带恢复权限。
+
 <a id="connection-generation"></a>
 ## Connection generation
 
@@ -77,7 +79,7 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
 - **浏览器 cookie 不带 `Secure`**：当前随产品提供的传输方式是 loopback HTTP；若部署经明文网络暴露同一 authority，bearer cookie 可能在传输中泄露。
-- **活动传输仅供诊断**：随附 GUI 没有可信 DOM 活动适配器。快照将 Stop 与目标控制报告为 unknown，将资格报告为 false。持久化活动诊断、通知标记、有序受限重放、权威控制修订以及认领和请求前释放检查均尚未实现。此传输不能授权受活动约束的通知释放。
+- **活动传输仅供诊断**：快照始终将资格报告为 false。原生 Stop 仅保存在进程内；恢复的历史初始为 unknown，直到操作者显式恢复。持久化活动诊断、通知标记、有序受限重放以及认领和请求前释放检查均尚未实现。此传输不能授权受活动约束的通知释放。
 - **没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
 
 

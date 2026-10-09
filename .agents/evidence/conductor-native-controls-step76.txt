@@ -1,0 +1,66 @@
+Conductor relay step 76 — native control snapshot checkpoint
+Task 142894 attempt 1; model openai-codex/gpt-6-astra; 2026-10-09; forge.
+Source-only: no installation, runtime restart, hold release, production delivery,
+Forage deployment, or step-70/full A01-A22 acceptance is claimed.
+Lineage: agents/forge/conductor-activity-snapshot from reviewed step-75 pin
+ e13958ddcaaf0c9ac67d86cf580711519c3b730e.
+
+Change:
+- Native AgentLoop owns a process-local Stop latch even without a goal. Fresh
+  empty sessions start clear; resumed/forked history starts unknown. Explicit
+  browser-authorized resume clears only Stop, never goals, Focus, or admission.
+  Generic prompts and every activity-frame category leave controls untouched.
+- Snapshot reads native Stop/Focus, exact goal id/revision/phase/activation,
+  foreground state and host admission. Unsupported owners remain unknown.
+- Revision cut uses Session.seq and owner-committed live counters plus stable
+  goal/admission instance epochs. Updates precede reentrant event observers;
+  away-and-back transitions invalidate previous cuts without intervening reads.
+- No queue-held predicate recursion. Disposed Agents cannot supply snapshots.
+- Diagnostic eligible:false and activityGated HTTP 409 remain unconditional,
+  even for authenticated all-clear activity. Durable restart custody and final
+  admission are later ledger steps; this is not release authority.
+
+Parent validation and adversarial checks:
+- New operator-controls.host.spec.ts: six native owner regression cases, passing.
+- Earlier-listener probe caught an initial observer-ordering stale revision;
+  replacement fixed at owners. A second probe caught Cordis proxy identities
+  changing on reads; replacement uses native epoch strings. Final probe:
+  repeated unchanged cut 1 -> 1; Stop cut before/during/after 1 -> 2 -> 2.
+  Permanent regression is included, not only the local probe.
+- Broad focused suite initially: 54 files passed, 1 failed, 1 skipped;
+  780 passed, 1 failed, 2 skipped. Failure was missing built CLI bin.js during
+  host rebuild; two midturn Codex tests skipped absent configured host adapter.
+- Host and Client tsc --project ... --noEmit: both passed. An initial command
+  using --incremental false was invalid for composite projects; corrected.
+- Baseline doc-sync: 29 passed / 14 failed. After change: 28 passed / 15 failed;
+  same fourteen inherited catalog/persistence/reference/prior-note gates plus
+  doc-typecheck host-bundler heap exhaustion. Changed bilingual pairs pass;
+  export JSDoc findings reduced 38 -> 37, none added. Full doc-sync is NOT clean.
+- Final canonical typecheck (NODE_OPTIONS=--max-old-space-size=8192 pnpm run
+  typecheck): passed, including host build, Typert, desktop bundle and Client
+  contract checks. doc-typecheck:contracts-ready also passed.
+- Bundler failure was corrected by annotating the two public UUID epoch fields
+  as string rather than exposing randomUUID's inferred template-literal type.
+  Increasing heap alone did not fix it (16 GB run stopped after >10 minutes);
+  annotated build completed normally. No build gates/hooks were bypassed.
+- Final full focused suite: 55 files passed / 1 skipped; 781 tests passed /
+  2 skipped, including all three built-profile cases (actual CLI and Python HTTP).
+  Command: pnpm exec vitest run packages/client/connection/tests
+  packages/core/agent-loop/tests packages/core/scope/tests packages/goal/goal/tests
+  packages/goal/goal-round-driver/tests
+- Source-only followup matrix also passed: 10 files / 91 tests.
+- Final full doc-sync after the epoch typing repair: 29 passed / 14 failed,
+  matching the baseline gate set. doc-typecheck now passes. Remaining failures:
+  doc graphs, type equivalence, cordis catalog, Cordis inspect catalog,
+  translation pairing (the two earlier activity notes), client catalog,
+  export JSDoc, config catalog, persistence catalog, persistence type history,
+  Session format references, repository references, concrete terms, agent note
+  format. These inherited failures were not expanded into unrelated repairs.
+
+Normal pre-commit initially found lint debt in already-touched owner files.
+Repaired line wrapping, test fixture initialization and explicit fail-closed
+narrowing instead of non-null assertions; no lint rules/hooks were disabled.
+Canonical typecheck without NODE_OPTIONS passes after these scoped repairs.
+
+Review status: author evidence only, done_unverified. No reviewer PASS is claimed.
+All old-source and notifier obligations remain; downstream steps unchanged.
