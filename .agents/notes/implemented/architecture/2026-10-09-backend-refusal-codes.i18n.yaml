@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-09-backend-refusal-codes.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-09-backend-refusal-codes.md
+/agent-note-typed-backend-refusals:
+  en: 90e82d1e987cdeb2
+  zh: 7bc804417cc0785c
+/agent-note-typed-backend-refusals/problem:
+  en: f446529c0977b358
+  zh: 079408c841669323
+/agent-note-typed-backend-refusals/decision:
+  en: 6cc0df067259440f
+  zh: 1aba9cb46d34bb6b
+/agent-note-typed-backend-refusals/alternatives-considered:
+  en: 47a821cf72e169de
+  zh: 7d23daf918508cb5
+/agent-note-typed-backend-refusals/consequences:
+  en: 6f5ae2eb4324dd0d
+  zh: c43c713ff5c924ad

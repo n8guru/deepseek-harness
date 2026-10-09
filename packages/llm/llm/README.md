@@ -58,6 +58,8 @@ for await (const chunk of ctx.llm.stream({
 
 After a successful mount, `ctx.llm.listProviders()` reports the registered routes in registration order.
 
+`backendCoverage()` checks every registered or retained adapter instance, without a provider allowlist. Its participants name all routes and registration generations and expose an optional typed `refusal`: `unsupported`, `unavailable`, `identity-lost`, `unjoined`, or `caller-active`. The human-readable `reason` is diagnostic; any refusal keeps coverage `UNKNOWN`. An absent `backendStatus()`, withdrawal of an unsupported route, or an idle Agent never proves backend settlement. Native maintenance exposes the same coverage over its authenticated status response. Deployment inventories are evidence only, not authority to skip a registration.
+
 `GenerateOptions.messages` accepts durable `Message` values and request-only `RequestUserInput` values. Request-only inputs carry user-role content with no `id` or `source`; Session writes and Agent delivery still require durable messages. Callers keep auxiliary inputs unchanged until the stream settles. A caller that records its exact request, such as session-title generation, must use durable messages.
 
 ### What you can do

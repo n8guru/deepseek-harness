@@ -14,6 +14,18 @@ export interface LlmBackendStatus {
   uncertainStarts: number
   unattributedEvents: number
 }
+/** Machine-readable refusal reasons, independent of provider names or a deployment allowlist. */
+export const backendRefusalReasons = {
+  unsupported: 'backend settlement unsupported',
+  unavailable: 'backend settlement unavailable or malformed',
+  'identity-lost': 'backend identity evidence disappeared',
+  unjoined: 'backend has unjoined or ambiguous work',
+  'caller-active': 'initiating native caller has not settled',
+} as const
+
+/** A refusal applies to the participant's exact provider routes and retained registration generations. */
+export type LlmBackendRefusal = keyof typeof backendRefusalReasons
+
 export interface LlmBackendCoverage {
   state: 'JOINED' | 'UNKNOWN'
   participants: readonly {
@@ -22,6 +34,8 @@ export interface LlmBackendCoverage {
     registrations: readonly { provider: string; generation: number }[]
     callers: readonly { phase: 'prepare' | 'stream'; sessionId?: string }[]
     status?: LlmBackendStatus
+    /** Stable refusal code; absent only when this instance and all its native callers are joined. */
+    refusal?: LlmBackendRefusal
     reason?: string
   }[]
 }

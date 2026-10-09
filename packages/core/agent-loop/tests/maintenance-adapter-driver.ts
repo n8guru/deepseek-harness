@@ -1,7 +1,8 @@
 /** Built Host over the shipped headless profile, driven by the real forge-agent-os native maintenance adapter. */
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { GenerateOptions, LlmBackendStatus, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -52,6 +53,18 @@ const ctx = await bootProductionProfile({ binName: 'maintenance-adapter', profil
 let handle
 try {
   const isOpen = (): boolean => ctx.hostMaintenanceReady.open
+  // Load the installed external adapter class, not the OAuth plugin's credential-writing apply().
+  const codexEntry = process.env.DSH_TEST_FORGE_MIRROR === 'full-mirror' ? process.env.DSH_TEST_CODEX_ENTRY : undefined
+  if (codexEntry !== undefined) {
+    const inventory = JSON.parse(readFileSync(new URL('./fixtures/forge-backend-inventory.json', import.meta.url), 'utf8'))
+    const codex = inventory.adapters.find((entry: { implementation: string }) => entry.implementation === 'CodexAppServerAdapter')
+    assert.equal(createHash('sha256').update(readFileSync(codexEntry)).digest('hex'), codex.entrySha256, 'external adapter pin drift')
+    const { CodexAppServerAdapter } = await import(codexEntry)
+    // A catalogue/stream access is a test error: no account discovery, credentials or backend launches.
+    const noBackendCalls = new Proxy({}, { get() { throw new Error('backend I/O is forbidden in the idle/refusal proof') } })
+    ctx.llm.registerAdapter(codex.providers, new CodexAppServerAdapter(noBackendCalls))
+  }
+  const registeredProviders = ctx.llm.listProviders().map(provider => provider.id).sort()
   const adapter = new GatedAdapter()
   ctx.llm.registerAdapter(['keyless-maint'], adapter)
   handle = await ctx.agents.create({ sessionId: SessionId('caller-agent'), meta: { cwd: process.cwd() }, agentOptions: { provider: 'keyless-maint', model: 'scripted' } })
@@ -61,7 +74,8 @@ try {
   writeFileSync(statePath, JSON.stringify({ bearer, faoLib, runDir: join(process.cwd(), 'run') }))
   const phases: Record<string, unknown> = {}
   const coverage = () => ctx.llm.backendCoverage().participants
-    .map(p => ({ providers: p.providers, reason: p.reason ?? null, joined: p.status?.state ?? null }))
+    .map(p => ({ providers: p.providers, registrations: p.registrations, refusal: p.refusal ?? null,
+      reason: p.reason ?? null, joined: p.status?.state ?? null }))
   const coverageAt: Record<string, unknown> = {}
   const run = async (phase: string) => {
     const stdout = await new Promise<string>((ok, reject) => {
@@ -92,13 +106,20 @@ try {
   coverageAt.probe = coverage()
   adapter.settle()
   coverageAt.settled = coverage()
+  const wireResponse = await fetch(base + '/api/maintenance.receive', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + bearer },
+    body: JSON.stringify({ action: 'status', runId: 'step70-assembled' }),
+  })
+  assert.equal(wireResponse.status, 200)
+  const wireStatus = await wireResponse.json()
   await run('drain')
   const drained = (phases.drain as { result: string }).result === 'drained'
   if (drained) { await run('claim'); await run('start') }
   await run('rollback-release')
   console.log('MAINT_ADAPTER_SNAPSHOT ' + JSON.stringify({
     closedWhileCallerActive, callerCompleted, reopenedAfterRelease: isOpen(),
-    modelTurns: callerRequests().length, titleRequests: adapter.requests.length - callerRequests().length, phases, coverageAt,
+    registeredProviders, wireStatus, modelTurns: callerRequests().length,
+    titleRequests: adapter.requests.length - callerRequests().length, phases, coverageAt,
   }))
 } finally {
   await handle?.dispose()

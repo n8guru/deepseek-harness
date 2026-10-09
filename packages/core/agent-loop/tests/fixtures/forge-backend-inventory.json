@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-09T22:43:48Z",
+  "host": "forge",
+  "source": "POST http://127.0.0.1:3080/api/llm.providers; dsh --profile web --dump-config; resolved plugin sources",
+  "adapters": [
+    {
+      "implementation": "DeepSeekAdapter",
+      "package": "@deepseek-ai/dsh-llm-deepseek",
+      "providers": [
+        "deepseek-official"
+      ],
+      "disposition": "backendStatus",
+      "evidence": "step98: provider-terminal LlmBackendLedger; backend-status.spec.ts"
+    },
+    {
+      "implementation": "PiAiAdapter",
+      "package": "@deepseek-ai/dsh-llm-pi-ai",
+      "providers": [
+        "anthropic",
+        "forge_qwen38",
+        "forage",
+        "forage_xai",
+        "xai_direct",
+        "forage_sub2api"
+      ],
+      "disposition": "backendStatus",
+      "evidence": "step98: provider-terminal LlmBackendLedger; backend-status.spec.ts"
+    },
+    {
+      "implementation": "CodexAppServerAdapter",
+      "package": "dsh-openai-oauth",
+      "providers": [
+        "openai-codex"
+      ],
+      "disposition": "refuse",
+      "refusal": "unsupported",
+      "entrySha256": "e2e0620b020f6866264d6e0383bf4d2a5e50043a6aa61cf6ebbf9abb80af6f97",
+      "evidence": "installed lib/index.js exports class but no backendStatus; app-server tracks child/requests without exposed joined-terminal evidence"
+    }
+  ],
+  "bridges": [
+    {
+      "package": "dsh-anthropic-oauth",
+      "entrySha256": "419330a080a5fde6cb129ba13a0cf316f5db14dfcfcfc23657594e1a8d3370e9",
+      "role": "settings/credentials for PiAiAdapter; no registerAdapter"
+    },
+    {
+      "package": "dsh-xai-oauth",
+      "entrySha256": "0efd15a61776895041eb3a1f5eda0d7f6cd6f93d369e49018cfd57f115c5cd3f",
+      "role": "credentials only; no registerAdapter"
+    }
+  ],
+  "semantics": "Inventory evidence, NOT a runtime allowlist. All actual registrations, including new or withdrawn routes, are checked by backendCoverage. Dispositions describe staged step98 source, not deployed support. Production remains unsupported until separately qualified activation. Unsupported codex prevents a full-mirror native_drained receipt."
+}
