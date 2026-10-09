@@ -1,4 +1,7 @@
-# Explicit staging opt-in only. No production grants or successor authority.
+# Explicit staging opt-in only. No production grants or successor authority:
+# launch authority exists only in a trusted `host-maintenance.successor` row.
+# The composer row only validates that launch against this Host and mounts its
+# preset through the canonical registry lifecycle; without a successor row it is inert.
 # The readiness service is absent until native control replay AND flush succeed.
 # Producer rows depend on it, irrespective of row ordering in the Loader.
 - id: agent
@@ -26,3 +29,5 @@
 - insert:
     - id: host-maintenance
       name: '@deepseek-ai/dsh-agent-loop/maintenance'
+    - id: host-maintenance-successor-composer
+      name: '@deepseek-ai/dsh-agent-loop/maintenance-successor'

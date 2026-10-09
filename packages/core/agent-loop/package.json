@@ -22,6 +22,10 @@
       "types": "./lib/types/maintenance.d.ts",
       "default": "./lib/maintenance.js"
     },
+    "./maintenance-successor": {
+      "types": "./lib/types/maintenance-successor.d.ts",
+      "default": "./lib/maintenance-successor.js"
+    },
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
@@ -31,6 +35,7 @@
   "files": [
     "lib/index.js",
     "lib/maintenance.js",
+    "lib/maintenance-successor.js",
     "maintenance.staged.patch.yml",
     "lib/invariant.js",
     "lib/types/**/*.d.ts"
