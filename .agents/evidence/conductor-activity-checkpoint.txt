@@ -76,3 +76,41 @@ INITIAL FAILURES (RESOLVED, NOT HIDDEN)
   no-config/no-clean with exact .js output. No vendor source was modified.
 
 No full step70 completion or independent review verdict is asserted.
+
+PARENT CHECKPOINT / PROPOSED LEDGER CONTINUATION (2026-10-09)
+Parent reran focus-transport.host.spec.ts, stream-server.host.spec.ts and
+focus-native.spec.ts together: 3 files, 26 tests passed at 04:03Z. Parent read the
+new activity owner and transport/admission diff; unconditional gated refusal and
+eligible:false remain intact. These are producer checks, not independent review.
+
+This crosses four reviewable ownership/lifecycle slices; the remaining work
+cannot safely be represented as a finished one-API patch. Keep step70 incomplete
+and hand the following proposal to the canonical replanner, preserving step69,
+step18 verify_attempts=2, downstream71-74 and the native-only installation gates:
+
+1. Trusted GUI activity adapter. Acceptance: shipped DOM input/submit/Focus/Stop
+   integration binds the captured trusted visible focused session and connection
+   generation before async work; actual browser tests reject synthetic events,
+   generic sendSession/session.prompt, hidden/session-switched and replayed input.
+2. Native activity control ownership. Acceptance: exact authoritative goal,
+   no-goal Stop latch, foreground and admission state; transition-owned revisions;
+   only explicit authenticated submit/resume clears Stop; no holds start turns;
+   acyclic Focus predicate (never focus.queued -> isHeld -> snapshot -> focus).
+3. Durable gated admission and final claim enforcement. Acceptance: persist and
+   reload gated markers/diagnostics under persistence compatibility rules; exact
+   ordered all-duplicate ACK replay never wakes; mixed held batches mutate nothing;
+   bounded ten-message selection; recheck after flush and every post-claim async
+   boundary before user/message entry; held custody survives without losing input.
+   Remove the unconditional refusal ONLY when this whole safety path is complete.
+4. Assembled source qualification and independent review. Acceptance: exercise
+   all A01-A22 cases with real HTTP/WS, shipped GUI, built profile/keyless model,
+   deferred flush/request races, schema checks and affected type/build regressions;
+   publish immutable exact native pin for completed independent cross-provider
+   review. Step70 stays incomplete until its full original criteria are satisfied.
+
+Continue on agents/forge/conductor-activity-snapshot from this checkpoint; do not
+restart from the specification or create a parallel notifier/native owner.
+Old-source c2fa8f0e6e9eef3c6db94e0c6708fbd88012fd88 and notifier checkpoint
+forge-agent-os e4eb33d8f5f76e8f4a85685d0cc677be01d31901 remain unchanged. The old
+runtime has no v1 capability and is unsupported, not approximated through activity
+inference. No runtime activation, install, restart or hold release was performed.
