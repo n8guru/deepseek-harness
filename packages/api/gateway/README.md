@@ -49,6 +49,8 @@ Host composition can register one application event source through `registerRemo
 <a id="client-service-clientremote-ctx-key-remote"></a>
 ## Client service: `ClientRemote` (ctx key: `remote`)
 
+`ctx.remote.$operatorActivity` binds mounted conversation occurrences to `session.operatorActivity` on the existing WebSocket. It records only trusted DOM events during dispatch in the visible, focused exact-session view, using the server epoch and a synchronous socket-bound sender. Pre-handshake gestures and delayed callbacks are dropped, never replayed; blur, hiding, session switch, disposal and connection-generation loss invalidate the binding. Reopening and heartbeat traffic do not record interaction. Alternate carriers expose no adapter. This trusts the GUI, not a compromised browser; native diagnostics still report `eligible: false` and activity-gated admission still refuses release.
+
 The browser carrier accepts the shell-owned stream origin described by [Connection](../../client/connection/README.md#use-this-package); logical stream framing and lifecycle remain unchanged.
 
 `ctx.remote.$mount()` validates and registers a generated Host-for-Client contribution, then installs concrete direct and scoped methods for the calling Cordis fiber. Each namespace is a traced `remote.<namespace>` child Service and unloads after its last method is withdrawn. Duplicate endpoints, namespace collisions, and Client-supplied fields without strict generated codecs fail before methods become callable.

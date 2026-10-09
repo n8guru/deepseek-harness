@@ -33,7 +33,7 @@ export interface ComposerKeymapHandlers {
   /** Whether Enter may submit right now (locked/busy states refuse). */
   canSubmit(): boolean
   /** Plain Enter submits; exactly Ctrl+Enter or Cmd+Enter selects accelerated delivery. */
-  submit(accelerated: boolean): void
+  submit(accelerated: boolean, event?: KeyboardEvent | null): void
   /**
    * Pasted files with directory metadata supplied by the clipboard entry API.
    * @param files - browser files in clipboard order.
@@ -153,7 +153,7 @@ export function registerComposerKeymap(editor: LexicalEditor, handlers: Composer
       event?.preventDefault()
       if (event?.repeat === true) return true // held-down Enter must not machine-gun sends
       if (!handlers.canSubmit()) return true
-      handlers.submit(event?.ctrlKey === true || event?.metaKey === true)
+      handlers.submit(event?.ctrlKey === true || event?.metaKey === true, event)
       return true
     }, COMMAND_PRIORITY_CRITICAL),
     editor.registerCommand(PASTE_COMMAND, (event) => {

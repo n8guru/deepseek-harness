@@ -1,11 +1,13 @@
 /** Focus controls use inbox/status events for refresh, never a background poller. */
 import { useEffect, useRef, useState } from 'react'
+import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 
 /** Shared native Focus operation invoked by the session-scoped dock. */
 export type FocusOperation = (input: { action: 'inspect' | 'set' | 'check'; enabled?: boolean; checkId?: string }) => Promise<{ enabled: boolean; queued: number }>
 
 /** Explicit operator Focus/Check controls; ambiguous Check retry retains its exact snapshot identity. */
-export function FocusControl({ operation, revision, running, notify, sessionId }: {
+export function FocusControl({ operation, revision, running, notify, sessionId, recordActivity }: {
+  recordActivity?: ((event: Event) => void) | undefined
   sessionId: string
   operation: FocusOperation
   revision: unknown
@@ -26,7 +28,7 @@ export function FocusControl({ operation, revision, running, notify, sessionId }
     try {
       let input: Parameters<FocusOperation>[0]
       if (check) {
-        const checkId = pendingCheck.current ?? crypto.randomUUID()
+        const checkId = pendingCheck.current ?? randomUUID()
         pendingCheck.current = checkId
         // Persist before sending: an ambiguous ACK must retry the same snapshot after reload.
         sessionStorage.setItem(storageKey, checkId)
@@ -43,8 +45,8 @@ export function FocusControl({ operation, revision, running, notify, sessionId }
     } finally { setBusy(false) }
   }
   return <div data-focus-control="">
-    <button type="button" aria-pressed={state?.enabled ?? false} disabled={busy || state === undefined} onClick={() => { void act(false) }}>Focus {state?.enabled ? 'on' : 'off'}</button>
+    <button type="button" aria-pressed={state?.enabled ?? false} disabled={busy || state === undefined} onClick={(event) => { recordActivity?.(event.nativeEvent); void act(false) }}>Focus {state?.enabled ? 'on' : 'off'}</button>
     <span role="status" aria-live="polite">{state === undefined ? 'Focus unavailable' : `${state.queued} held`}</span>
-    <button type="button" disabled={busy || running || state === undefined || (state.queued === 0 && pendingCheck.current === undefined)} onClick={() => { void act(true) }}>Check now</button>
+    <button type="button" disabled={busy || running || state === undefined || (state.queued === 0 && pendingCheck.current === undefined)} onClick={(event) => { recordActivity?.(event.nativeEvent); void act(true) }}>Check now</button>
   </div>
 }

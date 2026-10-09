@@ -35,6 +35,7 @@ function textOf(content: InboxState['next-turn'][number]['content']): string | n
 /** Queue operations injected by the session-scoped registration. */
 export interface QueueDockInjected {
   focusOperation?: FocusOperation
+  recordFocusActivity?: (event: Event) => void
   updateQueue: (itemId: MessageId, action: QueueAction) => Promise<void>
   notify: (level: 'info' | 'error', text: string) => void
   /** Resolve one durable queued image into a session-scoped browser URL. */
@@ -155,7 +156,9 @@ export type QueueDockProps = PropsRuntime<'conversation.input.dock'> & QueueDock
  * collapsible count header; an empty queue renders nothing. Local queued submissions
  * show sending status and disabled actions until their Host queue rows arrive.
  */
-export function QueueDock({ sessionId, focusOperation, useSession, useProjection, updateQueue, notify, loadImage, t }: QueueDockProps) {
+export function QueueDock({
+  sessionId, focusOperation, recordFocusActivity, useSession, useProjection, updateQueue, notify, loadImage, t,
+}: QueueDockProps) {
   const inbox = useProjection('inbox') as unknown as InboxState | undefined
   const pendingSubmissions = useSession(s => s.pendingSubmissions)
   const queue = useMemo(() => {
@@ -220,7 +223,10 @@ export function QueueDock({ sessionId, focusOperation, useSession, useProjection
 
   return (
     <div className={css.dock} data-queue-dock="">
-      {focusOperation !== undefined && <FocusControl key={sessionId} sessionId={sessionId} operation={focusOperation} revision={inbox} running={running} notify={notify} />}
+      {focusOperation !== undefined && <FocusControl
+        key={sessionId} sessionId={sessionId} operation={focusOperation} recordActivity={recordFocusActivity}
+        revision={inbox} running={running} notify={notify}
+      />}
       <div className={css.panel}>
         {rowCount > 1 && (
           <button
@@ -451,6 +457,7 @@ export const queueDockEntry = {
         const conversation = actx.get('conversation')
         if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
         return {
+          recordFocusActivity: (event) => { ctx.get('remote')?.$operatorActivity?.record(sessionId, event, 'focus-control') },
           focusOperation: async (input) => {
             const response = await fetch('/api/session.focus', {
               method: 'POST', headers: { 'content-type': 'application/json' },

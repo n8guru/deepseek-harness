@@ -28,6 +28,7 @@ import {
   RemoteStreamCarrierError,
   RemoteStreamMuxClient,
 } from './stream-client.ts'
+import { GuiOperatorActivity } from './operator-activity.ts'
 import { ClientRemoteEvents } from './remote-events.ts'
 import {
   RemoteStream,
@@ -101,6 +102,8 @@ interface InstalledMethod {
 
 /** Typed Remote service augmented by generated direct namespaces and Gateway stream supervision. */
 export interface ClientRemote extends TypertClientRemote {
+  /** Trusted DOM activity on the authenticated WebSocket only; absent for alternate carriers. */
+  readonly $operatorActivity?: GuiOperatorActivity | undefined
   /**
    * Create one independently cancellable, reconnecting logical stream.
    * @param options - domain-owned opener and generation-end classification.
@@ -147,6 +150,7 @@ class ClientRemoteService extends Service implements ClientRemote {
   private readonly namespaces = new Map<string, RemoteNamespaceHandle>()
   private hostFacts: RemoteHostFacts | undefined
   private readonly streams = new RemoteStreamMuxClient()
+  readonly $operatorActivity: GuiOperatorActivity | undefined
   private readonly events: ClientRemoteEvents
   private mutations = Promise.resolve()
 
@@ -155,6 +159,8 @@ class ClientRemoteService extends Service implements ClientRemote {
     this.ownerCtx = ctx
     const connection = ctx.get('connection') as ConnectionHandle
     this.connection = connection
+    this.$operatorActivity = connection.rpc.open === undefined
+      ? new GuiOperatorActivity(this.streams, connection.generation) : undefined
     this.events = new ClientRemoteEvents(
       ctx,
       connection,
@@ -178,6 +184,7 @@ class ClientRemoteService extends Service implements ClientRemote {
     else void loader.await().then(start, () => {})
     ctx.effect(() => async () => {
       disposed = true
+      this.$operatorActivity?.dispose()
       loop?.stop()
       await this.events.dispose()
       await this.streams.close()

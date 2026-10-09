@@ -49,6 +49,8 @@ Host 组合可通过 `registerRemoteEvents()` 注册唯一的应用事件 source
 <a id="client-service-clientremote-ctx-key-remote"></a>
 ## Client 服务：`ClientRemote`（ctx key：`remote`）
 
+`ctx.remote.$operatorActivity` 将已挂载的会话视图绑定到现有 WebSocket 上的 `session.operatorActivity`。它仅在可见、聚焦且会话精确匹配的视图中，在分发期间记录可信 DOM 事件，并使用服务端 epoch 和同步、绑定到该 socket 的发送器。握手前的手势与延迟回调直接丢弃，不会重放；失焦、隐藏、切换会话、资源释放以及连接代次丢失都会使绑定失效。重新打开与心跳不会记录交互。替代传输不提供此适配器。这里信任 GUI，并不抵御被攻陷的浏览器；原生诊断仍返回 `eligible: false`，受活动约束的准入仍拒绝放行。
+
 浏览器载体接受 [Connection](../../client/connection/README.zh.md#use-this-package) 定义的 shell 所拥有的流 origin；逻辑流帧与生命周期保持一致。
 
 `ctx.remote.$mount()` 会校验并注册生成的 Host-for-Client 贡献项，然后为发起调用的 Cordis fiber 安装具体的直接方法和作用域方法。每个 namespace 都是可追踪的 `remote.<namespace>` 子 Service，并在最后一个方法撤回后卸载。重复端点、命名空间冲突，以及缺少生成的严格 codec 的 Client 供值字段，都会在方法可调用前报错。

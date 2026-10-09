@@ -58,6 +58,8 @@ export interface ShortcutGesture {
 /** Local fixed input delivered after controls, or a sequence-invalidating interaction. */
 export type ShortcutFixedInput = {
   readonly type: 'keydown'
+  /** Original DOM event, absent for non-DOM fixed input. Never reconstructed from gesture fields. */
+  readonly event?: KeyboardEvent
   readonly gesture: ShortcutGesture
   readonly context: ShortcutContext
   consume(): void

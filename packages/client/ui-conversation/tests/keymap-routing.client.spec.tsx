@@ -62,9 +62,9 @@ describe('keymap keydown routing', () => {
       pasteText: () => {},
     })
     fireEvent.keyDown(root, { key: 'Enter' })
-    expect(submit).toHaveBeenCalledWith(false)
+    expect(submit).toHaveBeenCalledWith(false, expect.objectContaining({ type: 'keydown', isTrusted: false }))
     fireEvent.keyDown(root, { key: 'Enter', metaKey: true })
-    expect(submit).toHaveBeenCalledWith(true)
+    expect(submit).toHaveBeenCalledWith(true, expect.objectContaining({ type: 'keydown', isTrusted: false }))
   })
 
   it.each([

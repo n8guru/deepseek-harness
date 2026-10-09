@@ -2805,6 +2805,32 @@ describe('Client Typert API', () => {
 })
 
 describe('Remote stream client carrier lifecycle', () => {
+  it('sends ephemeral activity synchronously and refuses retained senders after cancel or reconnect', async () => {
+    await withFakeWebSocket('https://harness.example', async () => {
+      const client = new RemoteStreamMuxClient()
+      client.start()
+      const abort = new AbortController()
+      let send: ((value: unknown) => boolean) | undefined
+      const iterator = client.open('session.operatorActivity', { version: 1, sessionId: 'one' },
+        abort.signal, undefined, (writable) => { send = writable })
+      const next = iterator.next().catch(() => undefined)
+      await vi.waitFor(() => { expect(send).toBeDefined() })
+      const first = FakeWebSocket.sockets[0]!
+      expect(send?.({ interaction: 'input' })).toBe(true)
+      // No microtask/await is needed for an ephemeral gesture to reach its captured socket.
+      expect(first.sent.map(text => JSON.parse(text).type)).toEqual(['open', 'item'])
+      abort.abort()
+      expect(send?.({ interaction: 'submit' })).toBe(false)
+      await next
+      client.reconnect()
+      expect(send?.({ interaction: 'stop' })).toBe(false)
+      await vi.waitFor(() => { expect(FakeWebSocket.sockets).toHaveLength(2) })
+      expect(FakeWebSocket.sockets[1]!.sent).toEqual([])
+      await client.close()
+      expect(send?.({ interaction: 'input' })).toBe(false)
+    })
+  })
+
   it('does not pull another uplink item when sending ends the stream', async () => {
     await withFakeWebSocket('https://harness.example', async () => {
       const client = new RemoteStreamMuxClient()

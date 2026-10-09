@@ -29,8 +29,8 @@ function mount() {
 it('runs fixed handlers after local ownership and preserves their consumption for application dispatch', () => {
   const { input, dispatch, fixed } = mount()
   input.addEventListener('keydown', (event) => { event.preventDefault() }, { once: true })
-  press(input)
-  expect(fixed.mock.lastCall?.[0]).toMatchObject({ type: 'keydown', gesture: { defaultPrevented: true } })
+  const original = press(input)
+  expect(fixed.mock.lastCall?.[0]).toMatchObject({ type: 'keydown', event: original, gesture: { defaultPrevented: true } })
   fixed.mockImplementation((event) => { if (event.type === 'keydown') event.consume() })
   expect(press(input).defaultPrevented).toBe(true)
   expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ defaultPrevented: true }), expect.anything(), expect.any(Function))

@@ -19,6 +19,7 @@ interface DraftViewGate {
   showToast: (text: string) => void
   t: ComposerBarProps['t']
   canAcceptDrop: boolean
+  recordSubmit?: (event: Event, source: ComposerKeyboard) => void
 }
 
 /**
@@ -116,7 +117,7 @@ export function installDraftKeymap(
     },
     dismissPopup: () => { keyboard.dismissPopup() },
     canSubmit: () => !gate.current.locked && !gate.current.machineBusy,
-    submit: (accelerated) => {
+    submit: (accelerated, event) => {
       const g = gate.current
       // Empty-draft accelerated Enter acts on the queue instead of the
       // (empty) draft: the machine rejects empty drafts, so the gesture
@@ -129,6 +130,7 @@ export function installDraftKeymap(
         g.showToast(g.t('file.stillUploading'))
         return
       }
+      if (event != null) g.recordSubmit?.(event, keyboard)
       keyboard.submit(resolveSubmitMode(
         g.busyEnter,
         g.running,

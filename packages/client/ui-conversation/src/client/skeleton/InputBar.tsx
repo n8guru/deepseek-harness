@@ -45,7 +45,7 @@ export type InputBarProps = ComposerBarProps
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
   retryFileUpload,
-  toggleCommandMenu, stop, t,
+  toggleCommandMenu, stop, t, operatorActivity,
   renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
@@ -127,6 +127,18 @@ export const InputBar = memo(function InputBar({
   }, [])
   const cardRef = useRef<HTMLDivElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const root = cardRef.current?.closest<HTMLElement>('[data-conversation-session]')
+    if (sessionId === undefined || root == null) return
+    return operatorActivity?.mount(sessionId, root)
+  }, [sessionId, operatorActivity])
+  const recordSubmit = (event: Event, source = keyboard): void => {
+    // A prior editor's passive-effect keymap must not qualify the newly rendered session.
+    if (source === keyboard && sessionId !== undefined && !empty) operatorActivity?.record(sessionId, event, 'submit')
+  }
+  const recordStop = (event: Event): void => {
+    if (sessionId !== undefined) operatorActivity?.record(sessionId, event, 'stop')
+  }
 
   // A continuable child without its live parent cannot accept human input,
   // but its independent Stop below stays available while it runs.
@@ -246,11 +258,11 @@ export const InputBar = memo(function InputBar({
   // registration survives re-renders without re-arming per keystroke.
   const gate = useRef({
     locked, machineBusy, canSteerQueue, running, steeringAvailable, busyEnter,
-    intakeFiles, uploadsPending, showToast, t, canAcceptDrop,
+    intakeFiles, uploadsPending, showToast, t, canAcceptDrop, recordSubmit,
   })
   gate.current = {
     locked, machineBusy, canSteerQueue, running, steeringAvailable, busyEnter,
-    intakeFiles, uploadsPending, showToast, t, canAcceptDrop,
+    intakeFiles, uploadsPending, showToast, t, canAcceptDrop, recordSubmit,
   }
 
   useEffect(() => {
@@ -311,14 +323,18 @@ export const InputBar = memo(function InputBar({
     : running && steeringAvailable && !disabled && !uploadsPending && plainMessageDraft
       ? t(primarySubmitMode === 'steer' ? 'input.send.steer' : 'input.send.queue')
       : t('input.send')
-  const onPrimary = (): void => {
+  const onPrimary = (event: MouseEvent<HTMLButtonElement>): void => {
     if (primaryStops) {
+      recordStop(event.nativeEvent)
       stop?.()
       return
     }
     if (keyboard === undefined) return // absent machine: the button is disabled
     /* v8 ignore next -- defensive: the primary button is disabled for empty, disabled, and pending-upload states. */
-    if (!empty && !disabled && !machineBusy && !uploadsPending) keyboard.submit(primarySubmitMode, 'click')
+    if (!empty && !disabled && !machineBusy && !uploadsPending) {
+      recordSubmit(event.nativeEvent)
+      keyboard.submit(primarySubmitMode, 'click')
+    }
   }
 
   // Claim ghost hint: rendered by CSS as generated content after the last
@@ -465,7 +481,7 @@ export const InputBar = memo(function InputBar({
                   aria-label={t('input.stop')}
                   disabled={stop === undefined}
                   onMouseDown={keepFocus}
-                  onClick={stop}
+                  onClick={(event) => { recordStop(event.nativeEvent); stop?.() }}
                 >
                   <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
                     <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />

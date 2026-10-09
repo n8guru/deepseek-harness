@@ -46,8 +46,9 @@ async function bench() {
     const scoped = runtime.sessions.scope(sessionId)!.get('conversation') as ConversationController
     void scoped.cancel()
   }
+  const recordStop = vi.fn()
   const dispose = installStopShortcut(shortcuts, runtime.sessions,
-    binding => conversation.binding(binding).openTurn, runtime.ctx.uiSession, stop)
+    binding => conversation.binding(binding).openTurn, runtime.ctx.uiSession, stop, recordStop)
   disposers.push(dispose)
   const root = document.createElement('div')
   root.dataset.conversationSession = 's1'
@@ -58,19 +59,33 @@ async function bench() {
   root.append(input)
   input.focus()
   const press = (overrides: Partial<ShortcutGesture> = {}, target: Element = input,
-    context: Partial<ShortcutContext> = {}) => {
+    context: Partial<ShortcutContext> = {}, event?: KeyboardEvent) => {
     const consume = vi.fn()
-    listener?.({ type: 'keydown', gesture: { code: 'Escape', control: false, alt: false, shift: false,
+    listener?.({ type: 'keydown', ...(event === undefined ? {} : { event }), gesture: { code: 'Escape', control: false, alt: false, shift: false,
       meta: false, repeat: false, composing: false, defaultPrevented: false, ...overrides },
     context: { region: 'editable', modal: null, target, ...context }, consume })
     return consume
   }
-  return { runtime, cancel, input, root, press, dispose,
+  return { runtime, cancel, recordStop, input, root, press, dispose,
     reset: () => listener?.({ type: 'reset' }),
     events: reference.binding.eventSource as MutableSessionEventSource }
 }
 
 describe('fixed stop routing', () => {
+  it('passes only the cancelling press original event before Stop and never invents one for programmatic input', async () => {
+    const b = await bench()
+    const first = new KeyboardEvent('keydown', { key: 'Escape' })
+    const second = new KeyboardEvent('keydown', { key: 'Escape' })
+    b.press({}, b.input, {}, first)
+    expect(b.recordStop).not.toHaveBeenCalled()
+    b.press({}, b.input, {}, second)
+    expect(b.recordStop).toHaveBeenCalledExactlyOnceWith('s1', second)
+    expect(b.recordStop.mock.invocationCallOrder[0]).toBeLessThan(b.cancel.mock.invocationCallOrder[0]!)
+    b.press()
+    b.press()
+    expect(b.recordStop).toHaveBeenCalledOnce()
+  })
+
   it('cancels through the scoped ConversationController only after two eligible Escapes', async () => {
     const b = await bench()
     expect(b.press()).toHaveBeenCalledOnce()

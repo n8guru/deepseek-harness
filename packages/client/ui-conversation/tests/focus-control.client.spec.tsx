@@ -5,6 +5,19 @@ import { FocusControl, type FocusOperation } from '../src/client/queue/FocusCont
 
 afterEach(() => { cleanup(); sessionStorage.clear() })
 
+it('passes the original control event before async operation and never records inspection', async () => {
+  const operation = vi.fn<FocusOperation>().mockResolvedValue({ enabled: false, queued: 1 })
+  const recordActivity = vi.fn()
+  const screen = render(<FocusControl sessionId="one" operation={operation} revision={0} running={false}
+    notify={vi.fn()} recordActivity={recordActivity} />)
+  await waitFor(() => { expect(screen.getByRole('status').textContent).toBe('1 held') })
+  expect(recordActivity).not.toHaveBeenCalled()
+  const event = new MouseEvent('click', { bubbles: true })
+  fireEvent(screen.getByText('Focus off'), event)
+  expect(recordActivity).toHaveBeenCalledExactlyOnceWith(event)
+  expect(recordActivity.mock.invocationCallOrder[0]).toBeLessThan(operation.mock.invocationCallOrder[1]!)
+})
+
 it('shows authoritative state and forbids Check during foreground work', async () => {
   const operation = vi.fn<FocusOperation>().mockResolvedValue({ enabled: true, queued: 2 })
   const props = { sessionId: 'one', operation, revision: 1, running: true, notify: vi.fn() }

@@ -13,6 +13,7 @@ import { StopSequence } from './stop-sequence.ts'
  * @param openTurn - stable current-turn source for a live Session binding.
  * @param uiSession - current pending-interaction status.
  * @param cancel - scoped stop operation that preserves Queue and reports failures.
+ * @param recordStop - optional synchronous DOM diagnostic before cancellation; never receives reconstructed gestures.
  * @returns disposer releasing the input subscription, pending watches and expiry timer.
  */
 export function installStopShortcut(
@@ -21,6 +22,7 @@ export function installStopShortcut(
   openTurn: (binding: SessionBinding) => ObservableSnapshot<number | undefined>,
   uiSession: UiSession,
   cancel: (sessionId: SessionId) => void,
+  recordStop?: (sessionId: SessionId, event: KeyboardEvent) => void,
 ): () => void {
   let unwatch = (): void => {}
   const sequence = new StopSequence(shortcuts.stopSequenceMs, () => {
@@ -53,7 +55,10 @@ export function installStopShortcut(
     const turn = currentTurn()
     if (turn === undefined) { reset(); return }
     input.consume()
-    const stopped = sequence.press({ sessionId, turn, generation: binding, region, cancel: () => { cancel(sessionId) } })
+    const stopped = sequence.press({ sessionId, turn, generation: binding, region, cancel: () => {
+      if (input.event !== undefined) recordStop?.(sessionId, input.event)
+      cancel(sessionId)
+    } })
     if (stopped) return
     const changed = (): void => {
       if (sessions.binding(sessionId) !== binding || currentTurn() !== turn) reset()

@@ -87,7 +87,7 @@ export function installKeyboard(window: Window, shortcuts: Pick<ShortcutRegistry
       event.preventDefault()
       if (commandDeadKey) deadKey = false
     }
-    fixed?.({ type: 'keydown', gesture, context, consume })
+    fixed?.({ type: 'keydown', event, gesture, context, consume })
     if (native) return
     shortcuts.dispatch({ ...gesture, composing: guarded || (isDead && !commandDeadKey),
       defaultPrevented: event.defaultPrevented }, context, consume)

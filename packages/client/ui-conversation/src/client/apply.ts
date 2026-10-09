@@ -254,6 +254,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     }
     scope.effect(() => installStopShortcut(
       scope.shortcuts, sessions, binding => uiConversation.binding(binding).openTurn, ctx.uiSession, stop,
+      (sessionId, event) => { ctx.get('remote')?.$operatorActivity?.record(sessionId, event, 'stop') },
     ), 'ui-conversation: fixed stop input')
     scope.effect(() => {
       const command: ShortcutFixedCommand = {
@@ -456,6 +457,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       const inputTriggers = inputHub.inputTriggers(sessionId)
       const bridge = hostPathBridge()
       return {
+        operatorActivity: ctx.get('remote')?.$operatorActivity,
         keyboard: shell,
         addFiles: (files, directories = new Set()) => {
           if (sessions.binding(sessionId) === undefined) return t('file.sessionUnavailable')

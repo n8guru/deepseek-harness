@@ -1,0 +1,139 @@
+conductor-relay step75 — trusted GUI activity source checkpoint
+Parent task142801 attempt1; source-only delegate; 2026-10-09.
+Baseline branch agents/forge/conductor-activity-snapshot @075cc42803.
+Source-only candidate for native publication and done_unverified review; uninstalled.
+No independent review or step70/full-system acceptance is asserted.
+
+IMPLEMENTATION
+- Gateway-owned GuiOperatorActivity uses existing session.operatorActivity mux.
+  Trusted DOM events must be in dispatch, in a visible focused exact-session
+  occurrence. No draft text, keystrokes, client timestamps or credentials are sent.
+- The opening server binding epoch and local connection generation are captured;
+  synchronous sends target that exact physical socket/logical stream. No gesture
+  queue, reconnect replay or pre-handshake replay exists.
+- InputBar mounts/withdraws its occurrence; real keyboard/pointer/input, Enter/click
+  submit, Focus/Check and Stop handlers pass original events before async work.
+  Double-Escape forwards only the cancelling press event, not gesture labels.
+  A prior editor keymap cannot qualify a newly rendered session.
+- Blur, focus leaving the occurrence, document hidden, view hiding, session switch,
+  connection loss and disposal send scoped leave when writable and cancel binding.
+  Opening, focus restoration, reconnect and heartbeat never count as interaction.
+- Generic sendSession/session.prompt/composer APIs are unchanged. Stop recording
+  invokes no release/hold-clear operation. No native control/persistence/admission
+  source was changed; eligible:false and activityGated409 remain unchanged.
+
+EVIDENCE (commands executed in native-focus-contract)
+1. pnpm exec vitest run packages/client/ui-conversation/tests
+   packages/client/shortcuts/tests packages/api/gateway/tests
+   packages/client/connection/tests/focus-transport.host.spec.ts
+   packages/core/agent-loop/tests/focus-native.spec.ts
+   PASS:63 files/1017 tests. Added event-order assertions subsequently passed in
+   focused reruns (Stop18, Focus4, Gateway132, activity adapter2;156 total).
+2. xvfb-run -a env DSH_ACTIVITY_HEADED=1 pnpm exec vitest run
+   --config vitest.web.config.ts apps/web/tests/operator-activity.e2e.ts
+   PASS:1 real Chromium test, including final relocated fixture/cleanup edits.
+   Built shipped InputBar + Lexical + FocusControl + actual mux adapter, with
+   authenticated native HTTP/WS and native Agent/JSONL/keyless model owner.
+   Asserts server epoch/time, genuine input/Enter/click/Focus/Stop, synthetic and
+   generic-submission negatives, delayed-event replay rejection, wrong-session,
+   hidden view, real background-tab focus loss, heartbeat-only non-refresh,
+   reconnect epoch replacement and deferred submit completed after session switch.
+   Confirms eligible:false, Focus remains enabled after Stop, gated409, unchanged
+   durable sequence on gated refusal, and zero model requests from activity.
+   Headless command without xvfb/DSH_ACTIVITY_HEADED also passed. Its background
+   hasFocus is explicitly emulated; the headed run uses real tab focus with
+   Playwright's focus emulation disabled.
+3. pnpm exec tsc -b packages/api/gateway/tsconfig.host.json
+   packages/api/gateway/tsconfig.client.json
+   packages/client/shortcuts/tsconfig.client.json
+   packages/client/ui-conversation/tsconfig.client.json
+   PASS. Also tsc -b apps/web/tsconfig.json, and both root test aggregates:
+   pnpm exec tsc -p tsconfig.host.json --noEmit
+   pnpm exec tsc -p tsconfig.client.json --noEmit — PASS.
+4. Final adapter/Focus cleanup rerun:2 files/6 tests PASS.
+5. Three edited bilingual README pairs recorded and verified consistent.
+   git diff --check PASS; no diff in Connection, agent-loop or goal owners.
+
+RESOLVED ITERATION FAILURES
+- Added Gateway client file to explicit tsconfig files; fixed optional-property
+  typing and removed only untracked compiler-generated source twins.
+- Updated keymap spy expectations for the original DOM event parameter.
+- Browser fixture needed explicit production JSX settings and UTF-8 headers.
+  Playwright's focus emulation masked real background loss; headed test now
+  disables it, and headed mode is explicit, never inferred from ambient DISPLAY.
+- Moved browser fixture under client tests to avoid cross-project emit rewriting;
+  registered e2e in Host aggregate and excluded it from apps/web Client program.
+- Client test aggregate caught geometry casts and unused React import; fixed
+  without unknown casts, then reran successfully.
+
+LIMITS
+Trusted-GUI report, not compromised-browser/biological-presence attestation.
+The browser test assembles shipped components and actual native transport but is
+not the full shipped Loader/profile qualification (later assembled step owns it).
+Browser submit/Stop business sinks are fixture counters; existing native transport
+regressions exercise generic native prompt behavior. Native Stop/goal authority,
+durable gated receipts, final admission/claim/model-entry checks and full A01-A22
+qualification remain steps76+. Alternate carriers intentionally have no adapter.
+No installs, server replacement, service restart, scheduler, commits, pushes,
+production hold release, queue/completion/ledger or lease calls were performed.
+
+PARENT INSPECTION / BROAD DOCUMENTATION GATE
+Parent inspected actual Gateway composition, physical-socket immediate-send fence,
+GUI Enter/click/Focus/Stop wiring, adapter lifecycle and Chromium fixture. The
+read-only baseline advisory found six event/lifetime risks; the implementation
+addresses them through original-event forwarding, pre-await recording, click-only
+Focus qualification, cancelling-Escape identity and nonbuffered socket fencing.
+This is producer inspection, not independent verification.
+
+Parent ran pnpm run doc-sync:29 gates passed and14 failed. Broad catalog/type/
+persistence/reference gates are not clean on this continuation. The reported
+export-JSDoc list had one newly introduced missing OperatorInteraction comment;
+that comment was fixed. Focused verify-export-jsdoc rerun reports38 remaining
+violations, all naming unchanged native files; the new adapter finding is gone.
+Translation/Agent Note/concrete-term failures include the unchanged reviewed
+activity specification and prior transport checkpoint. Generated catalogs were
+not broadly regenerated in this GUI-only step. Full doc-sync is NOT claimed
+passing; independent review must retain this limitation. Parent log:
+/tmp/task142801-doc-sync.log. Focused tests/typechecks above are passing evidence.
+No runtime admission/Stop/goal/persistence files differ from baseline075cc42803.
+Initial normal pre-commit refused two new QueueDock line lengths and an inherited
+crypto.randomUUID call in the touched FocusControl. Wrapped JSX/parameters and
+used the already-declared dsh-util-crypto randomUUID helper (no dependency added).
+Parent reran FocusControl + QueueDock tests:2 files/39 tests PASS. Hook formatting
+changes were inspected; no hook was bypassed.
+
+EXACT CHANGED FILES (relative to native-focus-contract)
+.agents/evidence/conductor-gui-activity-step75.txt
+apps/web/tests/operator-activity.e2e.ts
+apps/web/tsconfig.json
+tsconfig.host.json
+packages/api/gateway/src/client/operator-activity.ts
+packages/api/gateway/src/client/index.ts
+packages/api/gateway/src/client/stream-client.ts
+packages/api/gateway/tsconfig.client.json
+packages/api/gateway/tests/operator-activity.client.spec.ts
+packages/api/gateway/tests/gateway.client.spec.ts
+packages/api/gateway/README.md
+packages/api/gateway/README.zh.md
+packages/api/gateway/README.i18n.yaml
+packages/client/shortcuts/src/client/dom.ts
+packages/client/shortcuts/src/client/types.ts
+packages/client/shortcuts/tests/fixed-input.client.spec.ts
+packages/client/shortcuts/README.md
+packages/client/shortcuts/README.zh.md
+packages/client/shortcuts/README.i18n.yaml
+packages/client/ui-conversation/src/client/apply.ts
+packages/client/ui-conversation/src/client/contract/slots.ts
+packages/client/ui-conversation/src/client/input/editor/keymap.ts
+packages/client/ui-conversation/src/client/input/editor/view-binding.ts
+packages/client/ui-conversation/src/client/queue/FocusControl.tsx
+packages/client/ui-conversation/src/client/queue/QueueDock.tsx
+packages/client/ui-conversation/src/client/skeleton/InputBar.tsx
+packages/client/ui-conversation/src/client/stop-shortcut.ts
+packages/client/ui-conversation/tests/browser/operator-activity.client.tsx
+packages/client/ui-conversation/tests/focus-control.client.spec.tsx
+packages/client/ui-conversation/tests/keymap-routing.client.spec.tsx
+packages/client/ui-conversation/tests/stop-shortcut.client.spec.ts
+packages/client/ui-conversation/README.md
+packages/client/ui-conversation/README.zh.md
+packages/client/ui-conversation/README.i18n.yaml

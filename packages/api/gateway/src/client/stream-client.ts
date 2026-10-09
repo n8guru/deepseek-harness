@@ -94,6 +94,7 @@ export class RemoteStreamMuxClient {
    * @param signal - cancellation for this logical stream.
    * @param uplink - the Client's items: each is sent as an `item` frame, its end as `end`; its `return()`
    * runs when the stream finishes, and its failure cancels the stream and fails the downlink.
+   * @param onWritable - optional immediate sender, fenced to this logical stream and physical socket; never buffers.
    * @returns Host items until completion, cancellation, or failure.
    */
   async *open(
@@ -101,6 +102,7 @@ export class RemoteStreamMuxClient {
     payload: unknown,
     signal: AbortSignal,
     uplink?: AsyncIterable<unknown>,
+    onWritable?: (send: (value: unknown) => boolean) => void,
   ): AsyncGenerator {
     signal.throwIfAborted()
     const streamId = randomUUID()
@@ -118,6 +120,13 @@ export class RemoteStreamMuxClient {
       this.streams.set(streamId, stream)
       this.send(socket, { type: 'open', streamId, endpoint, payload })
       opened = true
+      // Ephemeral GUI gestures must send on this socket now, never queue for a replacement.
+      onWritable?.((value) => {
+        if (signal.aborted || this.socket !== socket || socket.readyState !== WebSocket.OPEN
+          || this.streams.get(streamId) !== stream) return false
+        this.send(socket, { type: 'item', streamId, value })
+        return true
+      })
       if (uplink !== undefined) stream.pump = this.pumpUplink(socket, streamId, uplink, signal, inbox)
       while (true) {
         const frame = await inbox.next()
