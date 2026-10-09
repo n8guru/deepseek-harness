@@ -1,0 +1,706 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "operator-activity/v1 proposed wire shapes",
+  "description": "Specification only. Select the named $defs at each boundary; semantic time, provenance, revision and ordered custody invariants are normative in the companion proposal.",
+  "$defs": {
+    "activityRead": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "action": {
+          "const": "activity"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "version",
+        "action",
+        "sessionId"
+      ]
+    },
+    "activityOpen": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "version",
+        "sessionId"
+      ]
+    },
+    "activityOpened": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "bindingEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "version",
+        "bindingEpoch"
+      ]
+    },
+    "activityFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "bindingEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "interaction": {
+          "enum": [
+            "input",
+            "submit",
+            "focus-control",
+            "stop",
+            "leave"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "bindingEpoch",
+        "sequence",
+        "interaction"
+      ]
+    },
+    "guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "hostEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "bindingEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "activityRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "controlRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "version",
+        "hostEpoch",
+        "bindingEpoch",
+        "activityRevision",
+        "controlRevision"
+      ]
+    },
+    "goal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "enum": [
+                "none",
+                "unknown"
+              ]
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "present"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "phase": {
+              "enum": [
+                "active",
+                "paused",
+                "blocked",
+                "complete"
+              ]
+            },
+            "activation": {
+              "enum": [
+                "armed",
+                "disarmed"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "id",
+            "revision",
+            "phase",
+            "activation"
+          ]
+        }
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindingEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "principalClass": {
+          "const": "authenticated-operator-gui"
+        }
+      },
+      "required": [
+        "bindingEpoch",
+        "principalClass"
+      ]
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "operator-activity/v1"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "hostEpoch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "activityRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "controlRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lastActivityAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activityAgeMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idleThresholdMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000,
+          "default": 300000
+        },
+        "snapshotTtlMs": {
+          "const": 5000
+        },
+        "state": {
+          "enum": [
+            "active",
+            "idle",
+            "stale",
+            "unknown"
+          ]
+        },
+        "binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop": { "enum": ["clear", "stopped", "unknown"] },
+        "focus": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "unknown"
+          ]
+        },
+        "goal": {
+          "$ref": "#/$defs/goal"
+        },
+        "hostAdmission": {
+          "enum": [
+            "open",
+            "closed",
+            "unknown"
+          ]
+        },
+        "foregroundBusy": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "holdReasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "stop-stopped",
+              "stop-unknown",
+              "activity-unknown",
+              "activity-stale",
+              "activity-idle",
+              "focus-enabled",
+              "focus-unknown",
+              "goal-unknown",
+              "goal-paused",
+              "goal-blocked",
+              "goal-disarmed",
+              "admission-closed",
+              "admission-unknown",
+              "foreground-busy",
+              "foreground-unknown"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "sessionId",
+        "hostEpoch",
+        "activityRevision",
+        "controlRevision",
+        "observedAt",
+        "lastActivityAt",
+        "activityAgeMs",
+        "idleThresholdMs",
+        "snapshotTtlMs",
+        "state",
+        "binding",
+        "stop",
+        "focus",
+        "goal",
+        "hostAdmission",
+        "foregroundBusy",
+        "eligible",
+        "holdReasons"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "active",
+                  "idle"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "binding": {
+                "$ref": "#/$defs/binding"
+              },
+              "lastActivityAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "activityAgeMs": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "eligible": {
+                "const": true
+              }
+            },
+            "required": [
+              "eligible"
+            ]
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "active"
+              },
+              "stop": { "const": "clear" },
+              "focus": {
+                "const": "disabled"
+              },
+              "hostAdmission": {
+                "const": "open"
+              },
+              "foregroundBusy": {
+                "const": false
+              },
+              "holdReasons": {
+                "maxItems": 0
+              },
+              "goal": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "state": {
+                        "const": "none"
+                      }
+                    },
+                    "required": [
+                      "state"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "state": {
+                        "const": "present"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "phase": {
+                        "const": "complete"
+                      },
+                      "activation": {
+                        "enum": [
+                          "armed",
+                          "disarmed"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "id",
+                      "revision",
+                      "phase",
+                      "activation"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "state": {
+                        "const": "present"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "phase": {
+                        "const": "active"
+                      },
+                      "activation": {
+                        "const": "armed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "id",
+                      "revision",
+                      "phase",
+                      "activation"
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "holdReasons": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200000
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "urgency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "safety",
+                "security",
+                "deadline"
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ]
+        }
+      },
+      "required": [
+        "sequence",
+        "text"
+      ]
+    },
+    "guardedAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "activityGuard": {
+          "$ref": "#/$defs/guard"
+        }
+      },
+      "required": [
+        "sessionId",
+        "items",
+        "activityGuard"
+      ]
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "duplicate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sequence",
+        "messageId",
+        "duplicate"
+      ]
+    },
+    "admissionAck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "const": true
+        },
+        "origin": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "receipts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/receipt"
+          }
+        },
+        "focus": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "queued": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "enabled",
+            "queued"
+          ]
+        },
+        "delivery": {
+          "enum": [
+            "held",
+            "eligible"
+          ]
+        },
+        "activity": {
+          "$ref": "#/$defs/snapshot"
+        }
+      },
+      "required": [
+        "accepted",
+        "origin",
+        "receipts",
+        "focus",
+        "delivery",
+        "activity"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/activityRead"
+    },
+    {
+      "$ref": "#/$defs/activityOpen"
+    },
+    {
+      "$ref": "#/$defs/activityOpened"
+    },
+    {
+      "$ref": "#/$defs/activityFrame"
+    },
+    {
+      "$ref": "#/$defs/snapshot"
+    },
+    {
+      "$ref": "#/$defs/guardedAdmission"
+    },
+    {
+      "$ref": "#/$defs/admissionAck"
+    }
+  ]
+}
