@@ -1,0 +1,132 @@
+/* One sheet for the dock feature's two components: the overlay panel and the
+   session-header toggle share the feature's metrics and tokens. Every
+   `--dsw-*` name here is asserted against the theme sheets by
+   tests/styles.client.spec.ts — an undeclared token drops its whole
+   declaration silently. */
+
+/* The panel sits in the frame-wide overlay layer, which is click-through and
+   grants pointer events to its direct children — this element. It is pinned to
+   the frame's right edge and is therefore outside every column's scroll
+   container, so transcript scrolling cannot move it. */
+.panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 45vw);
+  border-left: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.title {
+  flex: none;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.bound {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.field {
+  flex: none;
+  box-sizing: border-box;
+  width: 88px;
+  min-height: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: var(--dsw-specific-input-major);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+
+.action {
+  flex: none;
+  min-height: 26px;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.action:hover,
+.action:focus-visible {
+  border-color: var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The iframe owns its own scroll region: the Stage page is a board, not a
+   document, and it never participates in the transcript's scrolling. */
+.frame {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.empty {
+  flex: 1;
+  min-height: 0;
+  padding: 16px 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* ── the session-header toggle ───────────────────────────────────────────── */
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.toggle:hover,
+.toggle:focus-visible {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.toggleOn {
+  background: var(--dsw-alias-interactive-bg-active);
+  color: var(--dsw-alias-label-primary);
+}
