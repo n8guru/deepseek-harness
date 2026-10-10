@@ -45,7 +45,7 @@ const marksUnit = (stateVersion = 1): ProjectionDefinition<'cache-test/marks', M
 })
 
 /** A persistence double serving readFrom over a fixed per-id stored log (headers stamp createdAt 0). */
-function fakePersistence(logs: Map<string, SessionEvent[]>) {
+function fakePersistence(logs: Map<string, SessionEvent[]>, listed?: string[]) {
   const readFrom = vi.fn(async (id: SessionId, fromSeq: number) => {
     const events = logs.get(String(id))
     if (events === undefined) throw new Error(`session "${id}" not found`)
@@ -54,7 +54,9 @@ function fakePersistence(logs: Map<string, SessionEvent[]>) {
       events: events.filter(event => event.seq >= fromSeq),
     }
   })
-  return { readFrom }
+  // `list` exists only when a test states what the store holds (the orphan sweep needs it).
+  const list = vi.fn(async () => (listed ?? []).map(id => headerOf(SessionId(id))))
+  return listed === undefined ? { readFrom } : { readFrom, list }
 }
 
 /** Header shape for cachedSnapshot calls (fake logs stamp createdAt 0, no cwd). */
@@ -66,6 +68,8 @@ interface HarnessOptions {
   config?: { writeEveryEvents: number; writeIntervalMs: number }
   stateVersion?: number
   logs?: Map<string, SessionEvent[]>
+  /** Ids the persistence double lists; omitted = no `list` (the boot sweep fails soft). */
+  listed?: string[]
 }
 
 const contexts: Context[] = []
@@ -83,7 +87,7 @@ async function harness(options: HarnessOptions = {}) {
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   ctx.sessionProjections.register(marksUnit(options.stateVersion))
-  const persistence = fakePersistence(logs)
+  const persistence = fakePersistence(logs, options.listed)
   ctx.provide('sessionPersistence', persistence as never)
   const fiber = await ctx.plugin(SessionProjectionCache, options.config ?? { writeEveryEvents: 100, writeIntervalMs: 60_000 })
   return { ctx, pool, logs, fiber, persistence, cache: ctx.sessionProjectionCache }
@@ -383,5 +387,54 @@ describe('SessionProjectionCache cold read', () => {
     await expect(ctx.sessionProjectionCache.coldSnapshot(SessionId('absent'))).rejects.toThrow('not found')
     await expect(ctx.sessionProjectionCache.coldSnapshot(SessionId('bare')))
       .resolves.toEqual({ asOfSeq: 2, values: {} })
+  })
+})
+
+describe('SessionProjectionCache orphan sweep', () => {
+  const seedRows = (pool: MemoryMediaPool, ids: string[]): void => {
+    pool.versions.set('session_projcache', 3)
+    const row = { identity: { createdAt: 0 }, rows: { 'cache-test/marks': { ver: 1, seq: 1, val: { marks: [] } } } }
+    pool.media.set('session_projcache', {
+      tables: new Map([['sessions', new Map(ids.map(id => [id, row]))]]),
+      global: null,
+    })
+  }
+  const storedIds = (pool: MemoryMediaPool) => [...pool.media.get('session_projcache')?.tables.get('sessions')?.keys() ?? []]
+
+  it('deletes rows whose session is neither stored nor live, at boot', async () => {
+    const pool = new MemoryMediaPool()
+    seedRows(pool, ['kept', 'gone-1', 'gone-2'])
+    await harness({ pool, listed: ['kept', 'other'] })
+    await settle()
+    await settle()
+    expect(storedIds(pool)).toEqual(['kept'])
+  })
+
+  it('keeps a live session even when the store does not list it yet', async () => {
+    const pool = new MemoryMediaPool()
+    const { ctx, cache } = await harness({ pool, listed: ['elsewhere'] })
+    const live = ctx.sessions.create(SessionId('live'))
+    endTurn(live)
+    await settle()
+    expect(storedIds(pool)).toEqual(['live'])
+    await expect(cache.sweep()).resolves.toBe(0)
+    expect(storedIds(pool)).toEqual(['live'])
+  })
+
+  it('treats an empty listing as an unavailable store and deletes nothing', async () => {
+    const pool = new MemoryMediaPool()
+    seedRows(pool, ['a', 'b'])
+    const { cache } = await harness({ pool, listed: [] })
+    await expect(cache.sweep()).resolves.toBe(0)
+    expect(storedIds(pool)).toEqual(['a', 'b'])
+  })
+
+  it('fails soft when the listing rejects: rows stay, boot is unaffected', async () => {
+    const pool = new MemoryMediaPool()
+    seedRows(pool, ['a'])
+    const { cache } = await harness({ pool }) // no list on the double
+    await settle()
+    expect(storedIds(pool)).toEqual(['a'])
+    await expect(cache.sweep()).rejects.toThrow()
   })
 })

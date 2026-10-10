@@ -15,6 +15,10 @@ export const UNGROUPED_KEY = ''
 /** Display label for the ungrouped bucket row. */
 export const UNGROUPED_LABEL = 'Ungrouped'
 
+/** Virtual sidebar account for session-backed delegated agents. */
+export const SUBAGENTS_KEY = 'dsh:subagents'
+export const SUBAGENTS_LABEL = 'Sub-agents'
+
 /** One top-level session row in a group or the flat list. */
 export interface SessionNode {
   id: SessionId
@@ -47,6 +51,8 @@ export interface GroupNode {
   label: string
   /** Total visible sessions in the group. */
   sessionCount: number
+  /** Running delegated sessions, shown on the virtual Sub-agents header. */
+  activeCount?: number
   expanded: boolean
   /** The group contains the selected session (active folder tint; supplied here so the renderer never scans). */
   containsCurrent: boolean
@@ -111,7 +117,7 @@ function byRecency(a: SessionSummary, b: SessionSummary): number {
 
 /**
  * Ordinary sessions are visible; among blank sessions, only the current one
- * is visible. Subagent children use their parent header catalog; archived
+ * is visible. Subagent children use their own virtual group; archived
  * sessions are visible nowhere, while their accounting slots remain so
  * unarchiving restores position.
  */
@@ -193,6 +199,15 @@ function groupByWorkspace(
       Date.parse(workspace.createdAt), workspace.title, members, 'account',
     ))
   }
+  const subagents = list.ids
+    .map(id => list.byId[id])
+    .filter((s): s is SessionSummary => s !== undefined && s.origin === 'subagent' && !archived.has(s.id))
+    .sort(byRecency)
+  const forgeIndex = groups.findIndex(group => group.label === 'Forge Agent OS')
+  if (subagents.length > 0 || forgeIndex !== -1) {
+    groups.splice(forgeIndex === -1 ? groups.length : forgeIndex + 1, 0,
+      buildGroup(SUBAGENTS_KEY, undefined, undefined, undefined, SUBAGENTS_LABEL, subagents, 'account'))
+  }
   const stray = list.ids
     .map(id => list.byId[id])
     .filter((s): s is SessionSummary =>
@@ -252,7 +267,9 @@ export function deriveGroups(
   const descendants = indexSubagentDescendants(list.byId)
   const currentGroup = list.current === undefined
     ? undefined
-    : (workspaces.find(w => w.sessionIds.includes(list.current as SessionId))?.workspaceId as string | undefined)
+    : list.byId[list.current]?.origin === 'subagent'
+      ? SUBAGENTS_KEY
+      : (workspaces.find(w => w.sessionIds.includes(list.current as SessionId))?.workspaceId as string | undefined)
         ?? UNGROUPED_KEY
   const groups: GroupNode[] = []
   for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
@@ -264,6 +281,7 @@ export function deriveGroups(
       createdAt: g.createdAt,
       label: g.label,
       sessionCount: g.sessions.length,
+      ...(g.key === SUBAGENTS_KEY ? { activeCount: g.sessions.filter(session => session.running).length } : {}),
       expanded,
       containsCurrent: g.key === currentGroup,
       sessions: expanded ? g.sessions.map(session => sessionNode(session, descendants)) : [],

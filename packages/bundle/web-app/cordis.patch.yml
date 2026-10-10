@@ -258,6 +258,11 @@
     - id: ui-jobs
       name: '@deepseek-ai/dsh-client-ui-jobs'
 
+    # Stage dock: the frame-wide overlay panel that iframes a bound Forage
+    # conversation stage, plus its session-header toggle.
+    - id: ui-stage-dock
+      name: '@deepseek-ai/dsh-client-ui-stage-dock'
+
     # Goal surface: GoalBar in the input dock over the goal session projection.
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'

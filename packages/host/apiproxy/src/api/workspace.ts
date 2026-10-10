@@ -90,6 +90,11 @@ export interface WorkspaceApi {
    * the workspace fails with `workspace-move-invalid`. A move to the current
    * position is a no-op success.
    */
+  attachSession(request: RpcRequest<{
+    workspaceId: WorkspaceId
+    sessionId: SessionId
+  }>): Promise<RpcResponse<{ workspace: WorkspaceView }>>
+
   insertSessionBefore(request: RpcRequest<{
     workspaceId: WorkspaceId
     sessionId: SessionId

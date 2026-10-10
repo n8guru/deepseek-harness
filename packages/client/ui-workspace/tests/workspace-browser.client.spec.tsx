@@ -357,6 +357,30 @@ describe('WorkspaceBrowser', () => {
     expect(screen.queryByText('gone-s')).toBeNull()
   })
 
+  it('shows active delegated sessions and archives only a finished child', () => {
+    const archiveSession = vi.fn(async () => {})
+    const running = { ...summary('working-child', 3), origin: 'subagent' as const, running: true }
+    const finished = { ...summary('finished-child', 2), origin: 'subagent' as const }
+    const b = mount({
+      useSessions: hook(sessionState([running, finished])),
+      useWorkspaces: hook(workspaceState([workspace('Forge Agent OS', [])])),
+      archiveSession,
+    })
+    expect(screen.getByText('Sub-agents')).toBeTruthy()
+    expect(screen.getByText('1 个运行中')).toBeTruthy()
+    fireEvent.click(screen.getByText('Sub-agents'))
+    expect(screen.getByText('working-child')).toBeTruthy()
+    expect(screen.getByText('finished-child')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '会话“working-child”的操作' }))
+    expect(screen.queryByRole('menuitem', { name: '归档会话' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '会话“finished-child”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档会话' }))
+    expect(archiveSession).toHaveBeenCalledWith(finished.id)
+    rerender(b, { useWorkspaces: hook(workspaceState([workspace('Forge Agent OS', [])], [finished.id])) })
+    expect(screen.queryByText('finished-child')).toBeNull()
+    expect(screen.getByText('working-child')).toBeTruthy()
+  })
+
   it('logs and keeps the tree when the archive call rejects', async () => {
     const rejection = new Error('archive exploded')
     const archiveSession = vi.fn(async () => { throw rejection })

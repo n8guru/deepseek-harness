@@ -2969,6 +2969,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         }
       },
 
+      async attachSession(request) {
+        const { payload } = request
+        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))
+        if (workspace === undefined) return workspaceNotFound(request, payload.workspaceId)
+        await workspace.attachSession(payload.sessionId)
+        return ok(request, { workspace: workspaceView(workspace) })
+      },
+
       async insertSessionBefore(request) {
         const { payload } = request
         const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(payload.workspaceId))

@@ -1,6 +1,7 @@
 // DSH host half: token-safe operator-card intake for the browser plugin.
 const name = 'dsh-operator-discuss'
-const inject = []
+// Wait for the HTTP carrier; loading before it must not silently lose intake.
+const inject = ['webServer']
 const DEFAULT_STUDIO_BASE = 'https://forage.ink'
 
 async function readStudioToken() {
@@ -86,8 +87,7 @@ function json(res, status, payload) {
 }
 
 function apply(ctx) {
-  const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : ctx.webServer
-  if (!webServer) return
+  const webServer = ctx.webServer
   ctx.effect(() => webServer.register({
     kind: 'exact',
     path: '/api/operator-discuss-card',
