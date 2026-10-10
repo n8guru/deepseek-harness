@@ -349,11 +349,14 @@ export class WorkerRun implements WorkflowRun {
   private async startChild(callId: number, request: ChildStartRequest): Promise<void> {
     let run: SubagentRun
     try {
+      const tableDefault = this.subagents.resolveModel()
       run = await this.subagents.start(this.provider, {
         prompt: [{ type: 'text', text: request.prompt }],
         parent: this.parent,
         signal: this.controller.signal,
         ...request.schema !== undefined ? { outputSchema: request.schema } : {},
+        // A script's explicit provider/model wins; otherwise the subagent-models table's
+        // `default` row (absent = inherit the parent's model).
         ...request.provider !== undefined || request.model !== undefined
           ? {
             agentOptions: {
@@ -361,7 +364,7 @@ export class WorkerRun implements WorkflowRun {
               ...request.model !== undefined ? { model: request.model } : {},
             },
           }
-          : {},
+          : tableDefault !== undefined ? { agentOptions: tableDefault } : {},
       })
     } catch (error: unknown) {
       const failure = this.childAdmissionFailure()

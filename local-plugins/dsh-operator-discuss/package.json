@@ -1,0 +1,30 @@
+{
+  "name": "dsh-operator-discuss",
+  "version": "0.1.0",
+  "description": "Routes Forage operator-card Discuss actions into full-capability DSH sessions",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": ["sessions", "connection"]
+    }
+  },
+  "scripts": {
+    "test": "node --test tests/plugin.test.mjs"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ]
+}

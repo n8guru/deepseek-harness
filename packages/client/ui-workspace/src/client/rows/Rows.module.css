@@ -232,6 +232,12 @@
   display: inline-flex;
 }
 
+/* A narrow chooser may have no current/recent workspace. Keep its native
+   workspace-scoped New Session action available without a hover gesture. */
+:global(html[data-dsh-orchestrator-chooser='true']) .projectRow .rowActions {
+  display: inline-flex;
+}
+
 .sessionRow:hover .time,
 .sessionRow.menuOpen .time {
   display: none;

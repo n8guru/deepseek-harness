@@ -20,6 +20,8 @@ Both target slots are declared by other plugins, so `apply` uses `slots.inject()
 
 The shared sidebar projection hides rows whose durable Session summary has `origin: 'subagent'`; users enter those conversations through the selected parent's subagent header catalog. Each visible ordinary row inherits the blue activity indicator while any descendant reached through uninterrupted subagent-origin lineage is running, and its hover and assistive text report the exact running-descendant count without describing an idle parent as running. Ordinary forks remain visible and terminate this aggregation because lineage alone does not set their origin. Pending user interaction outranks the session's own running state, and either remains the primary row status while descendant activity stays available as a separate hover and assistive status. With neither present, descendant activity outranks the green unviewed-completion reminder; the reminder returns once no descendant is running. The runtime keeps hidden rows available for conversation, title, and addressed transport state.
 
+In the explicitly opted-in orchestrator chooser, Workspace row actions remain visible without hover. The native **New session in {workspace}** action supplies an explicit Workspace even when no Session or recent Workspace is selected. The global New Session action retains its normal fallback; without any registered Workspace, use the native add flow or full DSH to choose a directory.
+
 ## Model Experience
 
 None, as the picker is browser chrome; nothing here reaches a model request.

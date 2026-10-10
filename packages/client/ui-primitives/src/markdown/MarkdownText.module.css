@@ -9,6 +9,12 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.spoken {
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-radius: 3px;
+  box-decoration-break: clone;
+}
+
 .markdown strong {
   font-weight: 600;
 }

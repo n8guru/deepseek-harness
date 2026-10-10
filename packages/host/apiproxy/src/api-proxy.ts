@@ -13,7 +13,7 @@ import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatu
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { contentHasImage, createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, contentHasImage, createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
@@ -321,6 +321,69 @@ async function buildModelCatalog(ctx: Context): Promise<{
   }
 }
 
+/** Find one positively-declared vision route, preferring the operator's configured route. */
+async function visionFallbackRoute(ctx: Context, preferred?: ModelSelection): Promise<ModelSelection | undefined> {
+  const candidates: ModelSelection[] = []
+  if (preferred !== undefined) candidates.push(preferred)
+  for (const provider of ctx.llm.listProviders()) {
+    try {
+      for (const model of await ctx.llm.listModels(provider.id)) {
+        candidates.push({ provider: provider.id, model: model.id })
+      }
+    } catch {
+      // One broken provider must not prevent another provider from supplying vision.
+    }
+  }
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const key = `${candidate.provider}\u0000${candidate.model}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    try {
+      const info = await ctx.llm.resolveModelInfo(candidate.provider, candidate.model)
+      if (info.inputModalities?.includes('image')) return candidate
+    } catch {
+      // Discovery is fail-soft; only an exact positive capability declaration wins.
+    }
+  }
+  return undefined
+}
+
+/** Describe uploaded images through a secondary vision route for a text-only primary model. */
+async function describeImagesForTextModel(
+  ctx: Context,
+  content: readonly ContentBlock[],
+  route: ModelSelection,
+  signal?: AbortSignal,
+): Promise<string> {
+  const images = content.filter((block): block is Extract<ContentBlock, { type: 'image' }> => block.type === 'image')
+  const assembler = new BlockAssembler()
+  const request = {
+    provider: route.provider,
+    model: route.model,
+    messages: [createUserMessage({
+      source: { kind: 'user' },
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Describe every attached image accurately for another model that cannot see images. Include visible text, people, objects, layout, colors, and details relevant to the user request. Be concise but complete; no preamble.',
+        },
+        ...images,
+      ],
+    })],
+    maxTokens: 1200,
+    ...signal === undefined ? {} : { signal },
+  }
+  for await (const chunk of ctx.llm.stream(request)) assembler.push(chunk)
+  const description = assembler.blocks()
+    .filter((block): block is Extract<ContentBlock, { type: 'text' | 'reasoning' }> => block.type === 'text' || block.type === 'reasoning')
+    .map(block => block.text.trim())
+    .filter(Boolean)
+    .join('\n')
+  if (description.length === 0) throw new Error('the vision fallback returned no description')
+  return description
+}
+
 /** Wrap an error result echoing the request's rpcId. */
 function err<T>(request: RpcRequest<unknown>, error: RpcError): RpcResponse<T> {
   return { rpcId: request.rpcId, result: { ok: false, error } }
@@ -612,6 +675,8 @@ export interface ApiProxyDefaults {
    * falls back to platform detection ({@link canOpenNativePath}).
    */
   canOpenPath?: () => boolean
+  /** Optional preferred cross-provider route used to describe images for text-only models. */
+  visionFallbackSelection?: () => ModelSelection | undefined
 }
 
 /** The tool/call payload fields the presenter path reads. */
@@ -1211,14 +1276,54 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   // restore that history under the old tool set.
   const agentFor = createApiRemoteAgentResolver(ctx, {
     agentOptions,
-    setup: async ({ meta, events }) =>
-      (await composeAgent(resolveSessionPreset({ header: meta, events }))).setup,
+    setup: async ({ meta, events }) => {
+      const composition = await composeAgent(resolveSessionPreset({ header: meta, events }))
+      const focusedContext = meta.focusedContext
+      if (focusedContext === undefined) return composition.setup
+      return async (agentCtx: Context): Promise<void> => {
+        await composition.setup(agentCtx)
+        const systemPrompt = agentCtx.get('systemPrompt')
+        if (systemPrompt === undefined) throw new Error('page-curator requires systemPrompt')
+        systemPrompt.section({
+          name: 'page-curator:focused-context', order: 5,
+          text: buildPageCuratorPreamble(focusedContext),
+        })
+      }
+    },
   })
 
   /** Send one transient frame to every connected mux consumer. */
   function broadcast(payload: MuxFrame): void {
     const envelope = frame(payload)
     for (const queue of muxQueues) queue.push(envelope)
+  }
+
+  /**
+   * Last-activity-wins record of which client surface the human is on, per
+   * session. Deliberately in-memory and unlogged: presence is ephemeral, and
+   * a durable event per keystroke would pollute session history forever.
+   * Re-publishing the same client is coalesced so a stream of keystrokes does
+   * not flood every connected consumer.
+   */
+  const activeClients = new Map<string, { clientId: string; clientLabel: string | undefined; at: number }>()
+  const ACTIVE_CLIENT_COALESCE_MS = 5_000
+
+  function publishActiveClient(sessionId: SessionId, clientId: string, clientLabel?: string): void {
+    const at = Date.now()
+    const previous = activeClients.get(sessionId)
+    const unchanged = previous !== undefined
+      && previous.clientId === clientId
+      && previous.clientLabel === clientLabel
+      && at - previous.at < ACTIVE_CLIENT_COALESCE_MS
+    activeClients.set(sessionId, { clientId, clientLabel, at })
+    if (unchanged) return
+    broadcast({
+      type: 'session/active-client',
+      sessionId,
+      clientId,
+      ...(clientLabel === undefined ? {} : { clientLabel }),
+      at,
+    })
   }
 
   // Projection change feed → session/projection push frames. The carrier
@@ -1559,12 +1664,26 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     }
   }
 
+  /** Compile untrusted page metadata into the fixed focused-context contract. */
+  function buildPageCuratorPreamble(context: { slug: string; title?: string; url: string; excerpt?: string }): string {
+    const lines = [
+      'Focused page context:',
+      `- URL: ${context.url}`,
+      `- Title: ${context.title ?? '(untitled)'}`,
+      `- Owning Studio slug: ${context.slug}`,
+    ]
+    if (context.excerpt !== undefined && context.excerpt.trim() !== '') lines.push(`- Short excerpt: ${context.excerpt.trim()}`)
+    lines.push('', "focused-context mode: skip the normal Forage Studio bootstrap and continuation briefings (do not run forage-session-start, do not load dev-session history or other projects' operator cards); Studio is the source of truth — query the owning slug (studio-query / GET /studio/query) before making project-state claims; you may still mint projects, edit forage code, and deploy.")
+    return lines.join('\n')
+  }
+
   /** Resolve one requested identity to a live agent, creating or resuming it once. */
   async function ensureSession(
     sessionId: SessionId,
     cwd: string,
     checkPersistedIdentity: boolean,
     presetId?: string,
+    focusedContext?: { slug: string; title?: string; url: string; excerpt?: string },
   ): Promise<Agent> {
     let creation = sessionCreations.get(sessionId)
     if (creation === undefined) {
@@ -1599,10 +1718,23 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           // session's history was produced under that composition, and
           // rebuilding it differently would replay tool calls the model can no
           // longer make.
+          const resumeFocus = inspected.meta.focusedContext ?? focusedContext
+          const composition = await composeAgent(storedPreset)
+          const setup = resumeFocus === undefined
+            ? composition.setup
+            : async (agentCtx: Context): Promise<void> => {
+              await composition.setup(agentCtx)
+              const systemPrompt = agentCtx.get('systemPrompt')
+              if (systemPrompt === undefined) throw new Error('page-curator requires systemPrompt')
+              systemPrompt.section({
+                name: 'page-curator:focused-context', order: 5,
+                text: buildPageCuratorPreamble(resumeFocus),
+              })
+            }
           return (await ctx.agents.resume({
             resumeSessionId: sessionId,
             agentOptions: agentOptions(),
-            setup: (await composeAgent(storedPreset)).setup,
+            setup,
           })).agent
         }
 
@@ -1612,14 +1744,26 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
         }
         const composition = await composeAgent(presetId)
+        const setup = async (agentCtx: Context): Promise<void> => {
+          await composition.setup(agentCtx)
+          if (focusedContext !== undefined) {
+            const systemPrompt = agentCtx.get('systemPrompt')
+            if (systemPrompt === undefined) throw new Error('page-curator requires systemPrompt')
+            systemPrompt.section({
+              name: 'page-curator:focused-context', order: 5,
+              text: buildPageCuratorPreamble(focusedContext),
+            })
+          }
+        }
         return (await ctx.agents.create({
           sessionId,
           agentOptions: agentOptions(),
           meta: {
             cwd,
             ...composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset },
+            ...focusedContext === undefined ? {} : { focusedContext },
           },
-          setup: composition.setup,
+          setup,
         })).agent
       })().catch((error: unknown) => {
         // Another Host entry path may have published the same identity while
@@ -2093,10 +2237,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         }
-        const cwd = workspace?.path ?? request.payload.cwd ?? defaults.cwd
-        const requestedPreset = request.payload.agentPreset
+        const focusedContext = request.payload.focusedContext
+        // Embed creation is a host-enforced capability boundary: browser-supplied
+        // cwd/preset cannot escape the canonical page-curator workspace.
+        const cwd = focusedContext === undefined
+          ? (workspace?.path ?? request.payload.cwd ?? defaults.cwd)
+          : (process.env.DSH_PAGE_CURATOR_CWD ?? '/home/n8/codex-forage')
+        const requestedPreset = focusedContext === undefined ? request.payload.agentPreset : 'page-curator'
         try {
-          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset)
+          await ensureSession(sessionId, cwd, request.payload.sessionId !== undefined, requestedPreset, focusedContext)
         } catch (error: unknown) {
           if (error instanceof AgentPresetConflict) {
             return err(request, {
@@ -2375,7 +2524,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async prompt(request) {
-        const { sessionId, mode, content, clientTimeZone } = request.payload
+        const { sessionId, mode, content, clientTimeZone, clientId, clientLabel } = request.payload
+        // A prompt is the strongest possible activity signal: publish the
+        // active surface before admission so device-scoped capabilities
+        // (capture, playback) follow the human even if admission then fails.
+        if (clientId !== undefined) publishActiveClient(sessionId, clientId, clientLabel)
         const canonicalTimeZone = clientTimeZone === undefined
           ? undefined
           : canonicalClientTimeZone(clientTimeZone)
@@ -2398,18 +2551,30 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const hasImage = content.some(part => part.type === 'image')
         const admit = async (): Promise<RpcResponse<{ accepted: true }>> => {
           try {
+            let durable = await durablePromptContent(ctx, content)
             if (hasImage) {
               const current = selectionFor(agent).current
               const modelInfo = await ctx.llm.resolveModelInfo(current.provider, current.model)
               if (modelInfo.inputModalities !== undefined && !modelInfo.inputModalities.includes('image')) {
-                return err(request, {
-                  code: 'attachment-error',
-                  message: `Model "${current.model}" does not support image input.`,
-                  details: { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' },
-                })
+                const fallback = await visionFallbackRoute(ctx, defaults.visionFallbackSelection?.())
+                let notice: string
+                if (fallback === undefined) {
+                  notice = '[Image uploaded. This model cannot see images natively, and no vision-capable fallback model is currently available.]'
+                } else {
+                  try {
+                    const description = await describeImagesForTextModel(ctx, durable, fallback)
+                    notice = `[Image uploaded. This model cannot see images natively, so ${fallback.provider}/${fallback.model} inspected it on its behalf.\n\nVision description:\n${description}]`
+                  } catch (error: unknown) {
+                    ctx.logger.warn(`api-proxy: vision fallback failed for ${fallback.provider}/${fallback.model}: ${errorChain(error)}`)
+                    notice = `[Image uploaded. This model cannot see images natively. The vision fallback ${fallback.provider}/${fallback.model} was unavailable for this upload.]`
+                  }
+                }
+                durable = [
+                  ...durable.filter(block => block.type !== 'image'),
+                  { type: 'text', text: notice },
+                ]
               }
             }
-            const durable = await durablePromptContent(ctx, content)
             const message: UserMessage = createUserMessage({ content: durable, source })
             if (mode === 'steer') agent.steer(message)
             else agent.followup(message)
@@ -2430,6 +2595,15 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           return ok(request, { accepted: true as const })
         }
         return hasImage ? serializeImageAdmission(agent, admit) : admit()
+      },
+
+      async presence(request) {
+        const { sessionId, clientId, clientLabel } = request.payload
+        // Intentionally does NOT resolve or wake an Agent: presence is a
+        // read-side hint about the human, valid while a session is idle and
+        // cheap enough to fire on ordinary typing.
+        publishActiveClient(sessionId, clientId, clientLabel)
+        return ok(request, { accepted: true as const })
       },
 
       async attachment(request) {

@@ -132,14 +132,74 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  delete document.documentElement.dataset.dshOrchestratorChooser
+  delete document.documentElement.dataset.dshSurface
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 describe('AppFrame', () => {
+  it.each([195, 390, 640])('keeps the opted-in native chooser expanded at %ipx with working toggle', (width) => {
+    frameWidth = width
+    document.documentElement.dataset.dshOrchestratorChooser = 'true'
+    selectedSession.current = undefined
+    const { frame, instance, slotCalls } = mountFrame()
+    const sidebarWidth = Math.min(280, width)
+    expect(tracks(frame)).toEqual([sidebarWidth, 0])
+    expect(frame.dataset.sidebarCollapsed).toBeUndefined()
+    expect(slotCalls.filter(call => call.key === 'sidebar').at(-1)?.props).toEqual({ collapsed: false, width: sidebarWidth })
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)).toEqual([SIDEBAR_COLLAPSED, 0])
+    act(() => { instance.actions.toggleSidebar() })
+    expect(tracks(frame)).toEqual([sidebarWidth, 0])
+  })
+
+  it.each([195, 390, 640])('keeps the normal root auto-collapsed at %ipx', (width) => {
+    frameWidth = width
+    const { frame } = mountFrame()
+    expect(tracks(frame)).toEqual([SIDEBAR_COLLAPSED, 0])
+  })
+
+  it('restores the chooser sidebar preference after a tiny frame widens', () => {
+    frameWidth = 195
+    document.documentElement.dataset.dshOrchestratorChooser = 'true'
+    const { frame, instance } = mountFrame()
+    expect(tracks(frame)).toEqual([195, 0])
+    expect(instance.getSnapshot().sidebar).toBe(280)
+    frameWidth = 640
+    act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
+    expect(tracks(frame)).toEqual([280, 0])
+    expect(instance.getSnapshot().sidebar).toBe(280)
+  })
+
+  it('keeps compact embed sidebar-free even when a chooser marker is present', () => {
+    frameWidth = 390
+    document.documentElement.dataset.dshOrchestratorChooser = 'true'
+    document.documentElement.dataset.dshSurface = 'embed'
+    const { frame, queryByTestId } = mountFrame()
+    expect(frame.style.gridTemplateColumns).toBe('minmax(0, 1fr)')
+    expect(queryByTestId('sidebar-content')).toBeNull()
+  })
+
   it('renders three tracks from store state', () => {
     const { frame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
+  })
+
+  it('uses a single conversation track on the compact embed surface', () => {
+    document.documentElement.dataset.dshSurface = 'embed'
+    try {
+      const { frame, queryByTestId, slotCalls } = mountFrame()
+      expect(frame.style.gridTemplateColumns).toBe('minmax(0, 1fr)')
+      expect(queryByTestId('center-content')).toBeTruthy()
+      expect(queryByTestId('sidebar-content')).toBeNull()
+      expect(queryByTestId('details-content')).toBeNull()
+      expect(slotCalls.map(c => c.key)).toEqual(expect.arrayContaining(['conversation']))
+      expect(slotCalls.map(c => c.key)).not.toContain('sidebar')
+      expect(slotCalls.map(c => c.key)).not.toContain('details')
+    } finally {
+      delete document.documentElement.dataset.dshSurface
+    }
   })
 
   it('renders the session pair with empty owner shares (sessionId is framework-standard)', () => {

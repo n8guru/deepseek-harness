@@ -20,6 +20,9 @@ import { Fragment, createElement } from 'react'
 import type { Key, ReactNode } from 'react'
 import type * as Md from 'mdast'
 import type {} from 'mdast-util-math'
+import { spokenTextParts } from './spoken.ts'
+import { renderedTableCellCount } from './table.ts'
+import type { SpokenRange } from './spoken.ts'
 import { normalizeUri } from 'micromark-util-sanitize-uri'
 import { CodeBlock } from './CodeBlock.tsx'
 import { renderTexToReact } from './katex.tsx'
@@ -119,6 +122,8 @@ export interface MarkdownFileMentions {
  * numbering accumulated in document order while references render.
  */
 export interface MarkdownRenderContext {
+  /** Marker-free full source and source ranges for prose-only inline highlighting. */
+  readonly spoken?: { text: string; ranges: readonly SpokenRange[] } | undefined
   /** Streaming arm: fences render plain and TeX stays literal. */
   readonly streaming: boolean
   /** Localized fence copy-button labels. */
@@ -202,10 +207,18 @@ function renderChildren(
   return nodes.map((node, index) => renderNode(node, index, context))
 }
 
+/** Render the shared speech fragments as safe, inline React text. */
+function renderSpokenText(node: Md.Text | Md.Html, key: Key, context: MarkdownRenderContext): ReactNode {
+  if (!context.spoken) return node.value
+  return <Fragment key={key}>{spokenTextParts(node, context.spoken).map((part, index) =>
+    part.region === null ? part.text : <span key={index} className={css.spoken} data-spoken={part.region}>{part.text}</span>,
+  )}</Fragment>
+}
+
 function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderContext): ReactNode {
   switch (node.type) {
     case 'text':
-      return node.value
+      return renderSpokenText(node, key, context)
     case 'paragraph':
       return <p key={key}>{renderChildren(node.children, context)}</p>
     case 'heading':
@@ -259,8 +272,8 @@ function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderConte
       return <code key={key}>{value}</code>
     }
     case 'html':
-      // No HTML parser enters the pipeline: raw HTML stays literal text.
-      return node.value
+      // Highlight literal HTML text without ever creating HTML elements.
+      return renderSpokenText(node, key, context)
     case 'code':
       return renderCode(node, key, context)
     case 'math':
@@ -416,7 +429,7 @@ function renderTableRow(
 ): ReactNode {
   // With column alignment present, every row renders exactly one cell per
   // column, padding or truncating the row (mdast-util-to-hast parity).
-  const length = align === null ? row.children.length : align.length
+  const length = renderedTableCellCount(row, align)
   const cells: ReactNode[] = []
   for (let index = 0; index < length; index++) {
     const cell = row.children[index]
@@ -552,7 +565,7 @@ export function renderFootnoteSection(context: MarkdownRenderContext): ReactNode
       backrefs.push('↩')
       if (reference > 1) backrefs.push(<sup key={`re-${reference}`}>{String(reference)}</sup>)
     }
-    const entries = renderBlockEntries(definition.children, context)
+    const entries = renderBlockEntries(definition.children, { ...context, spoken: undefined })
     const tail = entries[entries.length - 1]
     const body: ReactNode[] = entries.map((entry, index) => (
       'paragraph' in entry

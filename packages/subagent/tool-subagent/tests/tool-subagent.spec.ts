@@ -105,7 +105,7 @@ describe('dsh-tool-subagent', () => {
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')
     expect(schema).toBeDefined()
     const props = (schema!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
-    expect(Object.keys(props).sort()).toEqual(['description', 'prompt', 'run_in_background'])
+    expect(Object.keys(props).sort()).toEqual(['description', 'model', 'prompt', 'role', 'run_in_background'])
     expect(schema!.description).toContain('job_output')
   })
 
@@ -113,7 +113,7 @@ describe('dsh-tool-subagent', () => {
     const ctx = await setup({ provider: 'mock', enableRunInBackground: false })
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')
     const props = (schema!.parameters as { properties?: Record<string, unknown> }).properties ?? {}
-    expect(Object.keys(props).sort()).toEqual(['description', 'prompt'])
+    expect(Object.keys(props).sort()).toEqual(['description', 'model', 'prompt', 'role'])
     expect(schema!.description).not.toContain('job_output')
   })
 
@@ -1365,5 +1365,72 @@ describe('depth budget configuration', () => {
     await callSubagent(ctx, { description: 'd', prompt: 'p' })
     expect(requests[0]?.maxDepth).toBeUndefined()
     expect(requests[0]?.toolFilter).toBeUndefined()
+  })
+})
+
+describe('subagent model table', () => {
+  const roles = {
+    default: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+    reviewer: { provider: 'openai-codex', model: 'gpt-6-sol' },
+  }
+  async function capture(inheritsParentContext: boolean, toolConfig: object = {}) {
+    const seen: { agentOptions?: unknown }[] = []
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SubagentRuntime, { roles })
+    ctx.subagents.registerProvider({
+      name: 'tbl',
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      inheritsParentContext,
+      start: async (request) => {
+        seen.push(request)
+        return {
+          id: SessionId('tbl-child'),
+          localAgent: undefined,
+          result: Promise.resolve({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' as const }),
+          dispose: async () => {},
+        }
+      },
+    })
+    await ctx.plugin(tool, { provider: 'tbl', maxDepth: 'provider-managed', ...toolConfig })
+    return { ctx, seen }
+  }
+
+  it('applies the table default to a spawn child when the caller names nothing', async () => {
+    const { ctx, seen } = await capture(false)
+    await callSubagent(ctx, { description: 'd', prompt: 'p' })
+    expect(seen[0]?.agentOptions).toEqual(roles.default)
+  })
+
+  it('a role picks its row; an explicit provider/model beats the role', async () => {
+    const { ctx, seen } = await capture(false)
+    await callSubagent(ctx, { description: 'd', prompt: 'p', role: 'reviewer' })
+    await callSubagent(ctx, { description: 'd', prompt: 'p', role: 'reviewer', model: 'x/y/z' })
+    expect(seen[0]?.agentOptions).toEqual(roles.reviewer)
+    expect(seen[1]?.agentOptions).toEqual({ provider: 'x', model: 'y/z' })
+  })
+
+  it('an unknown role is rejected and lists the table', async () => {
+    const { ctx, seen } = await capture(false)
+    const result = await callSubagent(ctx, { description: 'd', prompt: 'p', role: 'nope' })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('default, reviewer')
+    expect(seen).toHaveLength(0)
+  })
+
+  it('a prototype key is not a role', async () => {
+    const { ctx } = await capture(false)
+    const result = await callSubagent(ctx, { description: 'd', prompt: 'p', role: 'toString' })
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('unknown subagent model role')
+  })
+
+  it('a fork child keeps the parent model unless the caller asks', async () => {
+    const { ctx, seen } = await capture(true)
+    await callSubagent(ctx, { description: 'd', prompt: 'p' })
+    await callSubagent(ctx, { description: 'd', prompt: 'p', role: 'reviewer' })
+    expect(seen[0]?.agentOptions).toBeUndefined()
+    expect(seen[1]?.agentOptions).toEqual(roles.reviewer)
   })
 })

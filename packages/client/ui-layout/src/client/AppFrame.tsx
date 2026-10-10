@@ -96,6 +96,7 @@ export function AppFrame({
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
   })
   const frameRef = useRef<HTMLDivElement | null>(null)
+  const embedSurface = document.documentElement.dataset.dshSurface === 'embed'
   const [viewport, setViewport] = useState(() => window.innerWidth)
 
   const lastSession = useRef(detailsSession)
@@ -133,13 +134,26 @@ export function AppFrame({
   // solver stays breakpoint-free: a narrow re-expand passes the preference
   // (or the default when the wide preference is closed) and the center
   // absorbs the squeeze.
-  const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
+  // The shell validates this root-only iframe opt-in before mounting. Keep
+  // native browsing and New Session visible, without changing normal roots.
+  const chooser = document.documentElement.dataset.dshOrchestratorChooser === 'true'
+  const narrow = !chooser && viewport < SIDEBAR_AUTO_COLLAPSE
   useEffect(() => { actions.setNarrow(narrow) }, [actions, narrow])
-  const sidebarCollapsed = narrow ? !panels.narrowExpanded : panels.sidebar === 0
+  const sidebarCollapsed = embedSurface || (narrow ? !panels.narrowExpanded : panels.sidebar === 0)
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const cols = computeColumns(viewport, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  const cols = embedSurface
+    ? { sidebar: 0, center: viewport, details: 0 }
+    : computeColumns(viewport, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  // A half-screen phone drawer can be narrower than the normal sidebar
+  // minimum. Let only the opted-in chooser use the full available width;
+  // the conversation remains mounted at zero width until the user collapses.
+  if (chooser && !embedSurface && cols.sidebar > viewport) {
+    cols.sidebar = viewport
+    cols.center = 0
+    cols.details = 0
+  }
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -165,12 +179,16 @@ export function AppFrame({
     <div
       ref={frameRef}
       className={css.frame}
-      style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
+      style={{
+        gridTemplateColumns: embedSurface
+          ? 'minmax(0, 1fr)'
+          : `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px`,
+      }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-details-collapsed={cols.details === 0 || undefined}
       data-dragging={dragging || undefined}
     >
-      <div className={css.sidebarCol}>
+      {!embedSurface && <div className={css.sidebarCol}>
         {/* Render-site slot call with live concession output: a closed
             sidebar keeps the mounted slot at the compact-rail width, and the
             component sees its rendered state as owner params decided here
@@ -180,7 +198,7 @@ export function AppFrame({
           collapsed: sidebarCollapsed,
           width: cols.sidebar,
         })}
-      </div>
+      </div>}
       <>
         {/* Both column occupants stay at fixed tree positions from first
             paint — no loading gate: a bare status line reads worse than
@@ -188,14 +206,14 @@ export function AppFrame({
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
         <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
+        {!embedSurface && <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>}
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.details > 0 && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {!embedSurface && !sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+      {!embedSurface && cols.details > 0 && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
     </div>
   )
 }

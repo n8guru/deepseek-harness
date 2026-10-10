@@ -96,6 +96,8 @@ export interface SessionHeader {
    * would replay history the model can no longer act on.
    */
   readonly agentPreset?: string
+  /** Durable page context for a forced page-curator session. */
+  readonly focusedContext?: { readonly slug: string; readonly title?: string; readonly url: string; readonly excerpt?: string }
 }
 
 /**
@@ -118,6 +120,7 @@ export interface CreateSessionOptions {
     readonly origin?: 'subagent'
     readonly delegationDepth?: number
     readonly agentPreset?: string
+    readonly focusedContext?: { readonly slug: string; readonly title?: string; readonly url: string; readonly excerpt?: string }
   }
 }
 

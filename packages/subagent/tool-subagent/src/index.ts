@@ -98,6 +98,13 @@ export const Config: z<Config> = z.object({
   maxDepth: z.union([z.natural().max(Number.MAX_SAFE_INTEGER), z.const('provider-managed' as const)]).default(3),
 })
 
+/** Parse a `provider/model` argument; model ids may themselves contain `/`. */
+function parseModelArg(value: string): AgentOptions {
+  const cut = value.indexOf('/')
+  if (cut < 1 || cut === value.length - 1) throw new Error(`model must be "provider/model", got "${value}"`)
+  return { provider: value.slice(0, cut), model: value.slice(cut + 1) }
+}
+
 /** Render text blocks from the canonical JSON block array without trusting arbitrary values. */
 function outputValueText(values: JsonValue[]): string {
   return values
@@ -324,6 +331,14 @@ export function apply(ctx: Context, config: Config): void {
           required: true,
           description: wording.promptDescription,
         },
+        role: {
+          type: 'string',
+          description: 'Optional model role from the subagent-models table (e.g. `mid`, `reviewer`; `default` applies when omitted). Unknown roles are rejected with the current list.',
+        },
+        model: {
+          type: 'string',
+          description: 'Optional explicit `provider/model` for this child; overrides `role`. Prefer `role`.',
+        },
         ...backgroundEnabled ? {
           run_in_background: {
             type: 'boolean' as const,
@@ -383,11 +398,18 @@ export function apply(ctx: Context, config: Config): void {
         }
 
         const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
+        // Precedence: explicit `model` > `role` > composed `agentOptions` > table `default`
+        // (spawn only: a fork inherits history, so a silent model switch would defeat it) > parent's.
+        const childRoute: AgentOptions | undefined = args.model !== undefined
+          ? parseModelArg(args.model)
+          : args.role !== undefined
+            ? ctx.subagents.resolveModel(args.role)
+            : config.agentOptions ?? (provider.inheritsParentContext ? undefined : ctx.subagents.resolveModel())
         const request = {
           label: args.description,
           prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
           parent,
-          ...config.agentOptions !== undefined ? { agentOptions: config.agentOptions } : {},
+          ...childRoute !== undefined ? { agentOptions: childRoute } : {},
           ...config.persona !== undefined ? { persona: config.persona } : {},
           ...config.toolFilter !== undefined ? { toolFilter: config.toolFilter } : {},
           ...maxDepth !== undefined ? { maxDepth } : {},

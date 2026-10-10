@@ -105,6 +105,14 @@ export type MuxFrame =
    * tail page's projections block.
    */
   | { type: 'session/projection'; sessionId: SessionId; key: string; value: unknown; seq: number }
+  /**
+   * The client surface the human is currently active on for this session.
+   * Transient and never logged — emitted on prompt and on `session.presence`,
+   * last-activity-wins. Device-scoped capabilities (microphone capture,
+   * spoken playback) read it to follow the human between machines instead of
+   * every open client acting at once. `at` is the host clock in milliseconds.
+   */
+  | { type: 'session/active-client'; sessionId: SessionId; clientId: string; clientLabel?: string; at: number }
   | { type: 'stream/error'; error: RpcError }
 
 /**

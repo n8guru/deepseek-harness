@@ -46,6 +46,8 @@ export type { WebBlockProps, WebSearchBlockProps, WebFetchBlockProps, WebSourceV
 export { CodeBlock } from './markdown/CodeBlock.tsx'
 export type { CodeBlockProps } from './markdown/CodeBlock.tsx'
 export { JsonBlock } from './markdown/JsonBlock.tsx'
+export { parseSpokenSegments } from './markdown/spoken.ts'
+export type { SpokenSegment } from './markdown/spoken.ts'
 export { MarkdownText } from './markdown/MarkdownText.tsx'
 export type { MarkdownCodeLabels, MarkdownFileMentions } from './markdown/MarkdownText.tsx'
 export { MessageText } from './markdown/MessageText.tsx'
