@@ -3,9 +3,9 @@
  * Host's own `dshHostDirectory/list` Typert Remote over the EXISTING
  * `ctx.connection.rpc` / `ctx.remote` mount (no new wire protocol) and keeps
  * a store fed with the latest snapshot. Registers no slot and renders
- * nothing — grouping peer sessions into `sidebar.workspaces` is step 4's
- * scope (deep-link open-on-click), not this row's. A later plugin reads
- * `createDshPeerSessionsStore`'s handle through ordinary store sharing.
+ * nothing itself. It provides the store as the `dshPeerSessions` Context
+ * service; ui-workspace's sidebar browser (step 4) reads it to render the
+ * machine groups and the deep-link open-on-click.
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -23,8 +23,20 @@ export type { DshHostDirectorySnapshot, DshHostPeerStatus, DshHostPeerView, DshH
 /** Poll interval floor for the Client-side read; the Host's own poll interval governs actual freshness. */
 const POLL_INTERVAL_MS = 5000
 
-/** Services required by the Remote mount this plugin polls. */
-export const inject = ['remote']
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /**
+     * Shared handle on the live `dshHostDirectory/list` snapshot store, provided
+     * by this plugin's apply. The sidebar browser (ui-workspace) reads it to
+     * group peer sessions by machine; it is optional there, so a build without
+     * this plugin simply shows no peer groups.
+     */
+    dshPeerSessions: SnapshotStore<DshPeerSessionsState>
+  }
+}
+
+/** Services required: the Remote mount and its `dshHostDirectory` namespace, which `ctx.remote.dshHostDirectory` reads. */
+export const inject = ['remote', 'remote.dshHostDirectory']
 
 /**
  * Start the poll loop against this Host's own directory Remote.
@@ -59,8 +71,10 @@ export function startDshPeerSessionsPoll(
  * @param ctx - Client root Context.
  */
 export function apply(ctx: ClientContext): void {
+  const store = createDshPeerSessionsStore()
+  ctx.provide('dshPeerSessions', store)
   ctx.effect(() => {
-    const { dispose } = startDshPeerSessionsPoll(ctx)
+    const { dispose } = startDshPeerSessionsPoll(ctx, { store })
     return dispose
   }, 'ui-peer-sessions: dshHostDirectory poll loop')
 }

@@ -31,10 +31,14 @@ async function harness(config: { machine?: string; peers?: DshHostPeer[]; pollIn
 }
 
 describe('DshHostDirectoryService', () => {
-  it('publishes one direct list method under the dshHostDirectory namespace', async () => {
+  it('publishes list plus the allow-remote-steer read/set methods under the dshHostDirectory namespace', async () => {
     const { directory } = await harness()
     expect(directory.typertRemote).toMatchObject({ serviceKey: 'dshHostDirectory', namespace: 'dshHostDirectory' })
-    expect(remoteMethods(directory)).toEqual([{ method: 'list', invocation: { kind: 'direct' } }])
+    expect(remoteMethods(directory)).toEqual([
+      { method: 'list', invocation: { kind: 'direct' } },
+      { method: 'allowRemoteSteer', invocation: { kind: 'direct' } },
+      { method: 'setAllowRemoteSteer', invocation: { kind: 'direct' } },
+    ])
   })
 
   it('starts empty with no configured peers, falling back to os.hostname() as the label', async () => {
@@ -62,7 +66,7 @@ describe('DshHostDirectoryService', () => {
         type: 'server-response',
         rpcId: 'x',
         result: { ok: true, value: { items: [
-          { sessionId: 's1', updatedAt: 111, running: true, blank: false, cwd: '/home/n8/proj' },
+          { sessionId: 's1', updatedAt: 111, running: true, blank: false, cwd: '/home/n8/proj', projections: { kind: 'cached', asOfSeq: 1, values: { title: 'Peer thing' } } },
         ] } },
       }), { status: 200 })
     })
@@ -77,10 +81,10 @@ describe('DshHostDirectoryService', () => {
     await vi.waitFor(() => {
       const snapshot = directory.list()
       expect(snapshot.sessions).toEqual([
-        { sessionId: 's1', machine: 'peer-machine', updatedAt: 111, running: true, blank: false, cwd: '/home/n8/proj' },
+        { sessionId: 's1', machine: 'peer-machine', updatedAt: 111, running: true, blank: false, cwd: '/home/n8/proj', title: 'Peer thing' },
       ])
       expect(snapshot.peers).toEqual([
-        { machine: 'peer-machine', authority: 'peer.example:3080', status: { state: 'ok', lastPolledAt: expect.any(Number) as number, sessionCount: 1 } },
+        { machine: 'peer-machine', authority: 'peer.example:3080', scheme: 'http', status: { state: 'ok', lastPolledAt: expect.any(Number) as number, sessionCount: 1 } },
       ])
     }, { timeout: 2000, interval: 20 })
   })
@@ -97,6 +101,7 @@ describe('DshHostDirectoryService', () => {
       expect(snapshot.sessions).toEqual([])
       expect(snapshot.peers).toEqual([{
         machine: 'down-machine', authority: 'down.example:3080',
+        scheme: 'http',
         status: {
           state: 'unreachable',
           lastAttemptAt: expect.any(Number) as number,
@@ -118,6 +123,7 @@ describe('DshHostDirectoryService', () => {
       const snapshot = directory.list()
       expect(snapshot.peers).toEqual([{
         machine: 'no-cookie-machine', authority: 'nocookie.example:3080',
+        scheme: 'http',
         status: {
           state: 'unreachable',
           lastAttemptAt: expect.any(Number) as number,
@@ -161,6 +167,7 @@ describe('DshHostDirectoryService', () => {
         {
           machine: 'late-machine',
           authority: 'late.example:3080',
+          scheme: 'http',
           status: expect.objectContaining({ state: expect.any(String) as string }) as unknown,
         },
       ])

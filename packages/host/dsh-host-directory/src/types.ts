@@ -1,4 +1,17 @@
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type {} from '@deepseek-ai/dsh-typert-protocol'
+
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    /** allow-remote-steer refused a steer verb or the opt-in itself. */
+    'dsh-host/steer-denied': {
+      readonly capability?: string
+      readonly endpoint?: string
+      readonly sessionId?: string
+      readonly reason?: string
+    }
+  }
+}
 
 /**
  * One configured peer DSH Host this Host polls server-to-server. `authority`
@@ -76,6 +89,11 @@ export interface DshHostRemoteSession {
   readonly blank: boolean
   readonly cwd?: string
   /**
+   * The peer's own title projection for this session (`projections.values.title`
+   * on its `session/list` row) when the peer reported one; omitted otherwise.
+   */
+  readonly title?: string
+  /**
    * Present only when `pollPendingInput` is enabled for this peer AND the
    * most recent per-session history poll actually classified an open
    * question/approval. Omitted (not merely `undefined`) otherwise, so R2's
@@ -95,6 +113,8 @@ export type DshHostPeerStatus =
 export interface DshHostPeerView {
   readonly machine: string
   readonly authority: string
+  /** Scheme the peer is dialed with; the Client builds the peer-origin deep link from it. */
+  readonly scheme: 'http' | 'https'
   readonly status: DshHostPeerStatus
 }
 
@@ -109,4 +129,33 @@ export interface DshHostDirectorySnapshot {
   readonly sessions: readonly DshHostRemoteSession[]
   /** Configured peers and their live poll freshness, in configured order. */
   readonly peers: readonly DshHostPeerView[]
+}
+
+/** Request addressing one session's allow-remote-steer state. */
+export interface DshHostSteerStateRequest {
+  readonly sessionId: string
+}
+
+/** Request to grant or revoke allow-remote-steer for one session. */
+export interface DshHostSetAllowRemoteSteerRequest {
+  readonly sessionId: string
+  /** `true` opts the session in; `false` revokes it. */
+  readonly allow: boolean
+}
+
+/** Why a session can never carry allow-remote-steer. */
+export type DshHostSteerIneligibleReason = 'mesh-pump-owned'
+
+/**
+ * One session's allow-remote-steer state, as read through the opt-in surface.
+ * `allowRemoteSteer` is the effective bit the gate enforces; it is never true
+ * for an ineligible (mesh-pump-owned) session.
+ */
+export interface DshHostSteerState {
+  readonly sessionId: string
+  /** Whether a tab served from a non-loopback origin may submit steer verbs into this session. Default `false`. */
+  readonly allowRemoteSteer: boolean
+  /** Whether this session may ever be opted in. */
+  readonly eligible: boolean
+  readonly ineligibleReason?: DshHostSteerIneligibleReason
 }

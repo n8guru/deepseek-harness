@@ -111,6 +111,17 @@ here answers, decides, or steers a peer session. See
 `packages/client/ui-peer-sessions/README.md` for how a Client-side consumer
 is expected to render `pendingInput` (deep-link only, never a form control).
 
+### allow-remote-steer gate (dsh-mesh-session-view step 5, R4 steer + R5 gate)
+
+A peer session opened through the step-4 deep link is served by its owning Host's own origin, so steering it is that Host's own composer calling the same `session/prompt` write RPC — there is nothing to relay. This package adds the Host-side gate: a per-session, default-OFF opt-in named `allow-remote-steer`, enforced by the owning Host through the `ctx.connection.rpc.guard('/api', …)` pre-dispatch seam (`packages/client/connection`).
+
+- **Remote vs owner.** A request whose `Host` authority is not loopback (the tailnet/trusted-host origin a deep-link tab uses) is remote; loopback is the owner at the keyboard and is never gated.
+- **Gated verbs** (`GATED_STEER_ENDPOINTS`): `session/prompt`, `updateQueue`, `cancel`, `selectModel`, `fork`, `rename`, and the opt-in setter itself. Reads, `session/create`, and the approval/question answer channel are not gated.
+- **Opt-in surface.** `dshHostDirectory/setAllowRemoteSteer({sessionId, allow})` (owner origin only; a remote tab can never grant itself) and `dshHostDirectory/allowRemoteSteer({sessionId})` (read). State is in memory: a Host restart returns every session to OFF (fail-closed).
+- **Mesh-pump sessions are never eligible.** `session-mesh-*` ids and any session that receives a `mesh-dispatch-*` prompt request id are refused by the setter and by the gate, and lose any opt-in.
+- A refused steer returns `dsh-host/steer-denied`; the composer shows it as a toast.
+- Permission/approval prompts are unchanged: an admitted steer raises them through the same `approval/request` forwarded-event stream for every origin.
+
 ## Understand the implementation
 
 <details>
