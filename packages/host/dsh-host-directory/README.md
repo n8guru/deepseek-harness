@@ -1,164 +1,46 @@
----
-description: "Host-side tailnet session directory: polls peer DSH Hosts' own session/list server-to-server and publishes a merged read-only view."
-kind: "package-reference"
----
-
 # @deepseek-ai/dsh-host-directory
 
-English
+English | [中文](README.zh.md)
 
-## Summary
+`DshHostDirectoryService` runs inside a `dsh web` Host and polls a static list of configured peer Hosts server-to-server. Each poll POSTs `/api/session.list` (API Proxy method `session.list`, payload `{}`) to the peer, the same wire endpoint the peer's own browser Client calls, and merges the rows into one snapshot tagged with each peer's declared `machine` label. The snapshot is published as the Typert Remote `dshHostDirectory/list`, which a Client plugin reads over the existing shared `/api` channel. The package adds no wire protocol, no relay, and no write to any peer session.
 
-`DshHostDirectoryService` runs inside a `dsh web` Host and polls a static list of
-configured peer Hosts' own `session/list` Typert Remote method, server-to-server,
-over the existing shared `/api` channel — the exact same wire endpoint a peer's
-own browser Client calls. It merges the results into one snapshot, tagged with
-each peer's declared `machine` label, and publishes that snapshot as its own
-Typert Remote method, `dshHostDirectory/list`, for a Client plugin to poll over
-the existing `ctx.connection.rpc`. No new wire protocol, no relay, no writes to
-any peer session, `ClaudeSession`, `mesh-pump`, or `mesh-pull-dispatch` tables.
+## Configuration
 
-This is the R2 read side of dsh-mesh-session-view (Studio project 1479605, step
-2), scoped by the Fable 5.1 architecture review's required redesign (R1–R6) and
-Nate's 2026-09-03 decision (option A).
-
-## Use this package
-
-Mount alongside `plugin-inventory`, before the API gateway:
+Mount the plugin alongside [`plugin-inventory`](../plugin-inventory/README.md) before the API gateway:
 
 ```yaml
 - id: dsh-host-directory
   name: '@deepseek-ai/dsh-host-directory'
   config:
-    machine: forge          # optional; defaults to os.hostname()
-    pollIntervalMs: 5000    # optional; floor 1000ms
+    machine: forge
+    pollIntervalMs: 5000
     peers:
       - machine: n8razer
         authority: 100.102.77.86:3080
-        sessionCookie: 'dsh-auth-<hash>=<signed-value>'   # see below
-        pollPendingInput: false   # optional; see "Pending-input classification" below
+        pollPendingInput: false
 ```
 
-`peers`, `pollIntervalMs`, and `machine` are ordinary `.volatile()` Config
-fields (ships live-referenced through `this.config.<field>.get()`, exactly like
-`dsh-bash-local`'s `timeoutMs`) — editing them through the profile's Cordis
-patch, or the generic Settings form (`@deepseek-ai/dsh-settings`), takes effect
-on the next poll tick with no Host restart, per `loader/volatile-update`. A
-Host restart is required only once, to mount this plugin the first time.
+`machine` labels this Host in the directory and defaults to `os.hostname()`. `pollIntervalMs` defaults to 5000 and is floored at 1000. Each peer takes `machine`, `authority`, an optional `scheme` (`http` by default), an optional `sessionCookie`, and an optional `pollPendingInput`. All three top-level fields are plain plugin config: changing an entry reloads the plugin, which rebuilds the peer table from the new values, and no Host restart is needed.
 
-### The `sessionCookie` bootstrap (read this before wiring a peer)
+## Peer access
 
-**Ground truth as of this build, later than the Fable 5.1 review this step
-re-scopes from:** every `/api` request — including a server-to-server one —
-now requires the peer's signed browser-session cookie (Agent Note
-`2026-08-24-browser-token-authentication`, which landed *before* the review;
-the review's Q3 answer, "the Host has no authentication layer to consume a
-token," was already stale when it was written). There is **no non-browser
-bearer** by design — that note explicitly declined a persistent launch-token
-bearer as an alternative. This package invents no second credential: it sends
-the exact same cookie a browser holds.
+The rc.8 `/api` route is guarded by a Host-header check against the peer's trusted hosts (loopback, LAN literals, or a declared `--trusted-host`), not by an auth layer. A peer admits the poll when this Host's authority is among its trusted hosts, so the poll sends no credential. `sessionCookie` is an optional pass-through that is forwarded verbatim as a `Cookie` header and is normally omitted; it is marked secret so configuration UIs never read it back.
 
-To authorize this Host to poll a peer:
+An unreachable peer is reported, never hidden. Its row in `list()` carries `status: { state: 'unreachable', message }` naming the cause (network error, a `401`/`403` rejection, a non-2xx status, or an error result), and its session rows are cleared so a session this Host cannot confirm is never shown as live. One peer's failure does not block another's poll. `list()` itself performs no I/O and returns the result of the last poll.
 
-1. Start (or already have running) `dsh web` on the peer. Its stdout prints
-   `dsh web: http://<peer-authority>/?token=<one-time-token>` once per process
-   start.
-2. Exchange that token for a signed cookie once, from *any* machine that can
-   reach the peer (a laptop browser, or `curl -i` from this Host itself):
-   ```sh
-   curl -i "http://<peer-authority>/?token=<one-time-token>"
-   ```
-   The response's `Set-Cookie` header carries `dsh-auth-<sha256(authority)>=<value>; ...`.
-3. Copy the full `name=value` pair (just those two fields, not the `Max-Age`/
-   `Path`/etc. attributes) into that peer's `sessionCookie` config field on
-   *this* Host.
-4. The cookie is authority-bound and durable (default 30-day lifetime,
-   survives peer restarts) — this is a one-time bootstrap per peer pair, not a
-   per-poll ceremony. It stops working only if the peer's operator deletes its
-   `client-connection/browser-session` credential record (global revocation)
-   or the 30-day lifetime elapses; either surfaces immediately as a `401` in
-   that peer's `DshHostPeerStatus`.
+## Pending-input classification
 
-An absent or expired `sessionCookie` fails closed and visibly: the peer's row
-in `list()` reports `status: { state: 'unreachable', message: '...' }`
-naming the cause (missing cookie vs. `401`/`403`) — it is never silently
-skipped, and no session for that peer is ever fabricated or guessed.
+Setting `peers[].pollPendingInput: true` costs one extra `POST /api/session.history` per session per tick (`maxMessages: 20`). `classifyPendingInput` then reports the most recent unresolved human-input request as `pendingInput` on that session row: an open `ask_user_question` tool call, or an open `approval/asked` with no `approval/decided`. A question takes precedence over an approval. A session with nothing pending carries no `pendingInput` key. A failed history read omits that one session's classification for the tick and never marks the peer unreachable. The option is off by default.
 
-### Pending-input classification (`pollPendingInput`, dsh-mesh-session-view step 6)
+## allow-remote-steer gate
 
-Set `peers[].pollPendingInput: true` to also classify each of that peer's
-sessions' most recent UNRESOLVED human-input request — an open
-`ask_user_question` tool call with no answer yet, or an open
-`approval/asked` with no `approval/decided` yet — and publish it as
-`DshHostRemoteSession.pendingInput`. This is what lets a consumer render
-"waiting on a question/approval — answer on owning host" instead of a dead
-control, matching the read-only notice `app/session_inspector.py` (Hub
-side) already renders from the same event vocabulary.
+Steering a peer session means opening it on its owning Host's own origin, where the composer issues the normal write RPCs. This package adds a per-session opt-in on that owning Host, default OFF, enforced through `ctx.connection.rpc.guard('/api', ...)`.
 
-It costs one extra `POST /api/session.history` per session per poll tick —
-the SAME wire endpoint and envelope the Hub's `read_host_history` already
-calls, not a new route — so it is **off by default**: R2's original
-`session/list`-only poll shape is unchanged unless an operator opts a peer
-in. A session with nothing pending simply has no `pendingInput` key at all
-(never `pendingInput: undefined` on the wire). A failed per-session read
-(timeout, transient error) silently omits that one session's classification
-for the tick; it never marks the whole peer `unreachable` — `session/list`
-already succeeded for that peer this tick, and one history read hiccup
-should not hide every session on it.
-
-This is read-only observation, same as the rest of this package: nothing
-here answers, decides, or steers a peer session. See
-`packages/client/ui-peer-sessions/README.md` for how a Client-side consumer
-is expected to render `pendingInput` (deep-link only, never a form control).
-
-### allow-remote-steer gate (dsh-mesh-session-view step 5, R4 steer + R5 gate)
-
-A peer session opened through the step-4 deep link is served by its owning Host's own origin, so steering it is that Host's own composer calling the same `session/prompt` write RPC — there is nothing to relay. This package adds the Host-side gate: a per-session, default-OFF opt-in named `allow-remote-steer`, enforced by the owning Host through the `ctx.connection.rpc.guard('/api', …)` pre-dispatch seam (`packages/client/connection`).
-
-- **Remote vs owner.** A request whose `Host` authority is not loopback (the tailnet/trusted-host origin a deep-link tab uses) is remote; loopback is the owner at the keyboard and is never gated.
-- **Gated verbs** (`GATED_STEER_ENDPOINTS`): `session/prompt`, `updateQueue`, `cancel`, `selectModel`, `fork`, `rename`, and the opt-in setter itself. Reads, `session/create`, and the approval/question answer channel are not gated.
-- **Opt-in surface.** `dshHostDirectory/setAllowRemoteSteer({sessionId, allow})` (owner origin only; a remote tab can never grant itself) and `dshHostDirectory/allowRemoteSteer({sessionId})` (read). State is in memory: a Host restart returns every session to OFF (fail-closed).
-- **Mesh-pump sessions are never eligible.** `session-mesh-*` ids and any session that receives a `mesh-dispatch-*` prompt request id are refused by the setter and by the gate, and lose any opt-in.
-- A refused steer returns `dsh-host/steer-denied`; the composer shows it as a toast.
-- Permission/approval prompts are unchanged: an admitted steer raises them through the same `approval/request` forwarded-event stream for every origin.
-
-## Understand the implementation
-
-<details>
-<summary>Implementation internals — click to expand</summary>
-
-`syncPeers()` runs once at construction and again on every `loader/volatile-update`
-(a live Config edit), reconciling the tracked peer map against the current
-`peers.get()` value — added peers start `never-polled`, removed peers are
-dropped, and an updated peer's cookie/scheme takes effect on its next tick
-without losing its last-known sessions. `rearmTimer()` only restarts the
-`setInterval` when `pollIntervalMs` actually changed, so an unrelated Config
-edit never resets the phase of an already-running poll loop.
-
-`pollOnePeer` sends a plain `fetch()` `POST <scheme>://<authority>/api/session/list`
-with the exact wire envelope shape browsers use
-(`{ type: 'client-request', rpcId, method: 'session/list', payload: {} }`,
-`Cookie: <sessionCookie>`), and maps `SessionSummary` rows into
-`DshHostRemoteSession`, tagging each with the peer's declared `machine`. A
-failure (network error, non-2xx, `result.ok === false`) never throws out of
-the poll loop — it's captured into that peer's `DshHostPeerStatus.unreachable`
-with the causing message, and that peer's session rows are cleared (a session
-this Host cannot currently confirm is never shown as live). `list()` never
-performs I/O itself; it always returns the last poll's result, so a Client
-reading it is never blocked on network latency.
-
-No invariant companion beyond the standard no-op registration: this package
-owns no durable cross-request state — the peer map is an in-memory poll cache,
-rebuilt from Config and live network reads on every tick.
-
-</details>
-
-## Further Exploration
-
-- [`@deepseek-ai/dsh-host-plugin-inventory`](../plugin-inventory/README.md) — the sibling package this one's Typert Remote shape mirrors.
-- [`@deepseek-ai/dsh-api-session-controller`](../../api/session-controller/README.md) — owns the `session/list` endpoint this package polls on every peer.
-- Agent Note [`2026-08-24-browser-token-authentication`](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.md) — the auth layer `sessionCookie` satisfies.
-- `/home/n8/forge-agent-os/tools/fleet-fix/results/dmsv-2.md` — this step's deploy procedure per host.
+- **Remote versus owner.** A request whose `Host` authority is not loopback is remote and must hold the opt-in. A loopback request is the owner at the keyboard and is never gated.
+- **Gated verbs.** `session.prompt`, `session.updateQueue`, `session.cancel`, `session.selectModel`, `session.fork`, and `session.rename` (the `session/...` spellings are also listed), plus the opt-in setter itself. Reads and the approval and question answer channel are not gated.
+- **Opt-in.** The Remotes `dshHostDirectory/allowRemoteSteer({ sessionId })` and `dshHostDirectory/setAllowRemoteSteer({ sessionId, allow })` read and change it. A remote origin cannot call the setter. State is in memory, so a Host restart returns every session to OFF.
+- **Mesh-pump sessions are never eligible.** A `session-mesh-` session id, or a prompt whose rpcId starts with `mesh-dispatch-`, marks the session pump-owned: the setter refuses it and any existing opt-in is revoked.
+- **Refusals.** A denied steer reaches the caller as an `internal` RPC error whose message starts `dsh-host/steer-denied:`.
 
 ## Model Experience
 
@@ -170,9 +52,9 @@ None; this package never assembles model input.
 
 ## Known Limitations and Deferred Work
 
-- **Static peer list, no auto-discovery** — per the Fable 5.1 review's R2, peers are operator-declared, not discovered via `tailscale status --json`. Adding that discovery is future work, not required for R2.
-- **No push, only poll** — a session started/ended on a peer is reflected within one `pollIntervalMs` window on this Host, never instantly; pushing via `host/remote-event` would need a core allowlist entry the review flagged as out of scope for a plugin.
-- **Cookie rotation is manual** — if a peer's operator revokes its `client-connection/browser-session` credential record, every configured cookie for that peer goes stale simultaneously and must be re-bootstrapped by hand; there is no automatic re-exchange (the launch token is one-shot and only printed at peer process start).
-- **No write path** — this package never opens, steers, or answers a peer's session; that is out of scope for R2 and belongs to the deep-link (row 4) and allow-remote-steer (row 5) steps.
-- **Pending-input classification is opt-in and best-effort** — `pollPendingInput` reads only the most recent page of a session's history (`maxMessages: 20`); a question/approval buried deeper than that page (unusual — it would mean the session kept working after asking, which the classifier by definition would already see as answered) is not detected. It also does not currently expose the same `summary` truncation/sanitization the Hub applies; a consumer publishing this to an untrusted surface should still bound the text it displays.
-- **The Mac Host cannot be polled at all yet** — its `dsh web` binds `127.0.0.1` only and has no `--trusted-host` tailnet authority (`dsh-fleet-health/RESULT.md` compatibility matrix, confirmed again for this step). Adding a `peers` entry for the Mac to any Host's config today would just poll a loopback address that Host cannot reach — configuring the Mac as a peer here requires, in order: (1) the Mac's `dsh web` launch config (launchd plist) gains `--trusted-host <mac-tailnet-authority>:3080`, matching forge/n8razer/droplet's existing pattern; (2) the Mac Host stops binding loopback-only and exposes that trusted authority, the same `tailscale serve` fronting pattern already live on the other three hosts; (3) a Mac Host restart to pick up both — gated the same as every other restart in this project, through the drain, in a window Nate OKs. This is a **host config + restart change, not a code change in this package**, and is not applied by dsh-mesh-session-view step 6 — see `/home/n8/forge-agent-os/tools/fleet-fix/results/dmsv-6.md` and dmsv-2's RESULT.md deploy item 4 for the exact steps. Once done, the Mac becomes an ordinary `peers` entry like any other.
+- **Static peer list** — peers are operator-declared; there is no discovery, for example from `tailscale status --json`.
+- **Poll only** — a session started or ended on a peer appears within one `pollIntervalMs` window, never instantly, and the poll reads only the first page of `session.list`.
+- **Generic error code** — rc.8 folds any thrown error into the closed `internal` RPC code, so `dsh-host/steer-denied` travels only as the message prefix.
+- **Read-only listing** — this package never opens, steers, or answers a peer session; steering happens only by opening the owning Host's own origin, under the allow-remote-steer gate.
+- **Pending-input is best-effort** — only the latest 20 history messages are inspected, and the summary text is not truncated or sanitized, so a consumer on an untrusted surface should bound what it displays.
+- **Peer must trust this Host** — a peer whose trusted hosts omit this Host's authority rejects the poll, and the row shows `unreachable`.
