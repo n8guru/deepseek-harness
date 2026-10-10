@@ -51,6 +51,11 @@ export const Config: z<Config> = z.object({
   writeIntervalMs: z.natural().min(1).required(),
 })
 
+/** Orphan-row sweep cadence; the json backend republishes the WHOLE file per delete, so it is rare and bounded. */
+const SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000
+/** Most rows one sweep deletes (each delete rewrites the file). */
+const SWEEP_LIMIT = 500
+
 /** Per-session write-behind bookkeeping (live sessions only; dropped at retire). */
 interface DirtyState {
   /** Committed events since the last durable write. */
@@ -86,6 +91,42 @@ export class SessionProjectionCache extends Service {
     this.ctx.effect(() => () => domain.close(), 'sessionProjectionCache.domainClose')
     this.table = domain.table('sessions')
     this.installWritePath()
+    // Rows whose session left the store (quarantine, deletion) were never
+    // evicted: the json medium grew to 38 MB / 11.7k rows and every write
+    // republished it whole. Sweep them at boot and periodically, off the init path.
+    void this.sweepSoft()
+    const timer = setInterval(() => void this.sweepSoft(), SWEEP_INTERVAL_MS)
+    timer.unref()
+    this.ctx.effect(() => () => clearInterval(timer), 'sessionProjectionCache.sweepTimer')
+  }
+
+  /**
+   * Delete cached rows whose session is neither stored nor live (at most
+   * {@link SWEEP_LIMIT} per call). Safe by the cache contract: a row is only a
+   * fold shortcut, so a wrongly-dropped one costs a longer tail replay. An
+   * empty listing is treated as "store unavailable" and deletes nothing.
+   * @returns the number of rows deleted.
+   */
+  async sweep(): Promise<number> {
+    const table = this.requireTable()
+    const stored = new Set((await this.ctx.sessionPersistence.list()).map(header => String(header.id)))
+    if (stored.size === 0) return 0
+    let deleted = 0
+    for (const id of [...table.keys()]) {
+      if (deleted >= SWEEP_LIMIT) break
+      if (stored.has(String(id)) || this.ctx.sessions.get(id) !== undefined) continue
+      if (await table.delete(id)) deleted += 1
+    }
+    return deleted
+  }
+
+  private async sweepSoft(): Promise<void> {
+    try {
+      const deleted = await this.sweep()
+      if (deleted > 0) this.ctx.logger.info(`session projection cache: swept ${deleted} orphan row(s)`)
+    } catch (error) {
+      this.ctx.logger.warn(`session projection cache: orphan sweep failed (rows stay): ${String(error)}`)
+    }
   }
 
   /**

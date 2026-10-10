@@ -185,6 +185,12 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       async insertBefore(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { workspaceIds: [request.payload.workspaceId] } } }
       },
+      async attachSession(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { workspace: { workspaceId: 'w1' as never, path: '/w', title: 'w', sessionIds: [], createdAt: 't', updatedAt: 't' } } },
+        }
+      },
       async insertSessionBefore(request) {
         return {
           rpcId: request.rpcId,

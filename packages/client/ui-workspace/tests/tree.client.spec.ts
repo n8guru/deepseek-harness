@@ -4,7 +4,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, workspaceLabel, relativeTime,
-  UNGROUPED_KEY, UNGROUPED_LABEL,
+  SUBAGENTS_KEY, UNGROUPED_KEY, UNGROUPED_LABEL,
 } from '../src/client/tree.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 
@@ -32,6 +32,24 @@ const noArchive: readonly SessionId[] = []
 const archived = (...ids: string[]): readonly SessionId[] => ids.map(sid)
 
 describe('deriveGroups', () => {
+  it('places delegated sessions after Forge Agent OS and before Ungrouped, with archive hiding only the selected child', () => {
+    const first = workspace('first', [])
+    const forge = workspace('forge', [], 'Forge Agent OS')
+    const last = workspace('last', [])
+    expect(deriveGroups(list(), [first, forge, last], noArchive, view()).map(group => group.key))
+      .toEqual(['first', 'forge', SUBAGENTS_KEY, 'last'])
+    const running = { ...summary('child-running', 5), origin: 'subagent' as const, running: true }
+    const finished = { ...summary('child-finished', 4), origin: 'subagent' as const }
+    const loose = summary('loose', 3)
+    const sessions = { ...list(running, finished, loose), current: running.id }
+    const groups = deriveGroups(sessions, [first, forge, last], noArchive, view([SUBAGENTS_KEY, UNGROUPED_KEY]))
+    expect(groups.map(group => group.key)).toEqual(['first', 'forge', SUBAGENTS_KEY, 'last', UNGROUPED_KEY])
+    expect(groups[2]).toMatchObject({ label: 'Sub-agents', activeCount: 1, sessionCount: 2, containsCurrent: true })
+    expect(groups[2]!.sessions.map(row => row.id)).toEqual([running.id, finished.id])
+    const archivedGroups = deriveGroups(sessions, [first, forge, last], archived('child-finished'), view([SUBAGENTS_KEY]))
+    expect(archivedGroups[2]!.sessions.map(row => row.id)).toEqual([running.id])
+  })
+
   it('keeps Host Workspace and sessionIds order without Client recency sorting', () => {
     const sessions = list(summary('newer', 20), summary('older', 10))
     const workspaces = [workspace('first', ['older', 'newer']), workspace('empty', [])]
@@ -128,8 +146,11 @@ describe('deriveGroups', () => {
       view(['first']),
     )
 
+    expect(groups.map(group => group.key)).toEqual(['first', SUBAGENTS_KEY])
     expect(groups[0]!.sessions.map(node => node.id)).toEqual([parent.id, fork.id])
     expect(groups[0]!.sessionCount).toBe(2)
+    expect(groups[1]!.sessionCount).toBe(3)
+    expect(groups[1]!.activeCount).toBe(3)
     expect(groups[0]!.sessions[0]).toMatchObject({ running: false, runningSubagentCount: 2 })
     expect(groups[0]!.sessions[1]).toMatchObject({ running: false, runningSubagentCount: 1 })
     expect(deriveFlat(sessions, noArchive).map(node => [node.id, node.runningSubagentCount])).toEqual([

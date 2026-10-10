@@ -106,6 +106,7 @@ export class FakeApiClient implements IApiClient {
   // (apiproxy subpath) resolve to any and inferred params trip no-unsafe-argument.
   readonly sessions: IApiClient['sessions'] = {
     list: (payload: unknown) => this.record('session.list', payload, this.onList(payload)),
+    presence: (payload: unknown) => this.record('session.presence', payload, Promise.resolve(ok({ accepted: true as const }))),
     search: (payload: unknown, signal?: AbortSignal) => {
       this.lastSearchSignal = signal
       return this.record('session.search', payload, this.onSearch(payload))
@@ -161,6 +162,9 @@ export class FakeApiClient implements IApiClient {
     delete: (payload: unknown) => this.record('workspace.delete', payload, Promise.resolve(ok({ deleted: true as const }))),
     insertBefore: (payload: unknown) => this.record('workspace.insertBefore', payload, Promise.resolve(ok({
       workspaceIds: [(payload as { workspaceId: WorkspaceId }).workspaceId],
+    }))),
+    attachSession: (payload: unknown) => this.record('workspace.attachSession', payload, Promise.resolve(ok({
+      workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },
     }))),
     insertSessionBefore: (payload: unknown) => this.record('workspace.insertSessionBefore', payload, Promise.resolve(ok({
       workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },

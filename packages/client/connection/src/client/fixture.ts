@@ -2751,6 +2751,23 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         }
         return ok(request, { workspaceIds: workspaces.map(candidate => candidate.workspaceId) })
       },
+      attachSession: (request) => {
+        const { workspaceId, sessionId } = request.payload
+        const workspace = workspaces.find(w => w.workspaceId === workspaceId)
+        if (workspace === undefined) {
+          return err(request, {
+            code: 'workspace-not-found',
+            message: `no workspace ${workspaceId}`,
+            details: { workspaceId },
+          })
+        }
+        if (!workspace.sessionIds.includes(sessionId)) {
+          workspace.sessionIds = [...workspace.sessionIds, sessionId]
+          workspace.updatedAt = new Date().toISOString()
+          emitHost({ type: 'host/workspace-changed', workspace: { ...workspace } })
+        }
+        return ok(request, { workspace: { ...workspace } })
+      },
       insertSessionBefore: (request) => {
         const { workspaceId, sessionId, beforeSessionId } = request.payload
         const workspace = workspaces.find(w => w.workspaceId === workspaceId)
@@ -3203,6 +3220,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'workspace.rename': return this.api.workspace.rename(request)
       case 'workspace.delete': return this.api.workspace.delete(request)
       case 'workspace.insertBefore': return this.api.workspace.insertBefore(request)
+      case 'workspace.attachSession': return this.api.workspace.attachSession(request)
       case 'workspace.insertSessionBefore': return this.api.workspace.insertSessionBefore(request)
       case 'workspace.archiveSession': return this.api.workspace.archiveSession(request)
       case 'skill.list': return this.api.skills.list(request)

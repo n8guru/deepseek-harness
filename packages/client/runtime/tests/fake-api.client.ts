@@ -140,6 +140,7 @@ export class FakeApiClient implements IApiClient {
   // and inferred parameters would trip no-unsafe-argument.
   readonly sessions: IApiClient['sessions'] = {
     list: (payload: unknown) => this.record('session.list', payload, this.onList(payload)),
+    presence: (payload: unknown) => this.record('session.presence', payload, Promise.resolve(ok({ accepted: true as const }))),
     search: (payload: unknown, signal?: AbortSignal) => {
       this.lastSearchSignal = signal
       return this.record('session.search', payload, this.onSearch(payload))
@@ -216,6 +217,9 @@ export class FakeApiClient implements IApiClient {
     delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
     insertBefore: (payload: unknown) =>
       this.record('workspace.insertBefore', payload, this.onWorkspaceInsertBefore(payload)),
+    attachSession: (payload: unknown) => this.record('workspace.attachSession', payload, Promise.resolve(ok({
+      workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },
+    }))),
     insertSessionBefore: (payload: unknown) =>
       this.record('workspace.insertSessionBefore', payload, this.onWorkspaceInsertSessionBefore(payload)),
     archiveSession: (payload: unknown) =>

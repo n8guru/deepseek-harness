@@ -37,6 +37,7 @@ import {
   workspaceCreateValueSchema,
   workspaceDeleteValueSchema,
   workspaceInsertBeforeValueSchema,
+  workspaceAttachSessionValueSchema,
   workspaceInsertSessionBeforeValueSchema,
   workspaceListValueSchema,
   workspaceRenameValueSchema,
@@ -120,6 +121,7 @@ export interface IApiClient {
     rename(payload: RequestPayload<'workspace.rename'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.rename'>>>
     delete(payload: RequestPayload<'workspace.delete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.delete'>>>
     insertBefore(payload: RequestPayload<'workspace.insertBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertBefore'>>>
+    attachSession(payload: RequestPayload<'workspace.attachSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.attachSession'>>>
     insertSessionBefore(payload: RequestPayload<'workspace.insertSessionBefore'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.insertSessionBefore'>>>
     archiveSession(payload: RequestPayload<'workspace.archiveSession'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.archiveSession'>>>
   }
@@ -199,6 +201,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'workspace.rename': workspaceRenameValueSchema,
   'workspace.delete': workspaceDeleteValueSchema,
   'workspace.insertBefore': workspaceInsertBeforeValueSchema,
+  'workspace.attachSession': workspaceAttachSessionValueSchema,
   'workspace.insertSessionBefore': workspaceInsertSessionBeforeValueSchema,
   'workspace.archiveSession': workspaceArchiveSessionValueSchema,
   'skill.list': skillListValueSchema,
@@ -453,6 +456,7 @@ export abstract class AbstractApiClient implements IApiClient {
     rename: (payload, signal) => this.callUnary('workspace.rename', payload, signal),
     delete: (payload, signal) => this.callUnary('workspace.delete', payload, signal),
     insertBefore: (payload, signal) => this.callUnary('workspace.insertBefore', payload, signal),
+    attachSession: (payload, signal) => this.callUnary('workspace.attachSession', payload, signal),
     insertSessionBefore: (payload, signal) => this.callUnary('workspace.insertSessionBefore', payload, signal),
     archiveSession: (payload, signal) => this.callUnary('workspace.archiveSession', payload, signal),
   }
