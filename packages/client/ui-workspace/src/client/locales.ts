@@ -7,6 +7,8 @@
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'group.ungrouped': '未分组',
+  'peer.unreachable': '{machine}（无法连接）',
+  'peer.openOnHost': '在 {machine} 上打开',
   'session.new': '新会话',
   'section.workspaces': '工作区',
   'section.sessions': '会话',
@@ -76,6 +78,8 @@ export type WorkspaceKey = keyof typeof zh
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
   'group.ungrouped': 'Ungrouped',
+  'peer.unreachable': '{machine} (unreachable)',
+  'peer.openOnHost': 'Opens on {machine}',
   'session.new': 'New Session',
   'section.workspaces': 'Workspaces',
   'section.sessions': 'Sessions',

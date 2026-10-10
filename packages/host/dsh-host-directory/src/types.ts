@@ -1,17 +1,4 @@
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type {} from '@deepseek-ai/dsh-typert-protocol'
-
-declare module '@deepseek-ai/dsh-typert-protocol' {
-  interface RemoteErrorDetailsMap {
-    /** allow-remote-steer refused a steer verb or the opt-in itself. */
-    'dsh-host/steer-denied': {
-      readonly capability?: string
-      readonly endpoint?: string
-      readonly sessionId?: string
-      readonly reason?: string
-    }
-  }
-}
 
 /**
  * One configured peer DSH Host this Host polls server-to-server. `authority`

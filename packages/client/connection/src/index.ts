@@ -14,6 +14,9 @@ import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink
 export type {
   ConnectionRpcAuthority,
   ConnectionRpcEndpointMatcher,
+  ConnectionRpcFailure,
+  ConnectionRpcGuard,
+  ConnectionRpcGuardRequest,
   ConnectionRpcHandler,
   ConnectionRpcHandlerOptions,
   HostConnectionHandle,

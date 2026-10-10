@@ -618,6 +618,36 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'dshHostDirectory',
+    summary: 'Host-only Remote service: owns the peer poll loop and publishes the merged directory snapshot.',
+    description: 'Host-only Remote service: owns the peer poll loop and publishes the merged directory snapshot. Declares no same-process Context merge beyond its own `dshHostDirectory` key — Client packages consume it exclusively through the generated `dshHostDirectory/list` Remote, mirroring plugin-inventory.',
+    methods: [
+      {
+        signature: 'readonly steerGate: RemoteSteerGate = new RemoteSteerGate()',
+        description: 'allow-remote-steer: per-session opt-in enforced on this (owning) Host.',
+        parameters: [],
+      },
+      {
+        signature: '@Remote(\'list\') list(): DshHostDirectorySnapshot',
+        description: 'Read the current merged directory snapshot: every session known from a currently-tracked peer\'s last successful poll, plus per-peer freshness. Never blocks on a network call — always returns the last poll\'s result.',
+        parameters: [],
+        returns: 'This host\'s label, remote sessions, and peer poll status.',
+      },
+      {
+        signature: '@Remote(\'allowRemoteSteer\') allowRemoteSteer(request: DshHostSteerStateRequest): DshHostSteerState',
+        description: 'Read one session\'s allow-remote-steer state. Safe from any origin: it reveals only whether remote steering is on, never any session content.',
+        parameters: [{ name: 'request', description: 'the session to read.' }],
+        returns: 'its effective state (default off; ineligible for mesh-pump sessions).',
+      },
+      {
+        signature: '@Remote(\'setAllowRemoteSteer\') setAllowRemoteSteer(request: DshHostSetAllowRemoteSteerRequest): DshHostSteerState',
+        description: 'Grant or revoke allow-remote-steer for one session. Refused for any non-loopback origin by the gate itself (a remote tab cannot opt itself in) and for mesh-pump-owned sessions (never eligible).',
+        parameters: [{ name: 'request', description: 'the session and whether to allow remote steering.' }],
+        returns: 'the resulting state.',
+      },
+    ],
+  },
+  {
     key: 'e2b',
     summary: 'Creates one lazily consumable E2B SDK handle and deletes the sandbox at timeout or disposal.',
     description: 'Creates one lazily consumable E2B SDK handle and deletes the sandbox at timeout or disposal. Creation begins at plugin construction; adapters await getSandbox before their first operation.',
@@ -3121,6 +3151,42 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type DshEnvironmentKey = `${typeof DSH_ENV_PREFIX}${string}`;',
   },
   {
+    name: 'DshHostDirectorySnapshot',
+    declaration: 'export interface DshHostDirectorySnapshot {\n    readonly self: string;\n    readonly sessions: readonly DshHostRemoteSession[];\n    readonly peers: readonly DshHostPeerView[];\n}',
+  },
+  {
+    name: 'DshHostPeerStatus',
+    declaration: 'export type DshHostPeerStatus = {\n    readonly state: \'ok\';\n    readonly lastPolledAt: number;\n    readonly sessionCount: number;\n} | {\n    readonly state: \'unreachable\';\n    readonly lastAttemptAt: number;\n    readonly lastOkAt?: number;\n    readonly message: string;\n} | {\n    readonly state: \'never-polled\';\n};',
+  },
+  {
+    name: 'DshHostPeerView',
+    declaration: 'export interface DshHostPeerView {\n    readonly machine: string;\n    readonly authority: string;\n    readonly scheme: \'http\' | \'https\';\n    readonly status: DshHostPeerStatus;\n}',
+  },
+  {
+    name: 'DshHostPendingInput',
+    declaration: 'export type DshHostPendingInput = {\n    readonly kind: \'question\';\n    readonly toolName: string;\n    readonly summary?: string;\n} | {\n    readonly kind: \'approval\';\n    readonly toolName?: string;\n    readonly summary?: string;\n};',
+  },
+  {
+    name: 'DshHostRemoteSession',
+    declaration: 'export interface DshHostRemoteSession {\n    readonly sessionId: SessionId;\n    readonly machine: string;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly cwd?: string;\n    readonly title?: string;\n    readonly pendingInput?: DshHostPendingInput;\n}',
+  },
+  {
+    name: 'DshHostSetAllowRemoteSteerRequest',
+    declaration: 'export interface DshHostSetAllowRemoteSteerRequest {\n    readonly sessionId: string;\n    readonly allow: boolean;\n}',
+  },
+  {
+    name: 'DshHostSteerIneligibleReason',
+    declaration: 'export type DshHostSteerIneligibleReason = \'mesh-pump-owned\';',
+  },
+  {
+    name: 'DshHostSteerState',
+    declaration: 'export interface DshHostSteerState {\n    readonly sessionId: string;\n    readonly allowRemoteSteer: boolean;\n    readonly eligible: boolean;\n    readonly ineligibleReason?: DshHostSteerIneligibleReason;\n}',
+  },
+  {
+    name: 'DshHostSteerStateRequest',
+    declaration: 'export interface DshHostSteerStateRequest {\n    readonly sessionId: string;\n}',
+  },
+  {
     name: 'DynamicCordisPackage',
     declaration: 'export interface DynamicCordisPackage {\n    pluginId: CordisDynamicPluginId;\n    packageId: CordisDynamicPackageId;\n    pluginRunId: CordisDynamicPluginRunId;\n    name: string;\n}',
   },
@@ -3699,6 +3765,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
+  },
+  {
+    name: 'RemoteSteerGate',
+    declaration: 'export class RemoteSteerGate {\n    ineligibleReason(sessionId: string): DshHostSteerIneligibleReason | undefined;\n    observeRequestId(sessionId: string, requestId: string | undefined): void;\n    state(sessionId: string): DshHostSteerState;\n    setAllow(sessionId: string, allow: boolean): DshHostSteerState;\n    allowedSessionIds(): string[];\n    guard(request: Pick<ConnectionRpcGuardRequest, \'endpoint\' | \'payload\' | \'authority\'> & {\n        readonly rpcId?: string;\n    }): ConnectionRpcFailure | undefined;\n}',
   },
   {
     name: 'ReplayEnvelope',

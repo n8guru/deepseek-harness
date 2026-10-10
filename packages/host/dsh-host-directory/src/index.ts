@@ -1,28 +1,23 @@
 /**
  * Host-side tailnet directory: polls a static list of peer DSH Hosts' own
- * `session/list` Typert Remote method server-to-server over plain `POST
- * /api/session/list` (the EXISTING wire protocol — no new endpoint shape),
+ * `session.list` API Proxy method server-to-server over plain `POST
+ * /api/session.list` (the EXISTING wire protocol — no new endpoint shape),
  * and publishes the merged remote-session view as one Typert Remote method
  * of its own, `dshHostDirectory/list`, over the same shared `/api` channel
  * (the same mechanism `@deepseek-ai/dsh-host-plugin-inventory` uses).
  *
- * CONFIG: `peers` and `pollIntervalMs` are ordinary `.volatile()` Config
- * fields (Loader's live-reference mechanism — see
- * `@deepseek-ai/dsh-settings`'s README: "Business plugins read their Config
- * references directly"), edited through the profile's Cordis patch or the
- * generic Settings form, exactly like `dsh-bash-local`'s `timeoutMs`. No
- * bespoke settings-namespace registration.
+ * CONFIG: `machine`, `peers` and `pollIntervalMs` are ordinary plugin Config
+ * fields edited through the profile's Cordis patch or the generic Settings
+ * form. DSH 0.1.0-rc.8's Loader has no live-reference (`.volatile()`) Config,
+ * so a changed entry reloads this plugin, which rebuilds the peer table from
+ * the new values; no Host restart. No bespoke settings-namespace registration.
  *
- * AUTH NOTE (ground truth as of this build, later than the Fable 5.1 review
- * this step re-scopes from): every `/api` request — including a
- * server-to-server one — now requires the peer's signed browser-session
- * cookie (Agent Note 2026-08-24-browser-token-authentication; landed BEFORE
- * the review, which still assumed "the Host has no authentication layer to
- * consume a token"). There is no non-browser bearer by design (that note
- * explicitly declined one). This plugin does not invent a second credential:
- * it sends the SAME cookie a browser would hold, supplied once per peer via
- * `DshHostPeer.sessionCookie` — see that field's doc and RESULT.md for the
- * one-time operator bootstrap ceremony this requires per peer pair.
+ * AUTH NOTE (rc.8): the `/api` channel is guarded by the Host-header trust
+ * fence (`api-request-trust`: loopback, LAN literals, or a declared
+ * `--trusted-host`), which is explicitly not an auth layer. A peer therefore
+ * only has to list THIS Host's authority among its trusted hosts; the poll
+ * sends no credential. `DshHostPeer.sessionCookie` stays as an optional
+ * pass-through for peers fronted by an auth layer (later DSH lines).
  *
  * R2 read side only (dsh-mesh-session-view project 1479605, step 2): never
  * writes ClaudeSession, mesh-pump, or mesh-pull-dispatch tables; owns no
@@ -30,7 +25,7 @@
  * "mesh" — everywhere in this package.
  */
 
-import type { Context, Volatile } from '@deepseek-ai/cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
 import os from 'node:os'
@@ -72,11 +67,23 @@ const DshHostPeerSchema = z.object({
   // 2026-08-24-browser-token-authentication) and pasted here by the
   // operator. Marked secret so settings.describe(redactSecrets) never
   // returns it to a configuration UI.
-  sessionCookie: z.string().role('secret'),
+  sessionCookie: z.string().role('secret').default(''),
   // dsh-mesh-session-view step 6: opt-in per-session pending-input poll.
   // See DshHostPeer.pollPendingInput's doc in types.ts.
   pollPendingInput: z.boolean().default(false),
 }) satisfies z<DshHostPeer>
+
+/**
+ * Request headers for one server-to-server peer call. The rc.8 `/api` fence is
+ * a Host-header trust check (not an auth layer), so no credential is needed
+ * when the peer lists this Host's authority; a configured `sessionCookie`
+ * (peers that front /api with an auth layer) is forwarded verbatim.
+ */
+function peerHeaders(peer: DshHostPeer): Record<string, string> {
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (peer.sessionCookie !== undefined && peer.sessionCookie.length > 0) headers.cookie = peer.sessionCookie
+  return headers
+}
 
 /** Default per-peer poll interval. */
 const DEFAULT_POLL_INTERVAL_MS = 5000
@@ -148,11 +155,15 @@ export function classifyPendingInput(events: readonly HistoryEvent[]): DshHostPe
   return undefined
 }
 
-/** Ref-ified live Config: `.get()` reads the current committed value, no reload needed. */
+/**
+ * Plugin Config. On DSH 0.1.0-rc.8 the Loader has no `.volatile()` live-ref
+ * Config: a changed entry config reloads this plugin, which rebuilds its peer
+ * table from the new values (no Host restart either way).
+ */
 interface Config {
-  machine: Volatile<string | undefined>
-  peers: Volatile<DshHostPeer[]>
-  pollIntervalMs: Volatile<number>
+  machine?: string | undefined
+  peers: DshHostPeer[]
+  pollIntervalMs: number
 }
 
 /**
@@ -184,11 +195,11 @@ interface PeerState {
 export class DshHostDirectoryService extends TypertRemoteService {
   static Config = z.object({
     /** Operator-declared label for THIS host in the directory. @default os.hostname() */
-    machine: z.string().volatile(),
+    machine: z.string(),
     /** Configured peers, in operator-declared order. Empty = solo, no polling. */
-    peers: z.array(DshHostPeerSchema).default([]).volatile(),
+    peers: z.array(DshHostPeerSchema).default([]),
     /** Poll interval in milliseconds for each configured peer. */
-    pollIntervalMs: z.natural().default(DEFAULT_POLL_INTERVAL_MS).volatile(),
+    pollIntervalMs: z.natural().default(DEFAULT_POLL_INTERVAL_MS),
   })
 
   private readonly peers = new Map<string, PeerState>()
@@ -200,7 +211,6 @@ export class DshHostDirectoryService extends TypertRemoteService {
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'dshHostDirectory')
     this.syncPeers()
-    ctx.on('loader/volatile-update', () => { this.syncPeers() })
 
     // allow-remote-steer (step 5): veto steer verbs arriving from a non-loopback
     // origin unless the session opted in. Pure policy: it never grants, and it
@@ -227,11 +237,11 @@ export class DshHostDirectoryService extends TypertRemoteService {
   }
 
   private machineLabel(): string {
-    return this.config.machine.get() ?? os.hostname()
+    return this.config.machine ?? os.hostname()
   }
 
   private rearmTimer(): void {
-    const intervalMs = Math.max(MIN_POLL_INTERVAL_MS, this.config.pollIntervalMs.get())
+    const intervalMs = Math.max(MIN_POLL_INTERVAL_MS, this.config.pollIntervalMs)
     if (this.timerIntervalMs === intervalMs) return
     clearInterval(this.timer)
     this.timerIntervalMs = intervalMs
@@ -240,9 +250,9 @@ export class DshHostDirectoryService extends TypertRemoteService {
     }, intervalMs)
   }
 
-  /** Reconcile tracked peer state against the current live `peers` config on every volatile update. */
+  /** Build the tracked peer table from the current `peers` config. */
   private syncPeers(): void {
-    const next = this.config.peers.get()
+    const next = this.config.peers
     const nextAuthorities = new Set(next.map(peer => peer.authority))
     for (const authority of this.peers.keys()) {
       if (!nextAuthorities.has(authority)) this.peers.delete(authority)
@@ -266,25 +276,19 @@ export class DshHostDirectoryService extends TypertRemoteService {
   private async pollOnePeer(state: PeerState): Promise<void> {
     const { peer } = state
     const scheme = peer.scheme ?? 'http'
-    // session/list: the SAME wire endpoint a peer's own browser Client calls
-    // (namespace `session`, method `list` — SessionController's Typert
-    // binding), reached over the existing shared /api channel. No new route.
-    const url = `${scheme}://${peer.authority}/api/session/list`
+    // session.list: the SAME wire endpoint a peer's own browser Client calls
+    // (DSH 0.1.0-rc.8 API Proxy unary method `session.list`), reached over the
+    // existing shared /api channel. No new route.
+    const url = `${scheme}://${peer.authority}/api/session.list`
     const attemptAt = Date.now()
     try {
-      if (peer.sessionCookie === undefined || peer.sessionCookie.length === 0) {
-        throw new Error('no sessionCookie configured for this peer: run the one-time token-URL exchange first (see RESULT.md)')
-      }
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'cookie': peer.sessionCookie,
-        },
+        headers: peerHeaders(peer),
         body: JSON.stringify({
           type: 'client-request',
           rpcId: randomUUID(),
-          method: 'session/list',
+          method: 'session.list',
           payload: {},
         }),
         signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
@@ -359,7 +363,7 @@ export class DshHostDirectoryService extends TypertRemoteService {
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'cookie': peer.sessionCookie ?? '' },
+        headers: peerHeaders(peer),
         body: JSON.stringify({
           type: 'client-request',
           rpcId: randomUUID(),

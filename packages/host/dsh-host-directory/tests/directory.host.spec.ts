@@ -1,4 +1,4 @@
-/** Peer poll loop, live volatile Config updates, and the published dshHostDirectory/list Remote. */
+/** Peer poll loop, Config-driven reload, and the published dshHostDirectory/list Remote. */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, type Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
@@ -56,12 +56,12 @@ describe('DshHostDirectoryService', () => {
 
   it('polls a configured peer, merges its sessions with the machine label, and reports ok status', async () => {
     const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      expect(String(url)).toBe('http://peer.example:3080/api/session/list')
+      expect(String(url)).toBe('http://peer.example:3080/api/session.list')
       expect(init?.method).toBe('POST')
       const headers = init?.headers as Record<string, string>
       expect(headers.cookie).toBe('dsh-auth-abc=signed-value')
       const body = JSON.parse(init?.body as string) as { method: string; type: string }
-      expect(body).toMatchObject({ type: 'client-request', method: 'session/list' })
+      expect(body).toMatchObject({ type: 'client-request', method: 'session.list' })
       return new Response(JSON.stringify({
         type: 'server-response',
         rpcId: 'x',
@@ -111,27 +111,26 @@ describe('DshHostDirectoryService', () => {
     }, { timeout: 2000, interval: 20 })
   })
 
-  it('fails closed with a visible status when a peer has no sessionCookie configured, never guessing one', async () => {
-    const fetchMock = vi.fn()
+  it('polls a peer with no sessionCookie configured and sends no cookie header (rc.8 /api is a Host-header fence, not an auth layer)', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string>
+      expect(headers.cookie).toBeUndefined()
+      expect(headers['content-type']).toBe('application/json')
+      return new Response(JSON.stringify({
+        type: 'server-response', rpcId: 'x',
+        result: { ok: true, value: { items: [{ sessionId: 's1', updatedAt: 1, running: false, blank: false }] } },
+      }), { status: 200 })
+    })
     vi.stubGlobal('fetch', fetchMock)
     const { directory } = await harness({
-      peers: [{ machine: 'no-cookie-machine', authority: 'nocookie.example:3080', sessionCookie: '' }],
+      peers: [{ machine: 'no-cookie-machine', authority: 'nocookie.example:3080' }],
       pollIntervalMs: 1000,
     })
 
     await vi.waitFor(() => {
-      const snapshot = directory.list()
-      expect(snapshot.peers).toEqual([{
-        machine: 'no-cookie-machine', authority: 'nocookie.example:3080',
-        scheme: 'http',
-        status: {
-          state: 'unreachable',
-          lastAttemptAt: expect.any(Number) as number,
-          message: expect.stringContaining('sessionCookie') as string,
-        },
-      }])
+      expect(directory.list().peers[0]?.status).toMatchObject({ state: 'ok', sessionCount: 1 })
     }, { timeout: 2000, interval: 20 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalled()
   })
 
   it('surfaces a 401 from a peer as a visible unreachable status naming the cause', async () => {
@@ -147,13 +146,13 @@ describe('DshHostDirectoryService', () => {
     }, { timeout: 2000, interval: 20 })
   })
 
-  it('reacts to a live volatile config update: a peer added after boot starts polling without a restart', async () => {
+  it('a config update reloads the plugin: a peer added after boot starts polling without a Host restart', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       type: 'server-response', rpcId: 'x', result: { ok: true, value: { items: [] } },
     }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
-    const { ctx, entryId, directory } = await harness({ peers: [], pollIntervalMs: 1000 })
-    expect(directory.list().peers).toEqual([])
+    const { ctx, entryId, directory: initial } = await harness({ peers: [], pollIntervalMs: 1000 })
+    expect(initial.list().peers).toEqual([])
 
     await ctx.loader.update(entryId, {
       config: {
@@ -163,6 +162,7 @@ describe('DshHostDirectoryService', () => {
     })
 
     await vi.waitFor(() => {
+      const directory = ctx.get('dshHostDirectory') as DshHostDirectoryService
       expect(directory.list().peers).toEqual([
         {
           machine: 'late-machine',
@@ -178,14 +178,14 @@ describe('DshHostDirectoryService', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       type: 'server-response', rpcId: 'x', result: { ok: true, value: { items: [] } },
     }), { status: 200 })))
-    const { ctx, entryId, directory } = await harness({
+    const { ctx, entryId, directory: initial } = await harness({
       peers: [{ machine: 'temp-machine', authority: 'temp.example:3080', sessionCookie: 'dsh-auth-z=w' }],
       pollIntervalMs: 1000,
     })
-    await vi.waitFor(() => { expect(directory.list().peers).toHaveLength(1) }, { timeout: 2000, interval: 20 })
+    await vi.waitFor(() => { expect(initial.list().peers).toHaveLength(1) }, { timeout: 2000, interval: 20 })
 
     await ctx.loader.update(entryId, { config: { peers: [], pollIntervalMs: 1000 } })
-    expect(directory.list().peers).toEqual([])
+    expect((ctx.get('dshHostDirectory') as DshHostDirectoryService).list().peers).toEqual([])
   })
 })
 
@@ -243,7 +243,7 @@ describe('classifyPendingInput', () => {
 describe('DshHostDirectoryService pendingInput (step 6, opt-in)', () => {
   it('omits pendingInput entirely when pollPendingInput is not set (R2 contract unchanged by default)', async () => {
     const fetchMock = vi.fn(async (url: string | URL) => {
-      if (String(url).endsWith('/api/session/list')) {
+      if (String(url).endsWith('/api/session.list')) {
         return new Response(JSON.stringify({
           type: 'server-response', rpcId: 'x',
           result: { ok: true, value: { items: [{ sessionId: 's1', updatedAt: 1, running: true, blank: false }] } },
@@ -264,7 +264,7 @@ describe('DshHostDirectoryService pendingInput (step 6, opt-in)', () => {
 
   it('surfaces pendingInput per session when pollPendingInput is enabled', async () => {
     const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
-      if (String(url).endsWith('/api/session/list')) {
+      if (String(url).endsWith('/api/session.list')) {
         return new Response(JSON.stringify({
           type: 'server-response', rpcId: 'x',
           result: { ok: true, value: { items: [{ sessionId: 's1', updatedAt: 1, running: true, blank: false }] } },
@@ -297,7 +297,7 @@ describe('DshHostDirectoryService pendingInput (step 6, opt-in)', () => {
 
   it('a failed per-session history read omits pendingInput but never marks the peer unreachable', async () => {
     const fetchMock = vi.fn(async (url: string | URL) => {
-      if (String(url).endsWith('/api/session/list')) {
+      if (String(url).endsWith('/api/session.list')) {
         return new Response(JSON.stringify({
           type: 'server-response', rpcId: 'x',
           result: { ok: true, value: { items: [{ sessionId: 's1', updatedAt: 1, running: true, blank: false }] } },

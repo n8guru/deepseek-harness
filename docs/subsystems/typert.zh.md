@@ -250,6 +250,41 @@ respond(message: ClientResponse): Promise<RpcReceipt>
 
 Source: [`packages/host/apiproxy/src/api/index.ts:22`](../../packages/host/apiproxy/src/api/index.ts)
 
+<a id="ctxdshhostdirectory--dshhostdirectoryservice"></a>
+
+### `ctx.dshHostDirectory` — `DshHostDirectoryService`
+
+Host-only Remote service: owns the peer poll loop and publishes the merged directory snapshot. Declares no same-process Context merge beyond its own `dshHostDirectory` key — Client packages consume it exclusively through the generated `dshHostDirectory/list` Remote, mirroring plugin-inventory.
+
+```ts cordis-catalog
+/**
+ * Read the current merged directory snapshot: every session known from a
+ * currently-tracked peer's last successful poll, plus per-peer freshness.
+ * Never blocks on a network call — always returns the last poll's result.
+ * @returns This host's label, remote sessions, and peer poll status.
+ */
+@Remote('list') list(): DshHostDirectorySnapshot
+
+/**
+ * Read one session's allow-remote-steer state. Safe from any origin: it
+ * reveals only whether remote steering is on, never any session content.
+ * @param request - the session to read.
+ * @returns its effective state (default off; ineligible for mesh-pump sessions).
+ */
+@Remote('allowRemoteSteer') allowRemoteSteer(request: DshHostSteerStateRequest): DshHostSteerState
+
+/**
+ * Grant or revoke allow-remote-steer for one session. Refused for any
+ * non-loopback origin by the gate itself (a remote tab cannot opt itself
+ * in) and for mesh-pump-owned sessions (never eligible).
+ * @param request - the session and whether to allow remote steering.
+ * @returns the resulting state.
+ */
+@Remote('setAllowRemoteSteer') setAllowRemoteSteer(request: DshHostSetAllowRemoteSteerRequest): DshHostSteerState
+```
+
+Source: [`packages/host/dsh-host-directory/src/index.ts:195`](../../packages/host/dsh-host-directory/src/index.ts)
+
 <a id="ctxtypert--typertregistry"></a>
 
 ### `ctx.typert` — `TypertRegistry`

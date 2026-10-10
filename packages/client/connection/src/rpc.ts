@@ -18,6 +18,37 @@ export type ConnectionRpcHandler = (
   signal: AbortSignal,
 ) => Promise<RpcResult<unknown>>
 
+/** Carrier-neutral refusal produced by a pre-dispatch guard. */
+export interface ConnectionRpcFailure {
+  readonly code: string
+  readonly message: string
+  readonly details: object
+}
+
+/**
+ * Request facts handed to a pre-dispatch guard. `authority` is the verbatim
+ * `Host` header the admitted request arrived on (the origin the browser tab
+ * is served from), so a guard can tell a loopback owner tab from a tab opened
+ * at the Host's tailnet origin. `rpcId` is the envelope's correlation id.
+ */
+export interface ConnectionRpcGuardRequest {
+  readonly endpoint: string
+  readonly rpcId: string
+  readonly payload: unknown
+  readonly authority: string | undefined
+  readonly headers: Headers
+}
+
+/**
+ * Pre-dispatch veto for one decoded `/api` RPC (interceptor-claimed OR
+ * API Proxy fallback). Returns a failure to refuse the call (it becomes the
+ * response's error result; no handler runs), or `undefined` to let it proceed.
+ * Guards add policy only; they never grant.
+ */
+export type ConnectionRpcGuard = (
+  request: ConnectionRpcGuardRequest,
+) => ConnectionRpcFailure | undefined | Promise<ConnectionRpcFailure | undefined>
+
 /** Synchronous ownership test for one endpoint on a shared RPC channel. */
 export type ConnectionRpcEndpointMatcher = (endpoint: string) => boolean
 
@@ -50,6 +81,16 @@ export interface HostConnectionRpc {
     handler: ConnectionRpcHandler,
     options: ConnectionRpcHandlerOptions,
   ): () => Promise<void>
+
+  /**
+   * Register a pre-dispatch guard on the shared `/api` channel. Every guard runs
+   * (in registration order) after the envelope is decoded and before the
+   * interceptor or API Proxy fallback; the first refusal ends the call.
+   * @param channel - reserved shared channel; currently `/api`.
+   * @param guard - policy veto, see {@link ConnectionRpcGuard}.
+   * @returns asynchronous disposer removing the guard.
+   */
+  guard(channel: '/api', guard: ConnectionRpcGuard): () => Promise<void>
 }
 
 /** Host `ctx.connection` shape consumed by transport-independent adapters. */

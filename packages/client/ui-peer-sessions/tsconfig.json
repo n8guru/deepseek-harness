@@ -21,6 +21,9 @@
       "path": "../runtime"
     },
     {
+      "path": "../../runtime-diagnostics/invariants"
+    },
+    {
       "path": "../../test-support/client-runtime"
     }
   ]

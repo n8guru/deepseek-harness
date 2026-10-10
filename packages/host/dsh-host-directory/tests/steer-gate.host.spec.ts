@@ -1,8 +1,8 @@
 /** allow-remote-steer gate: default off, opt-in on, pump excluded, loopback owner never gated. */
 import { describe, expect, it } from 'vitest'
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import {
   RemoteSteerGate,
+  SteerDeniedError,
   STEER_DENIED_CODE,
   SET_ALLOW_REMOTE_STEER_ENDPOINT,
   isLoopbackAuthority,
@@ -32,6 +32,9 @@ describe('sessionIdOfPayload', () => {
     expect(sessionIdOfPayload(null)).toBeUndefined()
     expect(sessionIdOfPayload({ args: { request: {} } })).toBeUndefined()
     expect(sessionIdOfPayload({ args: { request: { sessionId: '' } } })).toBeUndefined()
+    // rc.8 API Proxy shape: the request object rides the payload directly.
+    expect(sessionIdOfPayload({ sessionId: 's2', mode: 'steer' })).toBe('s2')
+    expect(sessionIdOfPayload({ sessionId: '' })).toBeUndefined()
   })
 })
 
@@ -39,7 +42,7 @@ describe('RemoteSteerGate: default OFF', () => {
   it('refuses every gated steer verb from a remote origin when the session never opted in', () => {
     const gate = new RemoteSteerGate()
     expect(gate.state('s1')).toEqual({ sessionId: 's1', allowRemoteSteer: false, eligible: true })
-    for (const endpoint of ['session/prompt', 'session/updateQueue', 'session/cancel', 'session/selectModel', 'session/fork', 'session/rename']) {
+    for (const endpoint of ['session.prompt', 'session.updateQueue', 'session.cancel', 'session.selectModel', 'session.fork', 'session.rename', 'session/prompt', 'session/updateQueue', 'session/cancel', 'session/selectModel', 'session/fork', 'session/rename']) {
       const refusal = gate.guard({ endpoint, payload: payload('s1', { requestId: 'r1' }), authority: REMOTE })
       expect(refusal, endpoint).toMatchObject({ code: STEER_DENIED_CODE, details: { sessionId: 's1', reason: 'not-opted-in' } })
     }
@@ -58,7 +61,7 @@ describe('RemoteSteerGate: default OFF', () => {
 
   it('does not gate reads, create, or approval/answer traffic from a remote origin', () => {
     const gate = new RemoteSteerGate()
-    for (const endpoint of ['session/list', 'session/page', 'session/follow', 'session/projections', 'session/create', 'dshHostDirectory/list', 'dshHostDirectory/allowRemoteSteer', 'remote-events/result']) {
+    for (const endpoint of ['session.list', 'session.history', 'session.create', 'session.search', 'session/list', 'session/page', 'session/follow', 'session/projections', 'session/create', 'dshHostDirectory/list', 'dshHostDirectory/allowRemoteSteer', 'remote-events/result']) {
       expect(gate.guard({ endpoint, payload: payload('s1'), authority: REMOTE }), endpoint).toBeUndefined()
     }
   })
@@ -86,15 +89,28 @@ describe('RemoteSteerGate: opt-in ON', () => {
   })
 })
 
+describe('RemoteSteerGate: rc.8 API Proxy wire shape', () => {
+  it('gates session.prompt by the direct {sessionId} payload and stamps a pump rpcId from the envelope', () => {
+    const gate = new RemoteSteerGate()
+    expect(gate.guard({ endpoint: 'session.prompt', payload: { sessionId: 's1', mode: 'steer', content: [] }, authority: REMOTE, rpcId: 'r1' }))
+      .toMatchObject({ code: STEER_DENIED_CODE, details: { sessionId: 's1', reason: 'not-opted-in' } })
+    gate.setAllow('s1', true)
+    expect(gate.guard({ endpoint: 'session.prompt', payload: { sessionId: 's1', mode: 'steer', content: [] }, authority: REMOTE, rpcId: 'r2' })).toBeUndefined()
+    // the pump (loopback origin) prompts with its mesh-dispatch rpcId: opt-in revoked, session ineligible
+    expect(gate.guard({ endpoint: 'session.prompt', payload: { sessionId: 's1', mode: 'queue', content: [] }, authority: LOCAL, rpcId: 'mesh-dispatch-9-1' })).toBeUndefined()
+    expect(gate.state('s1')).toMatchObject({ allowRemoteSteer: false, eligible: false, ineligibleReason: 'mesh-pump-owned' })
+  })
+})
+
 describe('RemoteSteerGate: mesh-pump sessions are never eligible', () => {
-  it('refuses to opt in a pump-minted session id, with a typed steer-denied RemoteError', () => {
+  it('refuses to opt in a pump-minted session id, with a typed steer-denied SteerDeniedError', () => {
     const gate = new RemoteSteerGate()
     expect(gate.state('session-mesh-138505-a1')).toEqual({
       sessionId: 'session-mesh-138505-a1', allowRemoteSteer: false, eligible: false, ineligibleReason: 'mesh-pump-owned',
     })
     let thrown: unknown
     try { gate.setAllow('session-mesh-138505-a1', true) } catch (error) { thrown = error }
-    expect(thrown).toBeInstanceOf(RemoteError)
+    expect(thrown).toBeInstanceOf(SteerDeniedError)
     expect(thrown).toMatchObject({ code: STEER_DENIED_CODE, details: { sessionId: 'session-mesh-138505-a1', reason: 'mesh-pump-owned' } })
     expect(gate.guard({ endpoint: 'session/prompt', payload: payload('session-mesh-138505-a1'), authority: REMOTE }))
       .toMatchObject({ code: STEER_DENIED_CODE, details: { reason: 'mesh-pump-owned' } })
@@ -108,7 +124,7 @@ describe('RemoteSteerGate: mesh-pump sessions are never eligible', () => {
     expect(gate.guard({ endpoint: 'session/prompt', payload: payload('s9', { requestId: 'mesh-dispatch-1-1' }), authority: LOCAL })).toBeUndefined()
     expect(gate.state('s9')).toMatchObject({ allowRemoteSteer: false, eligible: false, ineligibleReason: 'mesh-pump-owned' })
     expect(gate.guard({ endpoint: 'session/prompt', payload: payload('s9', { requestId: 'r' }), authority: REMOTE })).toMatchObject({ code: STEER_DENIED_CODE })
-    expect(() => gate.setAllow('s9', true)).toThrow(RemoteError)
+    expect(() => gate.setAllow('s9', true)).toThrow(SteerDeniedError)
     expect(gate.allowedSessionIds()).toEqual([])
   })
 

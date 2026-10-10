@@ -17,6 +17,7 @@ import type { ISession, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-r
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime, usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 
 // The service reads its initial locale from the browser; these specs assert
@@ -34,6 +35,7 @@ async function createRuntime(): Promise<SlotTestRuntime> {
   runtime.provide('connection', {
     hostDescription: { getSnapshot: () => undefined, subscribe: () => () => {} },
   })
+  runtime.provide('dshPeerSessions', createSnapshotStore({ snapshot: undefined, lastPollFailed: false }))
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.provide('locale', locale)
   runtime.slots.installLocale(locale)

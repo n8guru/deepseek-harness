@@ -37,7 +37,6 @@
  */
 
 import type { ConnectionRpcFailure, ConnectionRpcGuardRequest } from '@deepseek-ai/dsh-client-connection'
-import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import type { DshHostSteerIneligibleReason, DshHostSteerState } from './types.ts'
 
 /** Capability name of the opt-in. */
@@ -45,6 +44,14 @@ export const ALLOW_REMOTE_STEER = 'allow-remote-steer'
 
 /** Session-addressed write verbs a non-loopback origin may only use on an opted-in session. */
 export const GATED_STEER_ENDPOINTS: ReadonlySet<string> = new Set([
+  // DSH 0.1.0-rc.8 API Proxy unary methods (dotted wire names).
+  'session.prompt',
+  'session.updateQueue',
+  'session.cancel',
+  'session.selectModel',
+  'session.fork',
+  'session.rename',
+  // Typert-bound spelling used by later DSH lines; harmless where unrouted.
   'session/prompt',
   'session/updateQueue',
   'session/cancel',
@@ -53,8 +60,24 @@ export const GATED_STEER_ENDPOINTS: ReadonlySet<string> = new Set([
   'session/rename',
 ])
 
+/** Endpoints that submit a prompt (the pump's request id rides the envelope rpcId). */
+const PROMPT_ENDPOINTS: ReadonlySet<string> = new Set(['session.prompt', 'session/prompt'])
+
 /** Opt-in setter endpoint: only a loopback (owner) origin may call it. */
 export const SET_ALLOW_REMOTE_STEER_ENDPOINT = 'dshHostDirectory/setAllowRemoteSteer'
+
+/**
+ * A refused opt-in. rc.8's Typert Gateway folds any thrown Error into the
+ * closed `internal` RPC code, so the stable machine-readable code travels as
+ * the message prefix (`dsh-host/steer-denied: ...`) and on this error object.
+ */
+export class SteerDeniedError extends Error {
+  readonly code = 'dsh-host/steer-denied' as const
+  constructor(message: string, readonly details: Readonly<Record<string, string>>) {
+    super(`dsh-host/steer-denied: ${message}`)
+    this.name = 'SteerDeniedError'
+  }
+}
 
 /** Failure code a refused steer carries on the wire. */
 export const STEER_DENIED_CODE = 'dsh-host/steer-denied' as const
@@ -85,16 +108,18 @@ export function isLoopbackAuthority(authority: string | undefined): boolean {
 }
 
 /**
- * Pull the addressed session id out of a decoded RPC payload. Typert's HTTP
- * envelope is `{ args: { <paramName>: value } }`; every gated verb's first
- * parameter is `request: { sessionId, ... }`.
+ * Pull the addressed session id out of a decoded RPC payload. Two wire shapes
+ * exist: the rc.8 API Proxy carries the request object directly
+ * (`{ sessionId, ... }`); Typert-bound endpoints wrap it as
+ * `{ args: { request: { sessionId, ... } } }`.
  * @param payload - decoded envelope payload.
  * @returns the session id, or undefined when the shape is not recognised (callers fail closed).
  */
 export function sessionIdOfPayload(payload: unknown): string | undefined {
-  const args = (payload as { args?: unknown } | null | undefined)?.args
-  if (typeof args !== 'object' || args === null) return undefined
-  const request = (args as { request?: unknown }).request
+  if (typeof payload !== 'object' || payload === null) return undefined
+  const args = (payload as { args?: unknown }).args
+  let request: unknown = payload
+  if (typeof args === 'object' && args !== null) request = (args as { request?: unknown }).request
   if (typeof request !== 'object' || request === null) return undefined
   const sessionId = (request as { sessionId?: unknown }).sessionId
   return typeof sessionId === 'string' && sessionId !== '' ? sessionId : undefined
@@ -156,14 +181,13 @@ export class RemoteSteerGate {
    * @param sessionId - session identity.
    * @param allow - true to opt in, false to revoke.
    * @returns the resulting state.
-   * @throws RemoteError `dsh-host/steer-denied` when the session is pump-owned.
+   * @throws SteerDeniedError `dsh-host/steer-denied` when the session is pump-owned.
    */
   setAllow(sessionId: string, allow: boolean): DshHostSteerState {
     if (allow) {
       const reason = this.ineligibleReason(sessionId)
       if (reason !== undefined) {
-        throw new RemoteError(
-          STEER_DENIED_CODE,
+        throw new SteerDeniedError(
           `session "${sessionId}" is ${reason}: ${ALLOW_REMOTE_STEER} is never available for it`,
           { sessionId, reason, capability: ALLOW_REMOTE_STEER },
         )
@@ -185,13 +209,14 @@ export class RemoteSteerGate {
    * @param request - endpoint, payload and the origin authority the request arrived on.
    * @returns a refusal, or undefined to let the request proceed to normal dispatch.
    */
-  guard(request: Pick<ConnectionRpcGuardRequest, 'endpoint' | 'payload' | 'authority'>): ConnectionRpcFailure | undefined {
+  guard(request: Pick<ConnectionRpcGuardRequest, 'endpoint' | 'payload' | 'authority'> & { readonly rpcId?: string }): ConnectionRpcFailure | undefined {
     const { endpoint, payload, authority } = request
     // Stamp pump prompts from ANY origin so a pump session is excluded even
-    // when no live session event has been observed yet.
-    if (endpoint === 'session/prompt') {
+    // when no live session event has been observed yet. rc.8 carries the
+    // pump's request id as the envelope rpcId; later lines in the payload.
+    if (PROMPT_ENDPOINTS.has(endpoint)) {
       const sessionId = sessionIdOfPayload(payload)
-      if (sessionId !== undefined) this.observeRequestId(sessionId, requestIdOfPayload(payload))
+      if (sessionId !== undefined) this.observeRequestId(sessionId, requestIdOfPayload(payload) ?? request.rpcId)
     }
     const setter = endpoint === SET_ALLOW_REMOTE_STEER_ENDPOINT
     if (!setter && !GATED_STEER_ENDPOINTS.has(endpoint)) return undefined

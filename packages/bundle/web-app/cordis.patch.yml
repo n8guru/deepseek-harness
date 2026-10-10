@@ -216,7 +216,8 @@
     # R2 read side (dsh-mesh-session-view project 1479605, step 2): polls
     # this Host's own dshHostDirectory/list Remote over the existing
     # ctx.connection.rpc and keeps a peer-session snapshot store. Renders
-    # nothing; sidebar grouping is step 4's scope.
+    # nothing itself; it provides the `dshPeerSessions` store that ui-workspace (ordered
+    # after this row, and injecting it) reads to render the peer machine groups.
     - id: ui-peer-sessions
       name: '@deepseek-ai/dsh-client-ui-peer-sessions'
 
