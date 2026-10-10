@@ -15,13 +15,16 @@ afterEach(async () => {
 
 const activePlugin: Plugin.Function = () => {}
 
-async function harness(config: { machine?: string; peers?: DshHostPeer[]; pollIntervalMs?: number } = {}): Promise<{
+type HarnessConfig = { machine?: string; peers?: DshHostPeer[]; pollIntervalMs?: number; remoteSteerGate?: boolean }
+
+async function harness(config: HarnessConfig = {}, connection?: object): Promise<{
   ctx: Context
   entryId: string
   directory: DshHostDirectoryService
 }> {
   const ctx = new Context()
   contexts.push(ctx)
+  if (connection !== undefined) ctx.provide('connection', connection as never)
   await ctx.plugin(Loader)
   ctx.loader.builtins.active = activePlugin
   ctx.loader.builtins.directory = DshHostDirectoryService
@@ -29,6 +32,15 @@ async function harness(config: { machine?: string; peers?: DshHostPeer[]; pollIn
   const directory = ctx.get('dshHostDirectory') as DshHostDirectoryService
   return { ctx, entryId, directory }
 }
+
+describe('DshHostDirectoryService: remoteSteerGate', () => {
+  it.each([[undefined, 0], [false, 0], [true, 1]] as const)('remoteSteerGate=%s registers %i /api guard', async (remoteSteerGate, guards) => {
+    const guard = vi.fn(() => () => Promise.resolve())
+    await harness(remoteSteerGate === undefined ? {} : { remoteSteerGate }, { rpc: { guard } })
+    await vi.waitFor(() => { expect(guard).toHaveBeenCalledTimes(guards) }, { timeout: 500, interval: 20 })
+    expect(guard).toHaveBeenCalledTimes(guards)
+  })
+})
 
 describe('DshHostDirectoryService', () => {
   it('publishes list plus the allow-remote-steer read/set methods under the dshHostDirectory namespace', async () => {

@@ -6,7 +6,7 @@
  * of its own, `dshHostDirectory/list`, over the same shared `/api` channel
  * (the same mechanism `@deepseek-ai/dsh-host-plugin-inventory` uses).
  *
- * CONFIG: `machine`, `peers` and `pollIntervalMs` are ordinary plugin Config
+ * CONFIG: `machine`, `peers`, `pollIntervalMs` and `remoteSteerGate` are ordinary plugin Config
  * fields edited through the profile's Cordis patch or the generic Settings
  * form. DSH 0.1.0-rc.8's Loader has no live-reference (`.volatile()`) Config,
  * so a changed entry reloads this plugin, which rebuilds the peer table from
@@ -164,6 +164,7 @@ interface Config {
   machine?: string | undefined
   peers: DshHostPeer[]
   pollIntervalMs: number
+  remoteSteerGate: boolean
 }
 
 /**
@@ -200,6 +201,11 @@ export class DshHostDirectoryService extends TypertRemoteService {
     peers: z.array(DshHostPeerSchema).default([]),
     /** Poll interval in milliseconds for each configured peer. */
     pollIntervalMs: z.natural().default(DEFAULT_POLL_INTERVAL_MS),
+    /**
+     * Enforce the per-session allow-remote-steer opt-in on steer verbs from
+     * non-loopback origins. Off: trusted remote origins steer like the local UI.
+     */
+    remoteSteerGate: z.boolean().default(false),
   })
 
   private readonly peers = new Map<string, PeerState>()
@@ -212,19 +218,21 @@ export class DshHostDirectoryService extends TypertRemoteService {
     super(ctx, 'dshHostDirectory')
     this.syncPeers()
 
-    // allow-remote-steer (step 5): veto steer verbs arriving from a non-loopback
-    // origin unless the session opted in. Pure policy: it never grants, and it
-    // never touches any session, ClaudeSession, mesh-pump or pull-dispatch state.
-    ctx.inject(['connection'], (connectionCtx) => {
-      connectionCtx.connection.rpc.guard('/api', request => this.steerGate.guard(request))
-    })
-    // Stamp mesh-pump prompts as they land so a pump session is excluded from
-    // the opt-in even when its id does not carry the pump prefix.
-    ctx.on('session/event', (session, event) => {
-      if (event.type !== 'user/message') return
-      const source = (event.data as { source?: { rpcId?: unknown } } | undefined)?.source
-      this.steerGate.observeRequestId(session.id, typeof source?.rpcId === 'string' ? source.rpcId : undefined)
-    }, { global: true })
+    if (config.remoteSteerGate) {
+      // allow-remote-steer (step 5): veto steer verbs arriving from a non-loopback
+      // origin unless the session opted in. Pure policy: it never grants, and it
+      // never touches any session, ClaudeSession, mesh-pump or pull-dispatch state.
+      ctx.inject(['connection'], (connectionCtx) => {
+        connectionCtx.connection.rpc.guard('/api', request => this.steerGate.guard(request))
+      })
+      // Stamp mesh-pump prompts as they land so a pump session is excluded from
+      // the opt-in even when its id does not carry the pump prefix.
+      ctx.on('session/event', (session, event) => {
+        if (event.type !== 'user/message') return
+        const source = (event.data as { source?: { rpcId?: unknown } } | undefined)?.source
+        this.steerGate.observeRequestId(session.id, typeof source?.rpcId === 'string' ? source.rpcId : undefined)
+      }, { global: true })
+    }
 
     ctx.effect(() => {
       this.rearmTimer()

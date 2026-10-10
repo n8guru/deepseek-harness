@@ -34,7 +34,7 @@ Setting `peers[].pollPendingInput: true` costs one extra `POST /api/session.hist
 
 ## allow-remote-steer gate
 
-Steering a peer session means opening it on its owning Host's own origin, where the composer issues the normal write RPCs. This package adds a per-session opt-in on that owning Host, default OFF, enforced through `ctx.connection.rpc.guard('/api', ...)`.
+Steering a peer session means opening it on its owning Host's own origin, where the composer issues the normal write RPCs. With config `remoteSteerGate: true`, this package adds a per-session opt-in on that owning Host, default OFF, enforced through `ctx.connection.rpc.guard('/api', ...)`. The gate is disabled by default (`remoteSteerGate: false`): a `--trusted-host` origin steers every session exactly like the local UI, and the opt-in Remotes report state without enforcing it.
 
 - **Remote versus owner.** A request whose `Host` authority is not loopback is remote and must hold the opt-in. A loopback request is the owner at the keyboard and is never gated.
 - **Gated verbs.** `session.prompt`, `session.updateQueue`, `session.cancel`, `session.selectModel`, `session.fork`, and `session.rename` (the `session/...` spellings are also listed), plus the opt-in setter itself. Reads and the approval and question answer channel are not gated.

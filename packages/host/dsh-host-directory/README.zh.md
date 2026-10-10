@@ -34,7 +34,7 @@ rc.8 的 `/api` 路由由针对对端受信任 Host 的 Host 头检查把守（l
 
 ## allow-remote-steer 门禁
 
-引导（steer）对端会话，意味着在其所属 Host 自己的 origin 上打开它，由那里的 composer 发出常规写入 RPC。本包在该所属 Host 上增加按会话的选择加入开关，默认关闭，并通过 `ctx.connection.rpc.guard('/api', ...)` 强制执行。
+引导（steer）对端会话，意味着在其所属 Host 自己的 origin 上打开它，由那里的 composer 发出常规写入 RPC。配置 `remoteSteerGate: true` 时，本包在该所属 Host 上增加按会话的选择加入开关，默认关闭，并通过 `ctx.connection.rpc.guard('/api', ...)` 强制执行。门禁默认禁用（`remoteSteerGate: false`）：`--trusted-host` origin 与本地 UI 完全一样地引导每个会话，选择加入 Remote 只报告状态而不强制执行。
 
 - **远程与所有者。** `Host` authority 不是 loopback 的请求属于远程请求，必须已选择加入；loopback 请求是坐在键盘前的所有者，永远不受限制。
 - **受限动词。** `session.prompt`、`session.updateQueue`、`session.cancel`、`session.selectModel`、`session.fork` 与 `session.rename`（同时列出 `session/...` 写法），以及选择加入的设置端点本身。读取操作以及审批和提问的回答通道不受限制。
