@@ -16,6 +16,7 @@ import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type {
   ConnectionRpcEndpointMatcher,
+  ConnectionRpcGuard,
   ConnectionRpcHandler,
   ConnectionRpcHandlerOptions,
   HostConnectionHandle,
@@ -42,6 +43,7 @@ declare module '@deepseek-ai/cordis' {
 /** Host Connection service whose channel registrations belong to the caller fiber. */
 export class HostConnectionService extends Service implements HostConnectionHandle {
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
+  private readonly guards = new Set<ConnectionRpcGuard>()
 
   /**
    * Provide the Host half over the active HTTP server.
@@ -59,6 +61,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
       handle: (channel, handler, options) => this.register(owner, channel, handler, options),
       intercept: (channel, matches, handler, options) =>
         this.registerInterceptor(owner, channel, matches, handler, options),
+      guard: (channel, guard) => this.registerGuard(owner, channel, guard),
     }
   }
 
@@ -73,8 +76,12 @@ export class HostConnectionService extends Service implements HostConnectionHand
     fallback: FetchHandler,
   ): FetchHandler {
     return {
-      fetch: (request) => {
+      fetch: async (request) => {
         const endpoint = endpointFromPath(channel, new URL(request.url).pathname)
+        if (endpoint !== undefined && this.guards.size > 0) {
+          const refusal = await this.runGuards(request, endpoint)
+          if (refusal !== undefined) return refusal
+        }
         const interceptor = this.interceptors.get(channel)
         if (endpoint === undefined || interceptor === undefined || !interceptor.matches(endpoint)) {
           return fallback.fetch(request)
@@ -85,6 +92,65 @@ export class HostConnectionService extends Service implements HostConnectionHand
         return interceptor.fetchHandler.fetch(request)
       },
     }
+  }
+
+  /**
+   * Run every registered guard over a decoded `/api` call. The body is read
+   * from a clone so the downstream handler still sees the untouched request.
+   * An undecodable body is not this layer's to judge: it falls through to the
+   * normal handlers (which reject it themselves) with no guard consulted.
+   * @returns an error Response when a guard refuses, otherwise undefined.
+   */
+  private async runGuards(request: Request, endpoint: string): Promise<Response | undefined> {
+    if (request.method !== 'POST') return undefined
+    let body: unknown
+    try {
+      body = await request.clone().json()
+    } catch {
+      return undefined
+    }
+    const envelope = clientRequestSchema.safeParse(body)
+    if (!envelope.success || envelope.data.method !== endpoint) return undefined
+    const message: ClientRequest = envelope.data
+    for (const guard of this.guards) {
+      let refusal
+      try {
+        refusal = await guard({
+          endpoint,
+          rpcId: message.rpcId,
+          payload: message.payload,
+          authority: request.headers.get('host') ?? undefined,
+          headers: request.headers,
+        })
+      } catch (error) {
+        // Fail closed: a crashing policy guard must not let the call through.
+        return new Response(`guard failure: ${String(error)}`, { status: 500 })
+      }
+      if (refusal !== undefined) {
+        // RpcError's code set is closed (and schema-validated by every client),
+        // so the guard's own code travels in the message text under 'internal'.
+        return errorResponse(message.rpcId, {
+          code: 'internal',
+          message: `${refusal.code}: ${refusal.message}`,
+          details: {},
+        })
+      }
+    }
+    return undefined
+  }
+
+  private registerGuard(
+    owner: Context,
+    channel: string,
+    guard: ConnectionRpcGuard,
+  ): () => Promise<void> {
+    if (channel !== API_PATH) {
+      throw new Error(`connection: invalid shared RPC channel ${JSON.stringify(channel)}`)
+    }
+    return owner.effect(() => {
+      this.guards.add(guard)
+      return () => { this.guards.delete(guard) }
+    }, `client-connection: ${channel} rpc guard`)
   }
 
   private register(

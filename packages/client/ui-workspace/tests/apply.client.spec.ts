@@ -2,6 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
@@ -34,6 +35,7 @@ async function bench() {
   ctx.provide('connection', {
     hostDescription: { getSnapshot: () => undefined, subscribe: () => () => {} },
   } as never)
+  ctx.provide('dshPeerSessions', createSnapshotStore({ snapshot: undefined, lastPollFailed: false }))
   const locale = new LocaleRuntime(ctx)
   // These specs assert the shipped Chinese copy. There is no jsdom `window`
   // in this lane, so browser-language detection never runs and the locale
@@ -56,7 +58,7 @@ function declare(slots: SlotRegistry, ...names: HoleName[]): () => void {
 
 describe('ui-workspace apply', () => {
   it('declares the services it drives', () => {
-    expect(inject).toEqual(['slots', 'sessions', 'workspaces', 'locale', 'connection'])
+    expect(inject).toEqual(['slots', 'sessions', 'workspaces', 'locale', 'connection', 'dshPeerSessions'])
   })
 
   it('registers browser and pickers for declarations arriving before or after apply', async () => {
@@ -75,6 +77,23 @@ describe('ui-workspace apply', () => {
     await Promise.resolve()
     expect(after.slots.entries('conversation.hero.workspace')[0]!.component).toBe(WorkspacePicker)
     // expect(after.slots.entries('conversation.empty.workspace')[0]!.component).toBe(WorkspacePicker)
+  })
+
+  it('opens a peer session on its own origin in a new tab and shares the peer-sessions store', async () => {
+    const b = await bench()
+    declare(b.slots, 'sidebar.workspaces')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const browser = (b.slots.entries('sidebar.workspaces')[0]!.inject as () => WorkspaceBrowserInjected)()
+    expect(browser.hooks.peerSessions).toBe(b.ctx.get('dshPeerSessions'))
+    const windowOpen = vi.fn()
+    vi.stubGlobal('window', { open: windowOpen })
+    try {
+      browser.openPeerSession('https://forge.tail.ts.net/?session=s1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(windowOpen).toHaveBeenCalledWith('https://forge.tail.ts.net/?session=s1', '_blank', 'noopener,noreferrer')
+    expect(b.open).not.toHaveBeenCalled()
   })
 
   it('routes browser actions and picker creation to the services', async () => {

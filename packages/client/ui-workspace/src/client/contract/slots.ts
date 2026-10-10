@@ -23,6 +23,7 @@
  * contract and the same occupant.
  */
 import type { HostDescriptionSource } from '@deepseek-ai/dsh-client-connection/client'
+import type { DshPeerSessionsState } from '@deepseek-ai/dsh-client-ui-peer-sessions/client'
 import type { HostObservable, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pull the owner SlotMap merges into programs that resolve the
 // runtime shares below.
@@ -91,7 +92,18 @@ export type WorkspaceBrowserInjected = {
   hooks: DirectoryPickingInjected['hooks'] & {
     /** Current generation's Host description, bound by the slot renderer. */
     hostDescription: HostDescriptionSource
+    /**
+     * Live snapshot of this Host's `dshHostDirectory/list` poll (peer Hosts and
+     * the sessions they own). Read-only (dsh-mesh-session-view steps 2 and 4).
+     */
+    peerSessions: HostObservable<DshPeerSessionsState>
   }
+  /**
+   * Open a peer Host's session at that Host's own origin (a new browser tab on
+   * the `?session=<id>` deep link). Never mounts the remote session here: the
+   * connection layer is single-owner per app instance.
+   */
+  openPeerSession: (url: string) => void
   /**
    * Start a New Session in a Workspace: reuse-or-create its blank session and
    * open it; without an explicit workspace, inherit the current Session

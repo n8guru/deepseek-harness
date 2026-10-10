@@ -8,6 +8,7 @@ import {
   type SessionSearchResultItem, type SessionSummary, type SubagentDescendantSummary,
   type WorkspaceId, type WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
+import type { DshHostPeerView, DshHostRemoteSession } from '@deepseek-ai/dsh-host-directory/types'
 
 /** Group key for Sessions outside every Workspace. */
 export const UNGROUPED_KEY = ''
@@ -30,6 +31,17 @@ export interface SessionNode {
   /** Finished running while not selected and not yet opened (the green "done" reminder dot). */
   completed: boolean
   updatedAt: number
+  /**
+   * Operator-declared machine label of the owning peer Host. Present only on
+   * remote sessions discovered through `dshHostDirectory/list`.
+   */
+  machine?: string
+  /** Bare authority (`host[:port]`) of the owning peer Host; remote sessions only. */
+  peerAuthority?: string
+  /** Connection scheme of the owning peer Host; remote sessions only (default `http`). */
+  peerScheme?: 'http' | 'https'
+  /** Workspace directory of a remote session as the owning peer reported it (hover detail only). */
+  peerCwd?: string
 }
 
 /** Session order selected by the Workspace browser. */
@@ -51,6 +63,27 @@ export interface GroupNode {
   /** The group contains the selected session (active folder tint; supplied here so the renderer never scans). */
   containsCurrent: boolean
   /** Visible session rows (empty while the group is folded). */
+  sessions: readonly SessionNode[]
+}
+
+/**
+ * One remote-machine group section: a peer Host's sessions under its
+ * operator-declared machine label. The key is the peer authority; there is no
+ * backing Workspace.
+ */
+export interface PeerGroupNode {
+  /** Group key: the peer's bare authority (`host[:port]`). */
+  key: string
+  /** Operator-declared machine label (e.g. "forge"). */
+  machine: string
+  /** Peer reachability status from the last poll. */
+  peerStatus: DshHostPeerView['status']
+  /** Connection scheme used by this peer. */
+  peerScheme: 'http' | 'https'
+  /** Total sessions in the group. */
+  sessionCount: number
+  expanded: boolean
+  /** Session rows (empty while the group is folded). */
   sessions: readonly SessionNode[]
 }
 
@@ -410,4 +443,107 @@ export function relativeTime(updatedAt: number, now: number): RelativeTime {
   if (diff < 30 * DAY) return { unit: 'days', n: Math.floor(diff / DAY) }
   if (diff < 365 * DAY) return { unit: 'months', n: Math.floor(diff / (30 * DAY)) }
   return { unit: 'years', n: Math.floor(diff / (365 * DAY)) }
+}
+
+/**
+ * Build one {@link SessionNode} from a peer Host's session (no local status or
+ * projections: the session lives on another Host). `peerAuthority` is set by
+ * {@link derivePeerGroups}, which knows the roster.
+ * @param session - remote session row from the directory snapshot.
+ * @param peerScheme - connection scheme of the owning peer.
+ * @param pendingInteraction - classified pending human input, when polled.
+ * @returns the row node.
+ */
+export function remoteSessionNode(
+  session: DshHostRemoteSession,
+  peerScheme: 'http' | 'https',
+  pendingInteraction?: PendingInteractionStatus,
+): SessionNode {
+  return {
+    id: session.sessionId,
+    title: session.title ?? session.sessionId,
+    blank: session.blank,
+    running: session.running,
+    runningSubagentCount: 0,
+    completed: false,
+    updatedAt: session.updatedAt,
+    machine: session.machine,
+    peerScheme,
+    ...(session.cwd === undefined ? {} : { peerCwd: session.cwd }),
+    ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
+  }
+}
+
+/** Keep sidebar presentation independent from the directory's pending-input object. */
+function visiblePendingKind(kind: string | undefined): PendingInteractionStatus | undefined {
+  switch (kind) {
+    case 'approval':
+    case 'plan-review':
+    case 'question':
+      return kind
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Derive peer-machine groups from the directory snapshot. One group per
+ * configured peer in roster order (unreachable peers included, with their
+ * status); sessions newest-first, populated only while the peer is expanded.
+ * @param sessions - remote sessions from the latest directory snapshot.
+ * @param peers - configured peers with live poll status.
+ * @param expandedPeers - peer authorities the user has expanded.
+ * @param peerSchemes - optional per-authority scheme override (defaults to the roster's).
+ * @returns peer group sections in roster order.
+ */
+export function derivePeerGroups(
+  sessions: readonly DshHostRemoteSession[],
+  peers: readonly DshHostPeerView[],
+  expandedPeers: ReadonlySet<string>,
+  peerSchemes?: ReadonlyMap<string, 'http' | 'https'>,
+): PeerGroupNode[] {
+  const byAuthority = new Map<string, DshHostRemoteSession[]>()
+  const authorityByMachine = new Map<string, string>()
+  for (const peer of peers) {
+    authorityByMachine.set(peer.machine, peer.authority)
+    byAuthority.set(peer.authority, [])
+  }
+  for (const session of sessions) {
+    const authority = authorityByMachine.get(session.machine)
+    if (authority === undefined) continue
+    byAuthority.get(authority)?.push(session)
+  }
+  return peers.map((peer): PeerGroupNode => {
+    const peerSessions = byAuthority.get(peer.authority) ?? []
+    const scheme = peerSchemes?.get(peer.authority) ?? peer.scheme
+    const expanded = expandedPeers.has(peer.authority)
+    return {
+      key: peer.authority,
+      machine: peer.machine,
+      peerStatus: peer.status,
+      peerScheme: scheme,
+      sessionCount: peerSessions.length,
+      expanded,
+      sessions: expanded
+        ? [...peerSessions].sort((a, b) => b.updatedAt - a.updatedAt).map((session) => {
+          const pendingInteraction = session.pendingInput === undefined
+            ? undefined
+            : visiblePendingKind(session.pendingInput.kind)
+          return { ...remoteSessionNode(session, scheme, pendingInteraction), peerAuthority: peer.authority }
+        })
+        : [],
+    }
+  })
+}
+
+/**
+ * Peer-origin deep-link URL for a remote session: the owning Host's own
+ * address with `?session=<id>`.
+ * @param node - a session node carrying peer metadata.
+ * @returns the absolute URL, or undefined for a local session.
+ */
+export function peerSessionUrl(node: SessionNode): string | undefined {
+  if (node.peerAuthority === undefined) return undefined
+  const scheme = node.peerScheme ?? 'http'
+  return `${scheme}://${node.peerAuthority}/?session=${encodeURIComponent(node.id)}`
 }

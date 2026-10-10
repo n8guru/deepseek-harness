@@ -22,9 +22,14 @@ import css from './Rows.module.css'
 /** The standard locale seat, prop-passed from the browser root. */
 type RowTranslate = WorkspaceBrowserProps['t']
 
-/** Row display title: blank rows show the localized New Session label. */
+/**
+ * Row display title: blank rows show the localized New Session label. A blank
+ * peer session the owner has explicitly titled keeps that title (a placeholder
+ * label would hide what the owning Host calls it).
+ */
 function displayTitle(node: SessionNode, t: RowTranslate): string {
-  return node.blank ? t('session.new') : node.title
+  const titledRemote = node.machine !== undefined && node.title !== node.id
+  return node.blank && !titledRemote ? t('session.new') : node.title
 }
 
 /** Localized compact relative time ("刚刚"/"5分钟" in zh, "now"/"5min" in en). */
@@ -109,8 +114,10 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home, t }: {
+export function ProjectRowItem({ group, remoteLabel, onToggle, onCreate, actions, drag, home, t }: {
   group: GroupNode
+  /** Machine group of a peer Host: replaces the Workspace label and withholds New Session (the peer owns its sessions). */
+  remoteLabel?: string | undefined
   onToggle: () => void
   onCreate: () => void
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
@@ -123,7 +130,7 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
 }) {
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
-  const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
+  const label = remoteLabel ?? (row.workspaceId === undefined ? t('group.ungrouped') : row.label)
   const active = group.expanded && group.containsCurrent
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
@@ -184,14 +191,16 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home,
             )}
           />
         )}
-        <button
-          type="button"
-          className={css.iconButton}
-          aria-label={t('actions.newSession.aria', { name: label })}
-          onClick={(e) => { e.stopPropagation(); onCreate() }}
-        >
-          <IconPlusOutline16 />
-        </button>
+        {remoteLabel === undefined && (
+          <button
+            type="button"
+            className={css.iconButton}
+            aria-label={t('actions.newSession.aria', { name: label })}
+            onClick={(e) => { e.stopPropagation(); onCreate() }}
+          >
+            <IconPlusOutline16 />
+          </button>
+        )}
       </span>
     </div>
   )
@@ -289,6 +298,12 @@ function SessionHoverContent({ node, now, t }: { node: SessionNode; now: number;
       {/* Same placeholder rule as the row's trailing cell: no timestamp
           before the first prompt. */}
       {!node.blank && <div className={css.hoverTime}>{hoverTimeLabel(node.updatedAt, now, t)}</div>}
+      {node.machine !== undefined && (
+        <div className={css.hoverTime}>
+          {t('peer.openOnHost', { machine: node.machine })}
+          {node.peerCwd === undefined ? '' : ` · ${node.peerCwd}`}
+        </div>
+      )}
       {statuses.map(status => (
         <div className={css.hoverStatus} key={status.label}>
           <StateDot state={status.state} />
@@ -359,7 +374,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
-export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, t }: {
+export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork, onArchive, drag, flat = false, remote = false, t }: {
   node: SessionNode
   currentId: string | undefined
   now: number
@@ -374,6 +389,13 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
   flat?: boolean | undefined
+  /**
+   * The row is a peer Host's session (dsh-mesh-session-view step 4): same
+   * row, status dot and time cells, but `onOpen` leaves for the owning Host's
+   * own origin, and no local mutation verbs (rename, fork, archive, drag) are
+   * offered for a session this Host does not own.
+   */
+  remote?: boolean | undefined
   t: RowTranslate
 }) {
   const row = node
@@ -442,7 +464,7 @@ export function SessionNodeItem({ node, currentId, now, onOpen, onRename, onFork
           (rename/fork/archive) would all act on content that does not
           exist — both trailing cells stay off until the first prompt. */}
       {!row.blank && <span className={css.time}>{timeLabel(row.updatedAt, now, t)}</span>}
-      {!row.blank && (
+      {!row.blank && !remote && (
         <span className={css.rowActions}>
           <Menu
             open={menuOpen}

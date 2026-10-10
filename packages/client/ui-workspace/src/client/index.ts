@@ -13,6 +13,9 @@ import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+// Type-only: pulls the ui-peer-sessions Context merge (ctx.dshPeerSessions).
+import type {} from '@deepseek-ai/dsh-client-ui-peer-sessions/client'
+import { openDeepLinkWhenReady, resolveDeepLinkSession } from './navigation.ts'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from './contract/slots.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './WorkspaceBrowser.tsx'
@@ -43,7 +46,7 @@ const NS = 'workspace'
  * provides a waitable service. apply therefore depends on each slot
  * declaration through `slots.inject()` instead of assuming order.
  */
-export const inject = ['slots', 'sessions', 'workspaces', 'locale', 'connection']
+export const inject = ['slots', 'sessions', 'workspaces', 'locale', 'connection', 'dshPeerSessions']
 
 /**
  * Register the browser and picker once their slot declarations are on the
@@ -55,6 +58,12 @@ export function apply(ctx: ClientContext): void {
   const connection = ctx.get('connection') as ConnectionHandle
   const hostDescription = connection.hostDescription
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-workspace: dictionaries')
+  // Peer-origin deep link receiver: `?session=<id>` selects that exact session
+  // once the Session list is ready (the sender is another Host's sidebar row).
+  const deepLink = resolveDeepLinkSession()
+  if (deepLink !== undefined) {
+    ctx.effect(() => openDeepLinkWhenReady(ctx.sessions, deepLink), 'ui-workspace: peer deep link')
+  }
 
   const searchSessions: WorkspaceBrowserInjected['searchSessions'] = async (query, signal) => {
     const result = await ctx.sessions.search(query, signal)
@@ -102,7 +111,10 @@ export function apply(ctx: ClientContext): void {
       await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
     },
     createWorkspace: input => ctx.workspaces.create(input),
-    hooks: { directoryFlow: browserFlowSource, hostDescription },
+    // A peer session lives on its owning Host: leave for that Host's own
+    // origin instead of mounting it on this Host's single connection.
+    openPeerSession: (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
+    hooks: { directoryFlow: browserFlowSource, hostDescription, peerSessions: ctx.dshPeerSessions },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
     createWorkspace: input => ctx.workspaces.create(input),

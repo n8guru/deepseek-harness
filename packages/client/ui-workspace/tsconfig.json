@@ -33,6 +33,12 @@
       "path": "../ui-conversation"
     },
     {
+      "path": "../ui-peer-sessions"
+    },
+    {
+      "path": "../../host/dsh-host-directory"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]
