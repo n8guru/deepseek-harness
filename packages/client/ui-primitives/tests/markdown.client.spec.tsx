@@ -318,6 +318,7 @@ describe('MarkdownText', () => {
     const markdown = `Here: <img src="${u}" width="48%"> <img src="${u}" width="48%">`
     const { container } = render(<MarkdownText text={markdown} />)
     expect([...container.querySelectorAll('img')].map(i => i.getAttribute('src'))).toEqual([u, u])
+    expect([...container.querySelectorAll('img')].map(i => i.getAttribute('width'))).toEqual(['48%', '48%'])
     expect(container.textContent).not.toContain('<img')
   })
 

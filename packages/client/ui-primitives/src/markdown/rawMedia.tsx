@@ -42,7 +42,7 @@ function attrs(source: string): Record<string, string> {
   return out
 }
 
-const size = (v: string | undefined) => (v !== undefined && /^\d{1,4}$/.test(v) ? v : undefined)
+const size = (v: string | undefined) => (v !== undefined && /^\d{1,4}%?$/.test(v) ? v : undefined)
 
 function element(tag: string, a: Record<string, string>, key: Key): ReactNode {
   const src = mediaUrl(a.src)
