@@ -44,6 +44,9 @@ function attrs(source: string): Record<string, string> {
 
 const size = (v: string | undefined) => (v !== undefined && /^\d{1,4}%?$/.test(v) ? v : undefined)
 
+/** `.image` is `width:auto; display:block` (beats the width attribute): percent widths sit inline so `48%` pairs up. */
+const pct = (w: string | undefined) => (w?.endsWith('%') ? { width: w, display: 'inline-block', verticalAlign: 'top' } as const : undefined)
+
 function element(tag: string, a: Record<string, string>, key: Key): ReactNode {
   const src = mediaUrl(a.src)
   if (src === undefined) return undefined
@@ -51,10 +54,10 @@ function element(tag: string, a: Record<string, string>, key: Key): ReactNode {
   const height = size(a.height)
   switch (tag) {
     case 'img':
-      return <img key={key} className={css.image} src={src} alt={a.alt ?? ''} width={width} height={height}
+      return <img key={key} className={css.image} src={src} alt={a.alt ?? ''} width={width} height={height} style={pct(width)}
         loading="lazy" decoding="async" referrerPolicy="no-referrer" />
     case 'video':
-      return <video key={key} className={css.image} src={src} poster={mediaUrl(a.poster)} width={width} height={height}
+      return <video key={key} className={css.image} src={src} poster={mediaUrl(a.poster)} width={width} height={height} style={pct(width)}
         controls loop={'loop' in a} muted={'muted' in a} playsInline preload="metadata" />
     case 'audio':
       return <audio key={key} src={src} controls loop={'loop' in a} preload="metadata" />
