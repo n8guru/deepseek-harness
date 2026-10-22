@@ -313,6 +313,34 @@ describe('MarkdownText', () => {
     expect(container.textContent).not.toContain('</video>')
   })
 
+  it('renders two slash-less inline <img> tags with a percent width in one paragraph', () => {
+    const u = 'https://forage.ink/static/uploads/sage11_sent_543105.png'
+    const markdown = `Here: <img src="${u}" width="48%"> <img src="${u}" width="48%">`
+    const { container } = render(<MarkdownText text={markdown} />)
+    expect([...container.querySelectorAll('img')].map(i => i.getAttribute('src'))).toEqual([u, u])
+    expect(container.textContent).not.toContain('<img')
+  })
+
+  it('renders unquoted-URL media tags (void img, video, iframe) inline and as blocks', () => {
+    const png = 'https://forage.ink/static/uploads/sage11_fixed_top.png'
+    const markdown = [
+      `Look <img src=${png}> right here, and <video src=https://forage.ink/a.mp4 controls></video> too.`,
+      '<video src=https://forage.ink/b.mp4 controls>',
+      '<iframe src=https://forage.ink/viewer></iframe>',
+      `- item <img src=${png}>`,
+      'not media <b src=https://forage.ink/x>',
+    ].join('\n\n')
+    const { container } = render(<MarkdownText text={markdown} />)
+
+    expect([...container.querySelectorAll('img')].map(i => i.getAttribute('src'))).toEqual([png, png])
+    expect([...container.querySelectorAll('video')].map(v => v.getAttribute('src')))
+      .toEqual(['https://forage.ink/a.mp4', 'https://forage.ink/b.mp4'])
+    expect(container.querySelector('iframe')?.getAttribute('src')).toBe('https://forage.ink/viewer')
+    expect(container.textContent).not.toContain('<img')
+    expect(container.textContent).not.toContain('<video')
+    expect(container.textContent).toContain('<b src=')
+  })
+
   it('keeps incomplete streaming Markdown renderable', () => {
     const { container } = render(<MarkdownText text={'## Streaming\n\n- first\n- **unfinished'} />)
     expect(screen.getByRole('heading', { level: 2, name: 'Streaming' })).toBeTruthy()
