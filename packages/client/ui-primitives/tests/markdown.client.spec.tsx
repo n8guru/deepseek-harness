@@ -285,6 +285,34 @@ describe('MarkdownText', () => {
     expect(screen.getByText('mail diagram')).toBeTruthy()
   })
 
+  it('renders allowlisted raw media tags inline and keeps everything else literal', () => {
+    const markdown = [
+      '<video src="https://forage.ink/static/uploads/a.mp4" controls></video>',
+      'Inline <audio src="http://100.70.241.41:8080/a.mp3"></audio> and <img src="https://x.test/p.png?a=1&amp;b=2" alt="pic" onerror="boom()">',
+      '<iframe src="https://forage.ink/viewer" sandbox="allow-scripts allow-modals" srcdoc="<script>1</script>"></iframe>',
+      '<iframe src="/local/page.html" sandbox="allow-scripts allow-same-origin"></iframe>',
+      '<video src="javascript:alert(1)"></video>',
+      '<script src="https://x.test/a.js"></script>',
+    ].join('\n\n')
+    const { container } = render(<MarkdownText text={markdown} />)
+
+    expect(container.querySelector('video')?.getAttribute('src')).toBe('https://forage.ink/static/uploads/a.mp4')
+    expect(container.querySelector('video[src^="javascript"]')).toBeNull()
+    expect(container.querySelector('audio')?.getAttribute('src')).toBe('http://100.70.241.41:8080/a.mp3')
+    const img = container.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('https://x.test/p.png?a=1&b=2')
+    expect(img?.getAttribute('onerror')).toBeNull()
+    const [remote, local] = [...container.querySelectorAll('iframe')]
+    expect(remote?.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(remote?.hasAttribute('srcdoc')).toBe(false)
+    expect(local?.getAttribute('src')).toBe('/local/page.html')
+    expect(local?.getAttribute('sandbox')).toBe('allow-same-origin')
+    expect(container.querySelector('script')).toBeNull()
+    expect(container.textContent).toContain('<script src="https://x.test/a.js"></script>')
+    expect(container.textContent).toContain('<video src="javascript:alert(1)">')
+    expect(container.textContent).not.toContain('</video>')
+  })
+
   it('keeps incomplete streaming Markdown renderable', () => {
     const { container } = render(<MarkdownText text={'## Streaming\n\n- first\n- **unfinished'} />)
     expect(screen.getByRole('heading', { level: 2, name: 'Streaming' })).toBeTruthy()

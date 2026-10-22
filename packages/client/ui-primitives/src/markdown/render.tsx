@@ -6,8 +6,9 @@
  *
  * Untrusted-output policy (unchanged from the replaced pipeline): link and
  * image destinations pass a protocol allowlist, images additionally require
- * absolute HTTP(S), raw HTML renders as literal text (no HTML enters the
- * DOM), and KaTeX runs without trusted commands. Fragment-anchor URLs fail
+ * absolute HTTP(S), raw HTML renders as literal text except allowlisted
+ * img/video/audio/iframe tags with http(s) sources (rawMedia.tsx), and KaTeX
+ * runs without trusted commands. Fragment-anchor URLs fail
  * the allowlist, so footnote references and back-references render as plain
  * text rather than in-page links.
  *
@@ -26,6 +27,7 @@ import type { SpokenRange } from './spoken.ts'
 import { normalizeUri } from 'micromark-util-sanitize-uri'
 import { CodeBlock } from './CodeBlock.tsx'
 import { renderTexToReact } from './katex.tsx'
+import { renderRawMedia } from './rawMedia.tsx'
 import type { PositionedBlock } from './incremental.ts'
 import css from './MarkdownText.module.css'
 
@@ -272,8 +274,9 @@ function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderConte
       return <code key={key}>{value}</code>
     }
     case 'html':
-      // Highlight literal HTML text without ever creating HTML elements.
-      return renderSpokenText(node, key, context)
+      // Allowlisted media tags become real elements (see rawMedia.tsx); all
+      // other HTML stays literal, highlighted text that never creates elements.
+      return renderRawMedia(node.value, key) ?? renderSpokenText(node, key, context)
     case 'code':
       return renderCode(node, key, context)
     case 'math':

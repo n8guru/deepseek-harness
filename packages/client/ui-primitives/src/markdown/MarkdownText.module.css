@@ -248,6 +248,16 @@
   object-fit: contain;
 }
 
+/* Raw <iframe> media: the .image rule's height:auto would collapse a frame to
+   the 150px default, so frames keep their height attribute and fill the column. */
+.frame {
+  display: block;
+  max-width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+}
+
 /* Inline file mention: the same link language this sheet gives anchors (and
    thereby URL-promoted inline code) — link-blue at rest, underline only on
    hover/focus. An underline at rest reads badly inside the code chip, where
