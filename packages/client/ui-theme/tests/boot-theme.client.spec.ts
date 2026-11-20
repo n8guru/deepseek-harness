@@ -35,7 +35,7 @@ describe('theme boot index transform', () => {
     const html = executeBootstrap('dark', '<html><body class="app"><div id="root"></div></body></html>')
     expect(html.indexOf('<script>')).toBeGreaterThan(html.indexOf('<body class="app">'))
     expect(html.indexOf('<script>')).toBeLessThan(html.indexOf('<div id="root">'))
-    expect(document.documentElement.style.colorScheme).toBe('dark')
+    expect(document.documentElement.style.colorScheme).toBe('only dark')
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(true)
   })
 
@@ -43,7 +43,7 @@ describe('theme boot index transform', () => {
     document.body.setAttribute(DARK_ATTRIBUTE, '')
     mockSystemDark(true)
     executeBootstrap('light')
-    expect(document.documentElement.style.colorScheme).toBe('light')
+    expect(document.documentElement.style.colorScheme).toBe('only light')
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(false)
   })
 
@@ -53,14 +53,14 @@ describe('theme boot index transform', () => {
   ] as const)('resolves system=%s to %s', (matches, colorScheme, dark) => {
     mockSystemDark(matches)
     executeBootstrap('system')
-    expect(document.documentElement.style.colorScheme).toBe(colorScheme)
+    expect(document.documentElement.style.colorScheme).toBe(`only ${colorScheme}`)
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(dark)
   })
 
   it('defaults to system and falls back to light when matchMedia is unavailable', () => {
     vi.stubGlobal('matchMedia', undefined)
     executeBootstrap()
-    expect(document.documentElement.style.colorScheme).toBe('light')
+    expect(document.documentElement.style.colorScheme).toBe('only light')
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(false)
   })
 

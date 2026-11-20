@@ -36,7 +36,8 @@ export class ThemePresenter {
    */
   apply(snapshot: ThemeSnapshot): void {
     const scheme = snapshot.active.colorScheme
-    document.documentElement.style.colorScheme = scheme
+    // `only` keeps mobile Chrome/Samsung auto-dark from repainting the chosen theme.
+    document.documentElement.style.colorScheme = `only ${scheme}`
     const body = document.body
     if (scheme === 'dark') body.setAttribute(DARK_ATTRIBUTE, '')
     else body.removeAttribute(DARK_ATTRIBUTE)

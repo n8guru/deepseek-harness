@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { stubSettingsScope, type StubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
@@ -22,6 +22,9 @@ const make = (host = stubSettingsScope<ThemeSettings>()): {
 }
 
 describe('ThemeRuntime', () => {
+  // setTheme persists per device; each case starts from a fresh browser.
+  beforeEach(() => { localStorage.clear(); delete document.documentElement.dataset.dshThemePreference })
+
   it('defaults to the system preference resolved against prefers-color-scheme', () => {
     const { theme } = make()
     const snapshot = theme.getTheme()
@@ -246,5 +249,20 @@ describe('ThemeRuntime', () => {
       await ctx.fiber.dispose()
       expect(media.listenerCount()).toBe(0)
     })
+  })
+})
+
+describe('ThemeRuntime remote-browser seeding', () => {
+  beforeEach(() => { localStorage.clear(); delete document.documentElement.dataset.dshThemePreference })
+
+  it('starts from the boot-stamped Host preference when the scope has no answer', () => {
+    document.documentElement.dataset.dshThemePreference = 'light'
+    expect(make().theme.getTheme().preference).toBe('light')
+  })
+
+  it("keeps this device's own choice across loads", () => {
+    document.documentElement.dataset.dshThemePreference = 'light'
+    make().theme.setTheme('dark')
+    expect(make().theme.getTheme().preference).toBe('dark')
   })
 })

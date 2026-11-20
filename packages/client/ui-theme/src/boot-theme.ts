@@ -15,7 +15,8 @@ function bootThemeScript(preference: ThemePreference): string {
     && typeof matchMedia !== 'undefined'
     && matchMedia('(prefers-color-scheme: dark)').matches
   const dark = preference === 'dark' || systemDark
-  document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+  document.documentElement.dataset.dshThemePreference = preference
+  document.documentElement.style.colorScheme = dark ? 'only dark' : 'only light'
   document.body.toggleAttribute('data-ds-dark-theme', dark)
 })()</script>`
 }

@@ -148,6 +148,18 @@ const BUILTIN_INSPECT_TOKENS: readonly ThemeTokenInspection[] = Object.freeze([
  * sensing, not presentation) and re-emits when the OS scheme flips while the
  * preference is `system`.
  */
+/** Per-device preference for browsers whose settings scope cannot reach the Host. */
+const LOCAL_PREFERENCE_KEY = 'dsh-theme-preference'
+
+/** @returns the device's saved preference, else the boot-stamped Host one, else the default. */
+function initialPreference(): ThemePreference {
+  let local: string | null = null
+  try { local = localStorage.getItem(LOCAL_PREFERENCE_KEY) } catch { /* storage unavailable */ }
+  if (isThemePreference(local)) return local
+  const boot = typeof document === 'undefined' ? undefined : document.documentElement.dataset.dshThemePreference
+  return isThemePreference(boot) ? boot : DEFAULT_PREFERENCE
+}
+
 export class ThemeRuntime {
   private readonly ctx: Context
   private readonly host: SettingsScope<ThemeSettings>
@@ -168,7 +180,9 @@ export class ThemeRuntime {
   constructor(ctx: Context, host: SettingsScope<ThemeSettings>) {
     this.ctx = ctx
     this.host = host
-    this.preference = DEFAULT_PREFERENCE
+    // Remote (non-loopback) browsers get a memory-only settings scope, so seed from
+    // this device's last choice, then the Host preference the boot script stamped.
+    this.preference = initialPreference()
     // Non-browser runs (node e2e booting the client tree) have no matchMedia.
     this.media = typeof matchMedia === 'undefined' ? undefined : matchMedia('(prefers-color-scheme: dark)')
     this.snapshot = this.buildSnapshot()
@@ -226,7 +240,10 @@ export class ThemeRuntime {
     }
     if (this.preference === id) return
     this.preference = id as ThemePreference
-    if (isThemePreference(id)) void this.host.set(THEME_PREFERENCE_FIELD, id)
+    if (isThemePreference(id)) {
+      try { localStorage.setItem(LOCAL_PREFERENCE_KEY, id) } catch { /* storage unavailable */ }
+      void this.host.set(THEME_PREFERENCE_FIELD, id)
+    }
     this.publish()
   }
 
