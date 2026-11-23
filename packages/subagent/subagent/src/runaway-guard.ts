@@ -16,7 +16,7 @@
  * - `DSH_SUBAGENT_MAX_STEPS` — model steps across the child's life (default 200).
  * - `DSH_SUBAGENT_MAX_TOKENS` — summed input+output+cacheRead+cacheWrite tokens (default 20,000,000).
  * - `DSH_SUBAGENT_MAX_REPEAT_CALLS` — identical tool calls (same name and
- *   canonical-JSON arguments) across the child's life (default 8).
+ *   canonical-JSON arguments) across the child's life (default 20).
  *
  * @module @deepseek-ai/dsh-subagent/runaway-guard
  */
@@ -64,7 +64,7 @@ export const DEFAULT_MAX_STEPS = 200
 /** Default token budget. */
 export const DEFAULT_MAX_TOKENS = 20_000_000
 /** Default identical-call cap. */
-export const DEFAULT_MAX_REPEAT_CALLS = 8
+export const DEFAULT_MAX_REPEAT_CALLS = 20
 
 /** Parse one env value: unset or garbage keeps the default, `0`/`off` disables. */
 function limitFromEnv(raw: string | undefined, fallback: number): number | undefined {

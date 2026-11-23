@@ -84,9 +84,9 @@ function onlyLimit(name: 'STEPS' | 'TOKENS' | 'REPEAT_CALLS', value: string): vo
 }
 
 describe('resolveRunawayLimits', () => {
-  it('defaults to 200 steps, 20M tokens, 8 identical calls', () => {
-    expect(resolveRunawayLimits({})).toEqual({ maxSteps: 200, maxTokens: 20_000_000, maxRepeatCalls: 8 })
-    expect([DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS, DEFAULT_MAX_REPEAT_CALLS]).toEqual([200, 20_000_000, 8])
+  it('defaults to 200 steps, 20M tokens, 20 identical calls', () => {
+    expect(resolveRunawayLimits({})).toEqual({ maxSteps: 200, maxTokens: 20_000_000, maxRepeatCalls: 20 })
+    expect([DEFAULT_MAX_STEPS, DEFAULT_MAX_TOKENS, DEFAULT_MAX_REPEAT_CALLS]).toEqual([200, 20_000_000, 20])
   })
 
   it('honors overrides, disables on 0 or off, and ignores garbage', () => {
@@ -99,7 +99,7 @@ describe('resolveRunawayLimits', () => {
       DSH_SUBAGENT_MAX_STEPS: 'many',
       DSH_SUBAGENT_MAX_TOKENS: '-3',
       DSH_SUBAGENT_MAX_REPEAT_CALLS: '',
-    })).toEqual({ maxSteps: 200, maxTokens: 20_000_000, maxRepeatCalls: 8 })
+    })).toEqual({ maxSteps: 200, maxTokens: 20_000_000, maxRepeatCalls: 20 })
   })
 })
 
@@ -160,9 +160,9 @@ describe('runaway guard on one-shot children', () => {
     vi.stubEnv('DSH_SUBAGENT_MAX_STEPS', disabled)
     vi.stubEnv('DSH_SUBAGENT_MAX_TOKENS', disabled)
     vi.stubEnv('DSH_SUBAGENT_MAX_REPEAT_CALLS', disabled)
-    // Twelve identical calls: far past the default repeat limit of 8.
+    // Twenty-four identical calls: past the default repeat limit of 20.
     const script: Script = [
-      ...Array.from({ length: 12 }, (_, i) => toolCallResponse(`c${String(i)}`, 'noop', { same: true })),
+      ...Array.from({ length: 24 }, (_, i) => toolCallResponse(`c${String(i)}`, 'noop', { same: true })),
       textResponse('done'),
     ]
     const { ctx, parent } = await setup(script)
@@ -171,15 +171,15 @@ describe('runaway guard on one-shot children', () => {
     expect(stop).toBeUndefined()
   })
 
-  it('applies the default repeated-call limit of 8 with no environment', async () => {
+  it('applies the default repeated-call limit of 20 with no environment', async () => {
     const script: Script = [
-      ...Array.from({ length: 12 }, (_, i) => toolCallResponse(`c${String(i)}`, 'noop', { same: true })),
+      ...Array.from({ length: 24 }, (_, i) => toolCallResponse(`c${String(i)}`, 'noop', { same: true })),
       textResponse('done'),
     ]
     const { ctx, parent, adapter } = await setup(script)
     const { result } = await runChild(ctx, parent)
     expect(result.stopReason).toBe('error')
-    expect(adapter.requests).toHaveLength(8)
+    expect(adapter.requests).toHaveLength(20)
   })
 })
 
