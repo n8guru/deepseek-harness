@@ -21,6 +21,8 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { foldConsumedWork } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { finalAssistantOutput } from './assistant-output.ts'
+import { guardStopOf } from './runaway-guard.ts'
+import type { SubagentGuardStopData } from './runaway-guard.ts'
 import { SubagentRunId } from './types.ts'
 import type { SubagentResult, SubagentRun, SubagentRunEndInfo, SubagentRunInfo } from './types.ts'
 
@@ -33,6 +35,8 @@ export interface ActivationTerminal {
   readonly stopReason: SubagentResult['stopReason']
   /** The epoch's final assistant content, absent when it produced none or failed. */
   readonly output?: ContentBlock[]
+  /** The runaway-guard stop that ended this epoch, when one did; `stopReason` is then `error`. */
+  readonly guardStop?: SubagentGuardStopData
 }
 
 /**
@@ -199,9 +203,12 @@ export function createActivationObserver(
     capture: (child: Agent): void => {
       const own = child.session.events.slice(boundary)
       const output = finalAssistantOutput(own)
+      const guardStop = guardStopOf(own)
       captured = {
-        stopReason: epochStopReason(own),
+        // A runaway-guard stop is a failure, whatever the rejected turn looks like.
+        stopReason: guardStop === undefined ? epochStopReason(own) : 'error',
         ...output === undefined ? {} : { output },
+        ...guardStop === undefined ? {} : { guardStop },
       }
     },
     terminal,

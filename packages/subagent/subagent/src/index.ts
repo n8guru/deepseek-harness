@@ -103,6 +103,17 @@ export type {
 } from './descriptor.ts'
 export { seedDescriptorTurn } from './descriptor-seed.ts'
 export { SubagentError } from './error.ts'
+export {
+  DEFAULT_MAX_REPEAT_CALLS,
+  DEFAULT_MAX_STEPS,
+  DEFAULT_MAX_TOKENS,
+  guardStopMessage,
+  guardStopOf,
+  installRunawayGuard,
+  resolveRunawayLimits,
+  withGuardStopOutput,
+} from './runaway-guard.ts'
+export type { RunawayLimitKind, RunawayLimits, SubagentGuardStopData } from './runaway-guard.ts'
 export { settleRun } from './run-settlement.ts'
 export { assertSubagentMaxDepth, delegationDepthOf } from './depth.ts'
 export {

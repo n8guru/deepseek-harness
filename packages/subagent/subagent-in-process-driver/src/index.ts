@@ -24,8 +24,10 @@ import {
   captureDelegatedPolicyOverrides,
   childSessionMeta,
   finalAssistantOutput,
+  guardStopOf,
   resolveChildAgentOptions,
   resolveChildDepth,
+  withGuardStopOutput,
 } from '@deepseek-ai/dsh-subagent'
 import type {
   ResolvedSubagentStartRequest,
@@ -217,6 +219,13 @@ function readResult(
   // `cancelled` flag below. A cancellation with no accounting turn resolves
   // `error` through `toStopReason(undefined)`, which never overstates success.
   const lastEnd = foldConsumedWork(own).end
+  // A runaway-guard stop (step cap, token budget, repeated-call loop) rejected
+  // the child's next step: report an explicit error naming the limit, not a
+  // bare refusal.
+  const guardStop = guardStopOf(own)
+  if (guardStop !== undefined) {
+    return { output: withGuardStopOutput(guardStop, finalAssistantOutput(own) ?? []), stopReason: 'error' }
+  }
   // The seam's canonical selection rule; a partial answer survives cancel and truncation.
   const output: ContentBlock[] = finalAssistantOutput(own) ?? []
   const recorded = toStopReason(lastEnd?.data.reason)

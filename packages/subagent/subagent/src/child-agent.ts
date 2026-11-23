@@ -26,6 +26,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 // them through the tool registry's global layer.
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { delegationDepthOf } from './depth.ts'
+import { installRunawayGuard } from './runaway-guard.ts'
 
 /** Thrown when starting a child would exceed the requested depth cap. */
 export class SubagentDepthError extends Error {
@@ -172,6 +173,8 @@ export function applyChildComposition(
     childCtx.systemPrompt.section({ name: 'deployment:persona', order: 0, text: composition.persona })
   }
   if (composition.toolFilter !== undefined) childCtx.tools.restrict(composition.toolFilter)
+  // Every in-process child, one-shot or continuable, runs under the runaway guard.
+  installRunawayGuard(childCtx)
 }
 
 /** Policy seeded onto a child session's log at the delegation boundary. */

@@ -51,6 +51,7 @@ import { assertSubagentMaxDepth } from './depth.ts'
 import { seedDescriptorTurn } from './descriptor-seed.ts'
 import type { ContinuableCreateRequest, ContinuableCreateSpec, SubagentResult, SubagentStartRequest } from './types.ts'
 import type { ActivationObserver, ActivationTerminal } from './lifecycle.ts'
+import type { SubagentGuardStopData } from './runaway-guard.ts'
 import { SubagentError } from './error.ts'
 import type SubagentActivationSetupRegistry from './activation-setup-registry.ts'
 
@@ -292,10 +293,17 @@ function disposalOf(activation: Activation): Promise<void> | undefined {
  * the parent's own task vocabulary.
  * @param childId - the durable child the parent knows by id.
  * @param stopReason - how the child's last ordinary turn ended.
+ * @param guardStop - the runaway-guard stop that ended the child, which names the tripped limit.
  * @returns the model-facing opening line of the settlement notice.
  */
-function settlementSummary(childId: SessionId, stopReason: SubagentResult['stopReason']): string {
+function settlementSummary(
+  childId: SessionId,
+  stopReason: SubagentResult['stopReason'],
+  guardStop?: SubagentGuardStopData,
+): string {
   const subject = `Background subagent ${childId}`
+  // A runaway-guard stop outranks the generic failure line: name the limit.
+  if (guardStop !== undefined) return `${subject} stopped by runaway guard: ${guardStop.detail}.`
   switch (stopReason) {
     case 'completed':
       return `${subject} finished and will do no further work unless you send it more.`
@@ -1464,7 +1472,7 @@ export class SubagentContinuationManager {
     try {
       const parent = this.ctx.agents.get(activation.parentSession)
       if (parent === undefined) return
-      const summary = settlementSummary(activation.childId, terminal.stopReason)
+      const summary = settlementSummary(activation.childId, terminal.stopReason, terminal.guardStop)
       const message = createUserMessage({
         content: [
           { type: 'text' as const, text: summary },
