@@ -14,6 +14,6 @@ Preset-scoped hard limits for top-level agents. Mount this plugin only in agent 
     jobSettleTimeoutMs: 30000
 ```
 
-The plugin counts the agent session's own steps, full provider token usage (including cache reads/writes), and identical canonical tool calls. At the next `agent/pre-step` after a limit trips, it appends `agent/runaway-stop`, cancels and awaits the agent's live background jobs, and rejects the model step. Set an individual limit to `0` to disable it.
+The plugin counts the agent session's own steps, full provider token usage (including cache reads/writes), and identical canonical tool calls. The accounting boundary is reactive: one provider response can overshoot a token or repeated-call threshold, but equality does not admit another model step. At the next `agent/pre-step` after a limit trips, it appends `agent/runaway-stop`, cancels and awaits only the agent's owned live background jobs, and rejects the model step. Set an individual limit to `0` to disable it.
 
 The plugin requires the host `ctx.jobs` registry. It does not reconcile external task databases; the dispatcher must observe the durable stop and terminally reconcile its own task row.

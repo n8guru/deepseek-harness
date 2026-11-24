@@ -32,13 +32,31 @@ function limit(value: number | undefined, field: string): number | undefined {
 }
 
 async function stopOwnedJobs(ctx: Context, agent: Agent, timeoutMs: number): Promise<void> {
-  const live = ctx.jobs.list(agent).filter(job => job.status === 'running' || job.status === 'stopping')
-  for (const job of live) {
-    if (job.status === 'running') ctx.jobs.kill(job.id, agent, 'owner stopped by runaway guard')
-  }
+  const live = ctx.jobs.list(agent).filter(job => job.ownerSession === agent.id
+    && (job.status === 'running' || job.status === 'stopping'))
+  const issues: string[] = []
   await Promise.all(live.map(async (job: JobSnapshot) => {
-    await ctx.jobs.wait(job.id, timeoutMs, agent)
+    if (job.status === 'running') {
+      try {
+        ctx.jobs.kill(job.id, agent, 'owner stopped by runaway guard')
+      } catch (error) {
+        issues.push(`${job.id}: cancel failed: ${String(error)}`)
+      }
+    }
+    try {
+      const settled = await ctx.jobs.wait(job.id, timeoutMs, agent)
+      if (settled.status === 'running' || settled.status === 'stopping') {
+        issues.push(`${job.id}: did not settle within ${String(timeoutMs)}ms`)
+      }
+    } catch (error) {
+      issues.push(`${job.id}: wait failed: ${String(error)}`)
+    }
   }))
+  if (issues.length > 0) {
+    const detail = issues.join('; ')
+    ctx.logger.warn(`runaway-guard: background-job cleanup incomplete: ${detail}`)
+    throw new AggregateError(issues, `runaway-guard: background-job cleanup incomplete: ${detail}`)
+  }
 }
 
 /** Install one guard in the current agent-preset scope. */
@@ -52,6 +70,8 @@ export function apply(ctx: Context, config: Config): void {
   }, {
     eventType: 'agent/runaway-stop',
     onStop: async agent => stopOwnedJobs(ctx, agent, timeoutMs),
+    shouldGuard: agent => (agent.session.header.delegationDepth ?? 0) === 0
+      && agent.session.header.origin !== 'subagent',
   })
 }
 

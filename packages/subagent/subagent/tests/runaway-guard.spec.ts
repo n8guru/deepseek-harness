@@ -114,14 +114,22 @@ describe('runaway guard on one-shot children', () => {
     expect(adapter.requests).toHaveLength(3)
   })
 
-  it('stops a child that exceeds the token budget', async () => {
+  it('stops a child that reaches or exceeds the token budget', async () => {
     // Each scripted tool-call step reports 10 input + 5 output tokens.
     onlyLimit('TOKENS', '20')
     const { ctx, parent, adapter } = await setup(distinctCalls(10))
     const { result, stop } = await runChild(ctx, parent)
     expect(result.stopReason).toBe('error')
-    expect(text(result.output)).toContain('Subagent stopped by runaway guard: token budget 20 exceeded (30 tokens used)')
+    expect(text(result.output)).toContain('Subagent stopped by runaway guard: token budget 20 reached (30 tokens used)')
     expect(stop).toMatchObject({ limit: 'tokens', limitValue: 20, observed: 30 })
+    expect(adapter.requests).toHaveLength(2)
+  })
+
+  it('does not admit another step at exact token equality', async () => {
+    onlyLimit('TOKENS', '30')
+    const { ctx, parent, adapter } = await setup(distinctCalls(10))
+    const { stop } = await runChild(ctx, parent)
+    expect(stop).toMatchObject({ limit: 'tokens', limitValue: 30, observed: 30 })
     expect(adapter.requests).toHaveLength(2)
   })
 
