@@ -52,14 +52,92 @@ describe('preset-scoped runaway guard', () => {
         done: new Promise<JobOutcome>((resolve) => { settle = resolve }),
       }),
     })
+    ctx.jobs.start({
+      kind: 'shared', label: 'unowned shared work',
+      run: () => ({
+        cancel() { cancelled.push('unowned') },
+        done: new Promise<JobOutcome>(() => {}),
+      }),
+    })
 
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
     await waitForIdle(ctx, agent)
 
     expect(adapter.requests).toHaveLength(2)
     expect(cancelled).toEqual(['owner stopped by runaway guard'])
-    expect(ctx.jobs.list(agent)[0]?.status).toBe('killed')
+    expect(ctx.jobs.list(agent).find(job => job.ownerSession === agent.id)?.status).toBe('killed')
+    expect(ctx.jobs.list(agent).find(job => job.ownerSession === undefined)?.status).toBe('running')
     expect(agent.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(true)
     expect(agent.session.events.some(event => event.type === 'subagent/guard-stop')).toBe(false)
+  })
+
+  it('does not apply the parent preset guard to delegated children', async () => {
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(LocalJobRegistry)
+    ctx.jobs.attachController('test')
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(RunawayGuard, {
+      maxSteps: 1, maxTokens: 0, maxRepeatCalls: 0, jobSettleTimeoutMs: 1000,
+    })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'noop', { n: 1 }),
+      textResponse('child completed'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'noop', description: 'probe', parameters: {},
+      execute: () => Promise.resolve([{ type: 'text', text: 'ok' }]),
+    }))
+    const child = ctx.agentLoop.create(
+      SessionId('mesh-child'),
+      { provider: 'mock', model: 'mock' },
+      { origin: 'subagent', delegationDepth: 1 } as never,
+    )
+
+    child.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, child)
+
+    expect(adapter.requests).toHaveLength(2)
+    expect(child.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(false)
+  })
+
+  it('attempts every owned cancellation and fails closed when cleanup cannot settle', async () => {
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(LocalJobRegistry)
+    ctx.jobs.attachController('test')
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(RunawayGuard, {
+      maxSteps: 1, maxTokens: 0, maxRepeatCalls: 0, jobSettleTimeoutMs: 10,
+    })
+    const adapter = new MockAdapter([toolCallResponse('c1', 'noop', { n: 1 })])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'noop', description: 'probe', parameters: {},
+      execute: () => Promise.resolve([{ type: 'text', text: 'ok' }]),
+    }))
+    const agent = ctx.agentLoop.create(SessionId('cleanup-failure'), { provider: 'mock', model: 'mock' })
+    const cancelled: string[] = []
+    ctx.jobs.start({
+      kind: 'bad', label: 'throws on cancel', owner: agent,
+      run: () => ({ cancel() { cancelled.push('bad'); throw new Error('cancel boom') }, done: new Promise<JobOutcome>(() => {}) }),
+    })
+    let settle!: (outcome: JobOutcome) => void
+    ctx.jobs.start({
+      kind: 'good', label: 'settles on cancel', owner: agent,
+      run: () => ({
+        cancel() { cancelled.push('good'); settle({ status: 'killed' }) },
+        done: new Promise<JobOutcome>((resolve) => { settle = resolve }),
+      }),
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+
+    expect(cancelled).toEqual(['bad', 'good'])
+    expect(agent.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(true)
+    const end = agent.session.events.findLast(event => event.type === 'turn/end')
+    expect(end?.type === 'turn/end' && end.data.reason.kind).toBe('error')
   })
 })

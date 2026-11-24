@@ -67,6 +67,8 @@ export interface RunawayGuardOptions {
   readonly eventType?: 'subagent/guard-stop' | 'agent/runaway-stop'
   /** Quiescence hook run after the stop is logged and before the next step is rejected. */
   readonly onStop?: (agent: Agent, stop: SubagentGuardStopData) => Promise<void>
+  /** Optional scope predicate for listeners inherited by descendant agents. */
+  readonly shouldGuard?: (agent: Agent) => boolean
 }
 
 /** Default step cap. */
@@ -191,12 +193,12 @@ function evaluate(account: GuardAccount, limits: RunawayLimits): SubagentGuardSt
       detail: `step cap ${String(maxSteps)} reached (${String(account.steps)} steps taken)`,
     }
   }
-  if (maxTokens !== undefined && account.tokens > maxTokens) {
+  if (maxTokens !== undefined && account.tokens >= maxTokens) {
     return {
       limit: 'tokens',
       limitValue: maxTokens,
       observed: account.tokens,
-      detail: `token budget ${String(maxTokens)} exceeded (${String(account.tokens)} tokens used)`,
+      detail: `token budget ${String(maxTokens)} reached (${String(account.tokens)} tokens used)`,
     }
   }
   if (maxRepeatCalls !== undefined && account.topCall.count >= maxRepeatCalls) {
@@ -225,6 +227,7 @@ export function installRunawayGuard(
   if (limits.maxSteps === undefined && limits.maxTokens === undefined && limits.maxRepeatCalls === undefined) return
   const accounts = new WeakMap<Agent, GuardAccount>()
   childCtx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
+    if (options.shouldGuard !== undefined && !options.shouldGuard(agent)) return next()
     const session = agent.session
     let account = accounts.get(agent)
     if (account === undefined) {
