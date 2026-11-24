@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-11-24-preset-scoped-runaway-guard.md
+2026-11-24-preset-scoped-runaway-guard.md: e6938fa47afd002fe95670ab5b3eeb677b2649cf
+2026-11-24-preset-scoped-runaway-guard.zh.md: c672b7291a26866e678b4adbf07e103d9525969b

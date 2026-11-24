@@ -34,6 +34,8 @@ declare module '@deepseek-ai/dsh-session/types' {
      * history.
      */
     'subagent/guard-stop': SubagentGuardStopData
+    /** A preset-scoped non-child agent tripped its runaway policy. */
+    'agent/runaway-stop': SubagentGuardStopData
   }
 }
 
@@ -57,6 +59,14 @@ export interface RunawayLimits {
   readonly maxSteps: number | undefined
   readonly maxTokens: number | undefined
   readonly maxRepeatCalls: number | undefined
+}
+
+/** Optional policy applied when a guard limit trips. */
+export interface RunawayGuardOptions {
+  /** Durable event naming this guard's ownership domain. */
+  readonly eventType?: 'subagent/guard-stop' | 'agent/runaway-stop'
+  /** Quiescence hook run after the stop is logged and before the next step is rejected. */
+  readonly onStop?: (agent: Agent, stop: SubagentGuardStopData) => Promise<void>
 }
 
 /** Default step cap. */
@@ -205,8 +215,13 @@ function evaluate(account: GuardAccount, limits: RunawayLimits): SubagentGuardSt
  * Install the runaway guard on one child inside its creation window.
  * @param childCtx - the child agent's scoped creation context.
  * @param limits - the limits to enforce, resolved from the environment by default.
+ * @param options - event ownership and optional quiescence hook.
  */
-export function installRunawayGuard(childCtx: Context, limits: RunawayLimits = resolveRunawayLimits()): void {
+export function installRunawayGuard(
+  childCtx: Context,
+  limits: RunawayLimits = resolveRunawayLimits(),
+  options: RunawayGuardOptions = {},
+): void {
   if (limits.maxSteps === undefined && limits.maxTokens === undefined && limits.maxRepeatCalls === undefined) return
   const accounts = new WeakMap<Agent, GuardAccount>()
   childCtx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
@@ -219,7 +234,9 @@ export function installRunawayGuard(childCtx: Context, limits: RunawayLimits = r
     account.fold(session.events)
     const stop = evaluate(account, limits)
     if (stop === undefined) return next()
-    session.append('subagent/guard-stop', stop)
+    if (options.eventType === 'agent/runaway-stop') session.append('agent/runaway-stop', stop)
+    else session.append('subagent/guard-stop', stop)
+    await options.onStop?.(agent, stop)
     return { kind: 'reject' }
   })
 }
