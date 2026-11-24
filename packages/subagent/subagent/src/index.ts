@@ -113,7 +113,7 @@ export {
   resolveRunawayLimits,
   withGuardStopOutput,
 } from './runaway-guard.ts'
-export type { RunawayLimitKind, RunawayLimits, SubagentGuardStopData } from './runaway-guard.ts'
+export type { RunawayGuardOptions, RunawayLimitKind, RunawayLimits, SubagentGuardStopData } from './runaway-guard.ts'
 export { settleRun } from './run-settlement.ts'
 export { assertSubagentMaxDepth, delegationDepthOf } from './depth.ts'
 export {
