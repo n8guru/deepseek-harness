@@ -102,6 +102,33 @@ describe('preset-scoped runaway guard', () => {
     expect(child.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(false)
   })
 
+  it('never stops a session whose id matches exemptSessions', async () => {
+    const ctx = new Context()
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(LocalJobRegistry)
+    ctx.jobs.attachController('test')
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(RunawayGuard, {
+      maxSteps: 1, maxTokens: 0, maxRepeatCalls: 0, jobSettleTimeoutMs: 1000, exemptSessions: ['^cadence-gen-'],
+    })
+    const adapter = new MockAdapter([
+      toolCallResponse('c1', 'noop', { n: 1 }),
+      textResponse('conductor completed'),
+    ])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'noop', description: 'probe', parameters: {},
+      execute: () => Promise.resolve([{ type: 'text', text: 'ok' }]),
+    }))
+    const conductor = ctx.agentLoop.create(SessionId('cadence-gen-142'), { provider: 'mock', model: 'mock' })
+
+    conductor.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, conductor)
+
+    expect(adapter.requests).toHaveLength(2)
+    expect(conductor.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(false)
+  })
+
   it('attempts every owned cancellation and fails closed when cleanup cannot settle', async () => {
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)

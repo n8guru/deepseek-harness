@@ -14,6 +14,8 @@ export interface Config {
   maxTokens?: number
   maxRepeatCalls?: number
   jobSettleTimeoutMs?: number
+  /** Session-id regular expressions this preset must never stop (e.g. a standing interactive conductor). */
+  exemptSessions?: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -21,6 +23,7 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().default(20_000_000),
   maxRepeatCalls: z.number().default(20),
   jobSettleTimeoutMs: z.number().default(30_000),
+  exemptSessions: z.array(z.string()).default([]),
 })
 
 function limit(value: number | undefined, field: string): number | undefined {
@@ -63,6 +66,9 @@ async function stopOwnedJobs(ctx: Context, agent: Agent, timeoutMs: number): Pro
 export function apply(ctx: Context, config: Config): void {
   const timeoutMs = limit(config.jobSettleTimeoutMs, 'jobSettleTimeoutMs')
   if (timeoutMs === undefined) throw new Error('runaway-guard: jobSettleTimeoutMs cannot be zero')
+  // ponytail: id patterns because a session's preset cannot change after creation; a dedicated
+  // unguarded conductor preset replaces this once the conductor is created with one.
+  const exempt = (config.exemptSessions ?? []).map(pattern => new RegExp(pattern))
   installRunawayGuard(ctx, {
     maxSteps: limit(config.maxSteps, 'maxSteps'),
     maxTokens: limit(config.maxTokens, 'maxTokens'),
@@ -71,7 +77,8 @@ export function apply(ctx: Context, config: Config): void {
     eventType: 'agent/runaway-stop',
     onStop: async agent => stopOwnedJobs(ctx, agent, timeoutMs),
     shouldGuard: agent => (agent.session.header.delegationDepth ?? 0) === 0
-      && agent.session.header.origin !== 'subagent',
+      && agent.session.header.origin !== 'subagent'
+      && !exempt.some(pattern => pattern.test(String(agent.id))),
   })
 }
 
