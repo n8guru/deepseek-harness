@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { CallId, createAssistantMessage, createUserMessage, OFFLOADED_IMAGE_TEXT, offloadRequestImages } from '../src/index.ts'
-import type { ContentBlock } from '../src/index.ts'
+import type { ContentBlock, Message } from '../src/index.ts'
 
 const source = { kind: 'plugin' as const, plugin: 'test' }
 
@@ -94,7 +94,7 @@ describe('offloadRequestImages', () => {
 
     /** Grow a history one single-image step at a time, returning each step's request. */
     function growth(steps: number, ratio?: number): readonly (readonly string[])[] {
-      const history = [createUserMessage({ content: [{ type: 'text', text: 'review' }], source })]
+      const history: Message[] = [createUserMessage({ content: [{ type: 'text', text: 'review' }], source })]
       const requests: string[][] = []
       for (let step = 0; step < steps; step += 1) {
         history.push(assistant())
@@ -136,7 +136,7 @@ describe('offloadRequestImages', () => {
     })
 
     it('never exceeds the bound and keeps the newest images', () => {
-      const history = [createUserMessage({ content: [image(raw)], source })]
+      const history: Message[] = [createUserMessage({ content: [image(raw)], source })]
       for (let step = 0; step < 12; step += 1) {
         history.push(assistant(), createUserMessage({ content: [image(raw)], source }))
         const fitted = offloadRequestImages(history, max)
@@ -159,7 +159,7 @@ describe('offloadRequestImages', () => {
     })
 
     it('an image offloaded for a history prefix stays offloaded as the history grows', () => {
-      const history = [createUserMessage({ content: [image(raw)], source })]
+      const history: Message[] = [createUserMessage({ content: [image(raw)], source })]
       for (let step = 0; step < 8; step += 1) history.push(assistant(), createUserMessage({ content: [image(raw)], source }))
       const full = offloadRequestImages(history, max)
       for (let length = 1; length <= history.length; length += 1) {

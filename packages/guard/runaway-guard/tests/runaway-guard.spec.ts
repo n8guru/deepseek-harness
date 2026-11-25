@@ -53,7 +53,7 @@ describe('preset-scoped runaway guard', () => {
       }),
     })
     ctx.jobs.start({
-      kind: 'shared', label: 'unowned shared work',
+      kind: 'bash', label: 'unowned shared work',
       run: () => ({
         cancel() { cancelled.push('unowned') },
         done: new Promise<JobOutcome>(() => {}),
@@ -120,12 +120,12 @@ describe('preset-scoped runaway guard', () => {
     const agent = ctx.agentLoop.create(SessionId('cleanup-failure'), { provider: 'mock', model: 'mock' })
     const cancelled: string[] = []
     ctx.jobs.start({
-      kind: 'bad', label: 'throws on cancel', owner: agent,
+      kind: 'bash', label: 'throws on cancel', owner: agent,
       run: () => ({ cancel() { cancelled.push('bad'); throw new Error('cancel boom') }, done: new Promise<JobOutcome>(() => {}) }),
     })
     let settle!: (outcome: JobOutcome) => void
     ctx.jobs.start({
-      kind: 'good', label: 'settles on cancel', owner: agent,
+      kind: 'bash', label: 'settles on cancel', owner: agent,
       run: () => ({
         cancel() { cancelled.push('good'); settle({ status: 'killed' }) },
         done: new Promise<JobOutcome>((resolve) => { settle = resolve }),
