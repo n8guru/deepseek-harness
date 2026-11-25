@@ -14,7 +14,10 @@
  * Environment overrides (read when a child is composed; `0` or `off` disables
  * a limit, an unparseable value keeps the default):
  * - `DSH_SUBAGENT_MAX_STEPS` — model steps across the child's life (default 200).
- * - `DSH_SUBAGENT_MAX_TOKENS` — summed input+output+cacheRead+cacheWrite tokens (default 20,000,000).
+ * - `DSH_SUBAGENT_MAX_TOKENS` — UNCACHED work: summed input+output+cacheWrite tokens (default
+ *   20,000,000). Cache reads are tracked and reported separately but never count against the
+ *   budget: a ~100k-context session re-reads its prefix every step, so a budget over cache reads
+ *   stops normal ~100-step sessions (g143: four legit mesh sessions cut at 10M).
  * - `DSH_SUBAGENT_MAX_REPEAT_CALLS` — identical tool calls (same name and
  *   canonical-JSON arguments) across the child's life (default 20).
  *
@@ -40,7 +43,7 @@ declare module '@deepseek-ai/dsh-session/types' {
 }
 
 /** Which runaway limit tripped. */
-export type RunawayLimitKind = 'steps' | 'tokens' | 'repeat-call'
+export type RunawayLimitKind = 'steps' | 'tokens' | 'repeat-call' | 'token-rate' | 'fan-out'
 
 /** Payload of the `subagent/guard-stop` session event. */
 export interface SubagentGuardStopData {
@@ -52,6 +55,8 @@ export interface SubagentGuardStopData {
   readonly limitValue: number
   /** The observed value that tripped it. */
   readonly observed: number
+  /** Cache-read tokens over the same span, reported separately (never counted against a limit). */
+  readonly cacheReadTokens?: number
 }
 
 /** Resolved runaway limits; `undefined` disables the limit. */
@@ -59,7 +64,18 @@ export interface RunawayLimits {
   readonly maxSteps: number | undefined
   readonly maxTokens: number | undefined
   readonly maxRepeatCalls: number | undefined
+  /** Burst check: uncached tokens within any rolling hour. */
+  readonly maxTokensPerHour?: number | undefined
+  /** Burst check: delegation tool calls (subagent fan-out) within any rolling hour. */
+  readonly maxDelegationsPerHour?: number | undefined
 }
+
+/** Tool names that delegate work to child agents; counted by the fan-out burst check. */
+export const DELEGATION_TOOLS: ReadonlySet<string> = new Set([
+  'subagent', 'subagent_fork', 'subagent_claude_code', 'subagent_codex', 'workflow', 'ralph',
+])
+
+const HOUR_MS = 3_600_000
 
 /** Optional policy applied when a guard limit trips. */
 export interface RunawayGuardOptions {
@@ -129,7 +145,14 @@ function callKey(name: string, rawArguments: string): string {
 class GuardAccount {
   private cursor: number
   steps = 0
+  /** Uncached tokens: input + output + cache writes. */
   tokens = 0
+  /** Cache-read tokens, reported separately. */
+  cacheReadTokens = 0
+  /** (time, uncached tokens) per model response, for the rolling-hour rate. */
+  private readonly usage: { time: number; tokens: number }[] = []
+  /** Times of delegation tool calls, for the rolling-hour fan-out count. */
+  private readonly delegations: number[] = []
   private readonly calls = new Map<string, { name: string; count: number }>()
   /** The most-repeated call so far. */
   topCall: { name: string; count: number } = { name: '', count: 0 }
@@ -150,11 +173,16 @@ class GuardAccount {
       } else if (event.type === 'assistant/message') {
         const usage = event.data.usage
         if (usage !== undefined) {
-          this.tokens += (usage.inputTokens || 0) + (usage.outputTokens || 0)
-            + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+          // TokenUsage counts are disjoint: inputTokens already excludes cached input.
+          const uncached = (usage.inputTokens || 0) + (usage.outputTokens || 0) + (usage.cacheWriteTokens ?? 0)
+          this.tokens += uncached
+          this.cacheReadTokens += usage.cacheReadTokens ?? 0
+          this.usage.push({ time: event.time, tokens: uncached })
         }
         for (const block of event.data.message.content) {
-          if (block.type === 'tool-call') this.record(block.name, block.arguments)
+          if (block.type !== 'tool-call') continue
+          this.record(block.name, block.arguments)
+          if (DELEGATION_TOOLS.has(block.name)) this.delegations.push(event.time)
         }
       }
     }
@@ -168,10 +196,23 @@ class GuardAccount {
     if (entry.count > this.topCall.count) this.topCall = entry
   }
 
+  /** Uncached tokens spent in the rolling hour ending at `now`. */
+  tokensInHour(now: number): number {
+    return this.usage.reduce((sum, entry) => (entry.time > now - HOUR_MS ? sum + entry.tokens : sum), 0)
+  }
+
+  /** Delegation calls made in the rolling hour ending at `now`. */
+  delegationsInHour(now: number): number {
+    return this.delegations.filter(time => time > now - HOUR_MS).length
+  }
+
   private reset(): void {
     this.cursor = this.start
     this.steps = 0
     this.tokens = 0
+    this.cacheReadTokens = 0
+    this.usage.length = 0
+    this.delegations.length = 0
     this.calls.clear()
     this.topCall = { name: '', count: 0 }
   }
@@ -183,8 +224,13 @@ class GuardAccount {
  * @param limits - the limits in force.
  * @returns the stop to record, or `undefined` when the child may continue.
  */
-function evaluate(account: GuardAccount, limits: RunawayLimits): SubagentGuardStopData | undefined {
-  const { maxSteps, maxTokens, maxRepeatCalls } = limits
+function evaluate(account: GuardAccount, limits: RunawayLimits, now: number): SubagentGuardStopData | undefined {
+  const stop = evaluateLimits(account, limits, now)
+  return stop === undefined ? undefined : { ...stop, cacheReadTokens: account.cacheReadTokens }
+}
+
+function evaluateLimits(account: GuardAccount, limits: RunawayLimits, now: number): SubagentGuardStopData | undefined {
+  const { maxSteps, maxTokens, maxRepeatCalls, maxTokensPerHour, maxDelegationsPerHour } = limits
   if (maxSteps !== undefined && account.steps >= maxSteps) {
     return {
       limit: 'steps',
@@ -198,7 +244,26 @@ function evaluate(account: GuardAccount, limits: RunawayLimits): SubagentGuardSt
       limit: 'tokens',
       limitValue: maxTokens,
       observed: account.tokens,
-      detail: `token budget ${String(maxTokens)} reached (${String(account.tokens)} tokens used)`,
+      detail: `token budget ${String(maxTokens)} reached (${String(account.tokens)} uncached tokens used; `
+        + `${String(account.cacheReadTokens)} cache-read tokens not counted)`,
+    }
+  }
+  const hourly = maxTokensPerHour === undefined ? 0 : account.tokensInHour(now)
+  if (maxTokensPerHour !== undefined && hourly >= maxTokensPerHour) {
+    return {
+      limit: 'token-rate',
+      limitValue: maxTokensPerHour,
+      observed: hourly,
+      detail: `token burst ${String(maxTokensPerHour)}/hour reached (${String(hourly)} uncached tokens in the last hour)`,
+    }
+  }
+  const fanOut = maxDelegationsPerHour === undefined ? 0 : account.delegationsInHour(now)
+  if (maxDelegationsPerHour !== undefined && fanOut >= maxDelegationsPerHour) {
+    return {
+      limit: 'fan-out',
+      limitValue: maxDelegationsPerHour,
+      observed: fanOut,
+      detail: `subagent fan-out ${String(maxDelegationsPerHour)}/hour reached (${String(fanOut)} delegations in the last hour)`,
     }
   }
   if (maxRepeatCalls !== undefined && account.topCall.count >= maxRepeatCalls) {
@@ -224,7 +289,7 @@ export function installRunawayGuard(
   limits: RunawayLimits = resolveRunawayLimits(),
   options: RunawayGuardOptions = {},
 ): void {
-  if (limits.maxSteps === undefined && limits.maxTokens === undefined && limits.maxRepeatCalls === undefined) return
+  if (Object.values(limits).every(value => value === undefined)) return
   const accounts = new WeakMap<Agent, GuardAccount>()
   childCtx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
     if (options.shouldGuard !== undefined && !options.shouldGuard(agent)) return next()
@@ -235,7 +300,7 @@ export function installRunawayGuard(
       accounts.set(agent, account)
     }
     account.fold(session.events)
-    const stop = evaluate(account, limits)
+    const stop = evaluate(account, limits, Date.now())
     if (stop === undefined) return next()
     if (options.eventType === 'agent/runaway-stop') session.append('agent/runaway-stop', stop)
     else session.append('subagent/guard-stop', stop)

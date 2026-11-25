@@ -12,8 +12,13 @@ export const inject = ['jobs']
 /** Configured limits; zero disables one limit. */
 export interface Config {
   maxSteps?: number
+  /** Budget on UNCACHED work (input + output + cache writes); cache reads are reported, never counted. */
   maxTokens?: number
   maxRepeatCalls?: number
+  /** Burst check: uncached tokens within any rolling hour. */
+  maxTokensPerHour?: number
+  /** Burst check: subagent/workflow/ralph delegation calls within any rolling hour. */
+  maxDelegationsPerHour?: number
   jobSettleTimeoutMs?: number
   /**
    * Path of the conductor session registry's state file (dsh-session-registry
@@ -28,6 +33,8 @@ export const Config: z<Config> = z.object({
   maxSteps: z.number().default(200),
   maxTokens: z.number().default(20_000_000),
   maxRepeatCalls: z.number().default(20),
+  maxTokensPerHour: z.number().default(0),
+  maxDelegationsPerHour: z.number().default(0),
   jobSettleTimeoutMs: z.number().default(30_000),
   conductorSeatRegistry: z.string().default(''),
 })
@@ -109,6 +116,8 @@ export function apply(ctx: Context, config: Config): void {
     maxSteps: limit(config.maxSteps, 'maxSteps'),
     maxTokens: limit(config.maxTokens, 'maxTokens'),
     maxRepeatCalls: limit(config.maxRepeatCalls, 'maxRepeatCalls'),
+    maxTokensPerHour: limit(config.maxTokensPerHour ?? 0, 'maxTokensPerHour'),
+    maxDelegationsPerHour: limit(config.maxDelegationsPerHour ?? 0, 'maxDelegationsPerHour'),
   }, {
     eventType: 'agent/runaway-stop',
     onStop: async agent => stopOwnedJobs(ctx, agent, timeoutMs),

@@ -120,7 +120,7 @@ describe('runaway guard on one-shot children', () => {
     const { ctx, parent, adapter } = await setup(distinctCalls(10))
     const { result, stop } = await runChild(ctx, parent)
     expect(result.stopReason).toBe('error')
-    expect(text(result.output)).toContain('Subagent stopped by runaway guard: token budget 20 reached (30 tokens used)')
+    expect(text(result.output)).toContain('Subagent stopped by runaway guard: token budget 20 reached (30 uncached tokens used; 0 cache-read tokens not counted)')
     expect(stop).toMatchObject({ limit: 'tokens', limitValue: 20, observed: 30 })
     expect(adapter.requests).toHaveLength(2)
   })

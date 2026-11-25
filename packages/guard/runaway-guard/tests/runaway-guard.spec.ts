@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -189,5 +189,107 @@ describe('preset-scoped runaway guard', () => {
     expect(agent.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(true)
     const end = agent.session.events.findLast(event => event.type === 'turn/end')
     expect(end?.type === 'turn/end' && end.data.reason.kind).toBe('error')
+  })
+})
+
+/**
+ * g143: the mesh-worker preset values (see `~/.dsh/.agent-presets/mesh-worker/agent.cordis.yml`).
+ * Replayed over 208 recorded forge mesh sessions: only the 164112 runaway stops on tokens (step 114,
+ * 623k uncached / 20.6M cache reads); 164299/164307/164408/164413 (~10M incl. cache reads, ~2.6k
+ * uncached per step) run to the end.
+ */
+const MESH_WORKER = {
+  maxSteps: 300,
+  maxTokens: 600_000,
+  maxTokensPerHour: 500_000,
+  maxDelegationsPerHour: 20,
+  maxRepeatCalls: 12,
+  jobSettleTimeoutMs: 1000,
+}
+
+type Usage = { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+
+/** A scripted tool-call step whose provider usage is `usage`. */
+function step(index: number, name: string, args: object, usage: Usage) {
+  return toolCallResponse(`c${String(index)}`, name, args)
+    .map(chunk => (chunk.type === 'usage' ? { ...chunk, usage } : chunk))
+}
+
+/** Run one top-level mesh-worker session over `script` under the mesh-worker guard values. */
+async function runMeshWorker(script: ReturnType<typeof step>[], tools: string[] = ['noop'], onCall = () => {}) {
+  const ctx = new Context()
+  await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(LocalJobRegistry)
+  ctx.jobs.attachController('test')
+  await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(RunawayGuard, MESH_WORKER)
+  const adapter = new MockAdapter([...script, textResponse('done')])
+  ctx.llm.registerAdapter(['mock'], adapter)
+  for (const name of tools) {
+    ctx.tools.register(defineContentToolFixture({
+      name, description: 'probe', parameters: {},
+      execute: () => { onCall(); return Promise.resolve([{ type: 'text', text: 'ok' }]) },
+    }))
+  }
+  const agent = ctx.agentLoop.create(SessionId('mesh-164xxx'), { provider: 'mock', model: 'mock' })
+  agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+  await waitForIdle(ctx, agent)
+  const stop = agent.session.events.find(event => event.type === 'agent/runaway-stop')
+  return { requests: adapter.requests.length, stop: stop?.type === 'agent/runaway-stop' ? stop.data : undefined }
+}
+
+/** A ~100k-context step (164413's profile): the prefix is re-read from cache, ~2.6k is uncached. */
+const CACHED: Usage = { inputTokens: 1_000, outputTokens: 600, cacheReadTokens: 100_000, cacheWriteTokens: 1_000 }
+
+describe('g143 cache-aware mesh-worker guard', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('lets a 150-step cached session run to the end (15.4M tokens incl. cache reads)', async () => {
+    const { requests, stop } = await runMeshWorker(
+      Array.from({ length: 150 }, (_, i) => step(i, 'noop', { i }, CACHED)),
+    )
+    expect(stop).toBeUndefined()
+    expect(requests).toBe(151)
+  })
+
+  it('stops a subagent fan-out burst and reports cache reads separately', async () => {
+    const { requests, stop } = await runMeshWorker(
+      Array.from({ length: 40 }, (_, i) => step(i, 'subagent', { prompt: `child ${String(i)}` }, CACHED)),
+      ['subagent'],
+    )
+    expect(stop).toMatchObject({ limit: 'fan-out', limitValue: 20, observed: 20, cacheReadTokens: 2_000_000 })
+    expect(requests).toBe(20)
+  })
+
+  it('stops an identical-call repeat loop', async () => {
+    const { requests, stop } = await runMeshWorker(
+      Array.from({ length: 40 }, (_, i) => step(i, 'noop', { poll: 'same' }, CACHED)),
+    )
+    expect(stop).toMatchObject({ limit: 'repeat-call', limitValue: 12, observed: 12 })
+    expect(requests).toBe(12)
+  })
+
+  it('stops an uncached token burst within the hour', async () => {
+    // A cold-cache or cache-less loop: every step pays its whole 130k context.
+    const { requests, stop } = await runMeshWorker(
+      Array.from({ length: 40 }, (_, i) => step(i, 'noop', { i }, { inputTokens: 129_500, outputTokens: 500 })),
+    )
+    expect(stop).toMatchObject({ limit: 'token-rate', limitValue: 500_000, observed: 520_000 })
+    expect(requests).toBe(4)
+  })
+
+  it('stops the 164112-class long runaway on its uncached total, not on cache reads', async () => {
+    // 164112: ~5.4k uncached and ~180k cache reads per step, one step a minute (it polled with sleep);
+    // the replay stopped it at step 114. Its hourly rate stays under the burst check.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const heavy: Usage = { inputTokens: 2_000, outputTokens: 900, cacheReadTokens: 180_000, cacheWriteTokens: 2_500 }
+    const { requests, stop } = await runMeshWorker(
+      Array.from({ length: 200 }, (_, i) => step(i, 'noop', { i }, heavy)),
+      ['noop'],
+      () => { vi.setSystemTime(Date.now() + 60_000) },
+    )
+    expect(stop).toMatchObject({ limit: 'tokens', limitValue: 600_000, observed: 112 * 5_400, cacheReadTokens: 112 * 180_000 })
+    expect(stop?.detail).toContain('cache-read tokens not counted')
+    expect(requests).toBe(112)
   })
 })
