@@ -126,7 +126,7 @@ Source: [`packages/core/agent/src/types.ts:19`](../packages/core/agent/src/types
 'agent/runaway-stop': SubagentGuardStopData
 ```
 
-Source: [`packages/subagent/subagent/src/runaway-guard.ts:38`](../packages/subagent/subagent/src/runaway-guard.ts)
+Source: [`packages/subagent/subagent/src/runaway-guard.ts:41`](../packages/subagent/subagent/src/runaway-guard.ts)
 
 ### `agent-preset/*`
 
@@ -734,7 +734,7 @@ Source: [`packages/subagent/subagent/src/descriptor.ts:37`](../packages/subagent
 'subagent/guard-stop': SubagentGuardStopData
 ```
 
-Source: [`packages/subagent/subagent/src/runaway-guard.ts:36`](../packages/subagent/subagent/src/runaway-guard.ts)
+Source: [`packages/subagent/subagent/src/runaway-guard.ts:39`](../packages/subagent/subagent/src/runaway-guard.ts)
 
 ### `team/*`
 
