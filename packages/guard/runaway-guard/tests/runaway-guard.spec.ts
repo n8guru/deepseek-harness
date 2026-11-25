@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -9,7 +12,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
-import RunawayGuard from '../src/index.ts'
+import RunawayGuard, { conductorSeats } from '../src/index.ts'
 
 function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
   return new Promise((resolve) => {
@@ -102,14 +105,17 @@ describe('preset-scoped runaway guard', () => {
     expect(child.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(false)
   })
 
-  it('never stops a session whose id matches exemptSessions', async () => {
+  async function runSeatProbe(sessionId: string, opened: Record<string, unknown>) {
+    const dir = mkdtempSync(join(tmpdir(), 'runaway-seat-'))
+    const registry = join(dir, 'state.json')
+    writeFileSync(registry, JSON.stringify({ opened, closed: { 'cadence-gen-1': {} } }))
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)
     await ctx.plugin(LocalJobRegistry)
     ctx.jobs.attachController('test')
     await ctx.plugin(AgentLoop, { agents: [] })
     await ctx.plugin(RunawayGuard, {
-      maxSteps: 1, maxTokens: 0, maxRepeatCalls: 0, jobSettleTimeoutMs: 1000, exemptSessions: ['^cadence-gen-'],
+      maxSteps: 1, maxTokens: 0, maxRepeatCalls: 0, jobSettleTimeoutMs: 1000, conductorSeatRegistry: registry,
     })
     const adapter = new MockAdapter([
       toolCallResponse('c1', 'noop', { n: 1 }),
@@ -120,13 +126,30 @@ describe('preset-scoped runaway guard', () => {
       name: 'noop', description: 'probe', parameters: {},
       execute: () => Promise.resolve([{ type: 'text', text: 'ok' }]),
     }))
-    const conductor = ctx.agentLoop.create(SessionId('cadence-gen-142'), { provider: 'mock', model: 'mock' })
+    const agent = ctx.agentLoop.create(SessionId(sessionId), { provider: 'mock', model: 'mock' })
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await waitForIdle(ctx, agent)
+    rmSync(dir, { recursive: true, force: true })
+    return { requests: adapter.requests.length, stopped: agent.session.events.some(event => event.type === 'agent/runaway-stop') }
+  }
 
-    conductor.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, conductor)
+  it('never stops a session holding a conductor seat in the registry, whatever its id', async () => {
+    const seat = await runSeatProbe('standing-conductor-7', { 'standing-conductor-7': { opened_at: 'now' } })
+    expect(seat).toEqual({ requests: 2, stopped: false })
+  })
 
-    expect(adapter.requests).toHaveLength(2)
-    expect(conductor.session.events.some(event => event.type === 'agent/runaway-stop')).toBe(false)
+  it('guards a cadence-gen-* session that holds no registry seat (no id-pattern exemption)', async () => {
+    const unseated = await runSeatProbe('cadence-gen-142', { 'standing-conductor-7': { opened_at: 'now' } })
+    expect(unseated).toEqual({ requests: 1, stopped: true })
+  })
+
+  it('seats nobody when the registry file is missing or malformed', () => {
+    expect(conductorSeats('')('x')).toBe(false)
+    expect(conductorSeats(join(tmpdir(), 'no-such-runaway-seat.json'))('x')).toBe(false)
+    const dir = mkdtempSync(join(tmpdir(), 'runaway-seat-'))
+    writeFileSync(join(dir, 'state.json'), '{not json')
+    expect(conductorSeats(join(dir, 'state.json'))('x')).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('attempts every owned cancellation and fails closed when cleanup cannot settle', async () => {

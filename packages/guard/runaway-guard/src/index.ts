@@ -1,4 +1,5 @@
 /** Preset-scoped runaway policy for top-level agents. @module @deepseek-ai/dsh-runaway-guard */
+import { readFileSync, statSync } from 'node:fs'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -14,8 +15,13 @@ export interface Config {
   maxTokens?: number
   maxRepeatCalls?: number
   jobSettleTimeoutMs?: number
-  /** Session-id regular expressions this preset must never stop (e.g. a standing interactive conductor). */
-  exemptSessions?: string[]
+  /**
+   * Path of the conductor session registry's state file (dsh-session-registry
+   * `state.json`). A session holding a conductor seat there (a key of its
+   * `opened` map) is never stopped: the role marker is the registry seat, not
+   * the session id, so a conductor named anything is still exempt.
+   */
+  conductorSeatRegistry?: string
 }
 
 export const Config: z<Config> = z.object({
@@ -23,7 +29,7 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().default(20_000_000),
   maxRepeatCalls: z.number().default(20),
   jobSettleTimeoutMs: z.number().default(30_000),
-  exemptSessions: z.array(z.string()).default([]),
+  conductorSeatRegistry: z.string().default(''),
 })
 
 function limit(value: number | undefined, field: string): number | undefined {
@@ -62,13 +68,43 @@ async function stopOwnedJobs(ctx: Context, agent: Agent, timeoutMs: number): Pro
   }
 }
 
+/**
+ * Session ids holding a conductor seat in the registry file. Re-read only when
+ * the file's mtime changes; a missing or malformed file seats nobody.
+ */
+export function conductorSeats(path: string): (id: string) => boolean {
+  let mtime = -1
+  let seats = new Set<string>()
+  return (id) => {
+    if (path === '') return false
+    let current: number
+    try {
+      current = statSync(path).mtimeMs
+    } catch {
+      mtime = -1
+      seats = new Set()
+      return false
+    }
+    if (current !== mtime) {
+      mtime = current
+      try {
+        const opened = (JSON.parse(readFileSync(path, 'utf8')) as { opened?: unknown }).opened
+        seats = new Set(opened !== null && typeof opened === 'object' ? Object.keys(opened) : [])
+      } catch {
+        seats = new Set()
+      }
+    }
+    return seats.has(id)
+  }
+}
+
 /** Install one guard in the current agent-preset scope. */
 export function apply(ctx: Context, config: Config): void {
   const timeoutMs = limit(config.jobSettleTimeoutMs, 'jobSettleTimeoutMs')
   if (timeoutMs === undefined) throw new Error('runaway-guard: jobSettleTimeoutMs cannot be zero')
-  // ponytail: id patterns because a session's preset cannot change after creation; a dedicated
-  // unguarded conductor preset replaces this once the conductor is created with one.
-  const exempt = (config.exemptSessions ?? []).map(pattern => new RegExp(pattern))
+  // A session's preset cannot change after creation, so the standing conductor (which shares this
+  // preset) is exempted by its registry seat, checked every step so a hand-forward moves the exemption.
+  const seated = conductorSeats(config.conductorSeatRegistry ?? '')
   installRunawayGuard(ctx, {
     maxSteps: limit(config.maxSteps, 'maxSteps'),
     maxTokens: limit(config.maxTokens, 'maxTokens'),
@@ -78,7 +114,7 @@ export function apply(ctx: Context, config: Config): void {
     onStop: async agent => stopOwnedJobs(ctx, agent, timeoutMs),
     shouldGuard: agent => (agent.session.header.delegationDepth ?? 0) === 0
       && agent.session.header.origin !== 'subagent'
-      && !exempt.some(pattern => pattern.test(String(agent.id))),
+      && !seated(String(agent.id)),
   })
 }
 
